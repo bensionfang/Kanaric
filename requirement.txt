@@ -1,5 +1,0 @@
-PyQt6
-requests
-pykakasi
-winrt-Windows.Media.Control
-winrt-Windows.Foundation
