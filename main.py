@@ -14,7 +14,8 @@ from PyQt6.QtCore import (Qt, QThread, pyqtSignal, QParallelAnimationGroup,
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
                              QMenu, QFileDialog, QInputDialog, QFrame, 
                              QPushButton, QScrollArea, QGraphicsOpacityEffect, 
-                             QSystemTrayIcon, QStyle, QFontDialog, QSizeGrip)
+                             QSystemTrayIcon, QStyle, QFontDialog, QSizeGrip,
+                             QDialog, QTextEdit)
 from PyQt6.QtGui import QFont, QAction, QPixmap, QImage, QColor
 
 kks = pykakasi.kakasi()
@@ -27,7 +28,6 @@ conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS cache (artist TEXT, title TEXT, lyrics TEXT, PRIMARY KEY (artist, title))''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS word_corrections (artist TEXT, title TEXT, word TEXT, hira TEXT, PRIMARY KEY (artist, title, word))''')
-# 【新增】創建獨立儲存每首歌時間偏移的資料表
 cursor.execute('''CREATE TABLE IF NOT EXISTS sync_offsets (artist TEXT, title TEXT, offset REAL, PRIMARY KEY (artist, title))''')
 conn.commit()
 
@@ -36,15 +36,22 @@ def load_settings():
         try:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f: return json.load(f)
         except: pass
-    # 移除了全局的 sync_offset，因為現在是針對每首歌獨立記憶
     return {"font_size": 28, "font_family": "Microsoft JhengHei", "custom_css_path": "",
-            "mini_mode": False, "dynamic_color": True}
+            "mini_mode": False, "dynamic_color": True, "display_lines": 2}
 
 def save_settings(settings):
     with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(settings, f)
 
 # ================= 2. 點擊式假名排版核心 =================
-def build_clickable_furigana_html(text, artist, title, line_index):
+def build_clickable_furigana_html(text, artist, title, line_index, is_japanese=True):
+    if not is_japanese:
+        html = '<table border="0" cellpadding="0" cellspacing="0" align="left" style="margin: 0px; line-height: 1;">'
+        row1 = "<tr><td align='center' style='padding: 0;'></td></tr>"
+        text_escaped = text.replace(' ', '&nbsp;')
+        row2 = f"<tr><td align='center' style='white-space: nowrap; padding: 0;'>{text_escaped}</td></tr>"
+        html += row1 + row2 + "</table>"
+        return html, []
+
     words = kks.convert(text)
     
     html = '<table border="0" cellpadding="0" cellspacing="0" align="left" style="margin: 0px; line-height: 1;">'
@@ -91,7 +98,7 @@ def build_clickable_furigana_html(text, artist, title, line_index):
 
         for p_orig, p_hira in parts:
             p_orig_escaped = p_orig.replace(' ', '&nbsp;')
-            a_start = f"<a href='edit:{line_index}:{word_index}' style='text-decoration:none; color:inherit;'>"
+            a_start = f"<a href='edit:{line_index}:{word_index}' style='text-decoration:none; color:#ffffff;'>"
             a_end = "</a>"
             
             if not p_hira:
@@ -233,7 +240,6 @@ class FloatingLyricsApp(QWidget):
         self.search_title = ""
         self.search_artist = ""
         
-        # 【新增】當前歌曲專屬的微調秒數
         self.current_sync_offset = 0.0 
         
         self.current_lrc_text = ""
@@ -390,7 +396,6 @@ class FloatingLyricsApp(QWidget):
             self.search_title = title
             self.search_artist = artist
             
-            # 【讀取】每當換歌時，自動從資料庫抓取專屬於這首歌的微調秒數
             cursor.execute("SELECT offset FROM sync_offsets WHERE artist=? AND title=?", (self.search_artist, self.search_title))
             db_row = cursor.fetchone()
             self.current_sync_offset = db_row[0] if db_row else 0.0
@@ -413,6 +418,56 @@ class FloatingLyricsApp(QWidget):
         if self.lyrics_data:
             self.refresh_lyrics_display(position)
 
+    def show_help_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("操作說明")
+        dialog.resize(600, 500)
+        dialog.setStyleSheet("""
+            QDialog { background-color: #2b2b2b; color: white; }
+            QPushButton { background-color: #444; color: white; padding: 8px; border-radius: 4px; font-weight: bold; }
+            QPushButton:hover { background-color: #555; }
+            QTextEdit { background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #444; border-radius: 4px; padding: 10px; font-size: 14px; }
+        """)
+        
+        layout = QVBoxLayout(dialog)
+        
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        help_text = """# Desktop Floating Lyrics (桌面智慧浮動歌詞)
+
+這是一款專為 PC 打造的輕量級桌面浮動歌詞播放器。它能自動追蹤 Spotify 或 Windows 系統正在播放的音樂，並在桌面上同步顯示歌詞。
+
+## 滑鼠操作
+*   **移動視窗：** 按住視窗任何空白處即可自由拖曳。
+*   **調整視窗大小：** 拖曳視窗右下角，即可改變長寬比例，且絕對不會切斷文字。
+*   **調整字體大小：** 將游標停留在視窗上方，滾動滑鼠滾輪即可即時縮放字體。
+*   **修正假名拼音：** 直接使用滑鼠左鍵點擊歌詞中的漢字，會彈出視窗讓你輸入正確的拼音。
+
+## 鍵盤快捷鍵 (需點擊視窗使其反白)
+*   `] ` (右中括號)：歌詞顯示太慢，提早 0.5 秒。
+*   `[ ` (左中括號)：歌詞顯示太快，延遲 0.5 秒。
+> 系統會自動將你微調的秒數與該首歌曲綁定，存入本地資料庫。
+
+## 右鍵選單功能
+*   **手動搜尋 (修正歌名)：** 如果遇到極少數系統抓不到的冷門歌，可以點擊此選項，手動輸入 `正確歌名 - 歌手` 來強制搜尋。
+*   **極簡模式：** 隱藏所有背景與按鈕，只在桌面上留下純淨的歌詞。
+*   **專輯主題色：** 開啟/關閉依據專輯封面自動變換視窗背景顏色的功能。
+*   **外觀與排版設定：** 可以調整顯示行數、直接設定字體大小，或匯入自訂的 CSS 語法。
+
+## 背景執行 (系統托盤)
+點擊「隱藏視窗」或點擊視窗外的其他程式時，程式並未關閉。你可以在 Windows 右下角的系統托盤 (System Tray) 找到一個喇叭小圖示：
+*   對圖示按右鍵可以選擇「顯示歌詞」或「完全退出」。
+*   當背景有音樂開始播放時，隱藏的視窗會自動浮現。
+"""
+        text_edit.setMarkdown(help_text)
+        layout.addWidget(text_edit)
+        
+        close_btn = QPushButton("關閉")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec()
+
     def manual_search_lyrics(self):
         default_text = f"{self.search_title} - {self.search_artist}" if self.search_title else ""
         text, ok = QInputDialog.getText(self, "手動搜尋歌詞", "請輸入「日文歌名 - 歌手」進行精準搜尋：", text=default_text)
@@ -430,7 +485,6 @@ class FloatingLyricsApp(QWidget):
             else:
                 self.header_label.setText(f"{self.search_title} (手動)")
             
-            # 【讀取】手動搜尋後，也會自動載入屬於該首歌曲的微調紀錄
             cursor.execute("SELECT offset FROM sync_offsets WHERE artist=? AND title=?", (self.search_artist, self.search_title))
             db_row = cursor.fetchone()
             self.current_sync_offset = db_row[0] if db_row else 0.0
@@ -510,6 +564,8 @@ class FloatingLyricsApp(QWidget):
         ff = self.settings.get("font_family", "Microsoft JhengHei")
         line_idx = 0
         
+        is_japanese_song = bool(re.search(r'[\u3040-\u30FF]', lrc_text))
+        
         for line in lrc_text.split('\n'):
             match = pattern.match(line)
             if match:
@@ -517,7 +573,7 @@ class FloatingLyricsApp(QWidget):
                 seconds = int(m) * 60 + float(s)
                 text = text.strip()
                 if text:
-                    furigana_html, words_data = build_clickable_furigana_html(text, self.search_artist, self.search_title, line_idx)
+                    furigana_html, words_data = build_clickable_furigana_html(text, self.search_artist, self.search_title, line_idx, is_japanese_song)
                     self.lyrics_data.append((seconds, furigana_html, text, words_data))
                     
                     wrapper = QWidget()
@@ -551,6 +607,9 @@ class FloatingLyricsApp(QWidget):
             _, line_idx_str, word_idx_str = link.split(":")
             line_idx, word_idx = int(line_idx_str), int(word_idx_str)
             word_data = self.lyrics_data[line_idx][3][word_idx]
+            
+            if not word_data: return
+            
             orig_word, current_hira = word_data['orig'], word_data['hira']
 
             new_hira, ok = QInputDialog.getText(self, "精準修正假名", f"請輸入漢字「{orig_word}」的正確假名：", text=current_hira)
@@ -564,7 +623,6 @@ class FloatingLyricsApp(QWidget):
 
     def refresh_lyrics_display(self, position):
         current_index = -1
-        # 【修改】使用該首歌曲專屬的微調秒數
         adjusted_position = position + self.current_sync_offset
         
         for i in range(len(self.lyrics_data)):
@@ -577,6 +635,7 @@ class FloatingLyricsApp(QWidget):
     def animate_to_index(self, index):
         self.last_index = index
         is_mini = self.settings.get("mini_mode")
+        lines_to_show = self.settings.get("display_lines", 2)
 
         if hasattr(self, 'anim_group') and self.anim_group.state() == QAbstractAnimation.State.Running:
             self.anim_group.stop()
@@ -599,9 +658,11 @@ class FloatingLyricsApp(QWidget):
                 
                 if i == index:
                     op_anim.setEndValue(1.0) 
-                elif i == index + 1:
-                    if not is_mini or index == -1:
-                        op_anim.setEndValue(0.5) 
+                elif index == -1 and i < lines_to_show:
+                    op_anim.setEndValue(0.8)
+                elif index < i < index + lines_to_show:
+                    if not is_mini:
+                        op_anim.setEndValue(0.8)
                     else:
                         op_anim.setEndValue(0.0)
                 else:
@@ -632,6 +693,9 @@ class FloatingLyricsApp(QWidget):
         menu = QMenu(self)
         menu.setStyleSheet("QMenu { font-size: 14px; padding: 5px; }")
         
+        menu.addAction("操作說明 (使用教學)", self.show_help_dialog)
+        menu.addSeparator()
+        
         menu.addAction("手動搜尋 (修正歌名)", self.manual_search_lyrics)
         menu.addSeparator()
         
@@ -645,6 +709,8 @@ class FloatingLyricsApp(QWidget):
         menu.addSeparator()
 
         ui_menu = menu.addMenu("外觀與排版設定")
+        ui_menu.addAction("設定顯示行數", self.set_display_lines)
+        ui_menu.addAction("設定歌詞字體大小", self.set_font_size_menu)
         ui_menu.addAction("選擇歌詞字型", self.set_custom_font)
         ui_menu.addAction("匯入自訂 CSS 樣式", self.load_custom_css)
         ui_menu.addAction("清除自訂 CSS", self.clear_custom_css)
@@ -664,6 +730,24 @@ class FloatingLyricsApp(QWidget):
             if self.settings_btn.isVisible(): menu.exec(self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft()))
             else: menu.exec(self.mapToGlobal(self.rect().center()))
 
+    def set_display_lines(self):
+        current = self.settings.get("display_lines", 2)
+        val, ok = QInputDialog.getInt(self, "設定顯示行數", "請輸入要顯示的歌詞行數 (1~5)：", current, 1, 5, 1)
+        if ok:
+            self.settings["display_lines"] = val
+            save_settings(self.settings)
+            self.last_index = -2
+            if self.lyrics_data:
+                self.refresh_lyrics_display(self.media_worker.media_updated.pos if hasattr(self.media_worker, 'pos') else 0)
+
+    def set_font_size_menu(self):
+        current = self.settings.get("font_size", 28)
+        val, ok = QInputDialog.getInt(self, "設定字體大小", "請輸入字體大小 (10~100)：", current, 10, 100, 2)
+        if ok:
+            self.settings["font_size"] = val
+            save_settings(self.settings)
+            self.font_update_timer.start()
+
     def toggle_mini_mode(self):
         self.settings["mini_mode"] = not self.settings.get("mini_mode")
         save_settings(self.settings)
@@ -679,14 +763,13 @@ class FloatingLyricsApp(QWidget):
         self.apply_mode_styles()
 
     def adjust_sync(self, amount):
-        if not self.search_title: return # 防呆：確保目前有歌曲才能調整
+        if not self.search_title: return 
         
         if amount == 'reset': 
             self.current_sync_offset = 0.0
         else: 
             self.current_sync_offset += amount
             
-        # 【儲存】一按下括號鍵調整時間，就立刻存入資料庫綁定該首歌曲
         cursor.execute("INSERT OR REPLACE INTO sync_offsets VALUES (?, ?, ?)", 
                        (self.search_artist, self.search_title, self.current_sync_offset))
         conn.commit()
