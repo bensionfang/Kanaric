@@ -1,0 +1,309 @@
+<%- include('header') %>
+
+<div class="page-header animate-fade-in">
+    <div>
+        <h1>Stats.fm 風格聽歌統計</h1>
+        <p class="subtitle">追蹤您播放音樂的完整歷史軌跡與喜好排行</p>
+    </div>
+    
+    <button class="refresh-btn" onclick="loadStatsData(true)">
+        <i class="fa-solid fa-arrows-rotate" id="refresh-icon"></i> 立即更新
+    </button>
+</div>
+
+<!-- ================= 數據概覽卡片 ================= -->
+<div class="stats-overview-grid animate-fade-in">
+    <!-- 卡片 1: 總播放歌曲 -->
+    <div class="stats-card glass-panel">
+        <div class="card-icon blue"><i class="fa-solid fa-music"></i></div>
+        <div class="card-info">
+            <span class="card-label">累計播放曲數</span>
+            <h2 class="card-value" id="stat-total-songs">0</h2>
+            <span class="card-trend"><i class="fa-solid fa-compact-disc"></i> 獨特歌曲庫</span>
+        </div>
+    </div>
+    
+    <!-- 卡片 2: 總播放次數 -->
+    <div class="stats-card glass-panel">
+        <div class="card-icon purple"><i class="fa-solid fa-play"></i></div>
+        <div class="card-info">
+            <span class="card-label">累計播放次數</span>
+            <h2 class="card-value" id="stat-total-plays">0</h2>
+            <span class="card-trend"><i class="fa-solid fa-arrow-trend-up"></i> 播放事件累計</span>
+        </div>
+    </div>
+    
+    <!-- 卡片 3: 總聽歌時長 -->
+    <div class="stats-card glass-panel">
+        <div class="card-icon pink"><i class="fa-solid fa-hourglass-half"></i></div>
+        <div class="card-info">
+            <span class="card-label">累計聆聽時間</span>
+            <h2 class="card-value" id="stat-total-time">0 分鐘</h2>
+            <span class="card-trend"><i class="fa-solid fa-clock"></i> 自動換算為小時</span>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 詳細分析儀表板 ================= -->
+<div class="stats-dashboard-grid animate-fade-in">
+    <!-- 左側: 播放排行榜 TOP 10 -->
+    <div class="dashboard-card glass-panel">
+        <div class="card-header">
+            <h3><i class="fa-solid fa-ranking-star"></i> 熱門聆聽排行榜 (TOP 10)</h3>
+            <span class="header-desc">播放頻率最高的熱門金曲</span>
+        </div>
+        <div class="table-container">
+            <table class="premium-table">
+                <thead>
+                    <tr>
+                        <th style="width: 80px; text-align: center;">排名</th>
+                        <th>歌曲資訊</th>
+                        <th style="width: 120px; text-align: right;">播放次數</th>
+                        <th style="width: 140px; text-align: right;">累計時間</th>
+                    </tr>
+                </thead>
+                <tbody id="top-songs-table">
+                    <tr>
+                        <td colspan="4" class="table-empty">
+                            <i class="fa-solid fa-spinner fa-spin"></i> 載入排行榜數據中...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 右側: 近 7 日聽歌趨勢圖 -->
+    <div class="dashboard-card glass-panel">
+        <div class="card-header">
+            <h3><i class="fa-solid fa-chart-line"></i> 近 7 日聽歌活躍度</h3>
+            <span class="header-desc">每日累計播放次數時間線</span>
+        </div>
+        <div class="chart-container">
+            <canvas id="timelineChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+    let timelineChart = null;
+
+    // Load data when page displays
+    document.addEventListener('DOMContentLoaded', () => {
+        loadStatsData(false);
+        
+        // Auto refresh every 5 seconds
+        setInterval(() => {
+            loadStatsData(false);
+        }, 5000);
+    });
+
+    async function loadStatsData(manual = false) {
+        const refreshIcon = document.getElementById('refresh-icon');
+        if (manual && refreshIcon) {
+            refreshIcon.classList.add('fa-spin');
+        }
+
+        try {
+            // 1. Load Summary
+            const summaryResp = await fetch('/api/stats/summary');
+            if (summaryResp.ok) {
+                const summary = await summaryResp.json();
+                document.getElementById('stat-total-songs').textContent = summary.totalSongs;
+                document.getElementById('stat-total-plays').textContent = summary.totalPlays;
+                
+                // Format time into hours & minutes
+                const totalMinutes = Math.round(summary.totalTime / 60);
+                if (totalMinutes >= 60) {
+                    const hours = Math.floor(totalMinutes / 60);
+                    const mins = totalMinutes % 60;
+                    document.getElementById('stat-total-time').textContent = `${hours} 小時 ${mins} 分`;
+                } else {
+                    document.getElementById('stat-total-time').textContent = `${totalMinutes} 分鐘`;
+                }
+            }
+
+            // 2. Load Top Songs
+            const topSongsResp = await fetch('/api/stats/top-songs');
+            if (topSongsResp.ok) {
+                const topSongs = await topSongsResp.json();
+                const tableBody = document.getElementById('top-songs-table');
+                
+                if (topSongs.length === 0) {
+                    tableBody.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="table-empty">
+                                <i class="fa-solid fa-circle-question"></i> 目前尚無播放紀錄，趕快播放歌曲吧！
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    tableBody.innerHTML = topSongs.map((song, index) => {
+                        let rankBadge = '';
+                        if (index === 0) rankBadge = '<span class="rank-badge rank-1"><i class="fa-solid fa-trophy"></i> 1</span>';
+                        else if (index === 1) rankBadge = '<span class="rank-badge rank-2">2</span>';
+                        else if (index === 2) rankBadge = '<span class="rank-badge rank-3">3</span>';
+                        else rankBadge = `<span class="rank-num">${index + 1}</span>`;
+
+                        const totalMin = Math.round(song.total_duration / 60);
+                        
+                        return `
+                            <tr>
+                                <td style="text-align: center;">${rankBadge}</td>
+                                <td>
+                                    <div class="song-info-cell">
+                                        <div class="song-meta">
+                                            <span class="song-title">${escapeHtml(song.title)}</span>
+                                            <span class="song-artist">${escapeHtml(song.artist)}</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td style="text-align: right; font-weight: 600; color: #a5b4fc;">
+                                    ${song.play_count} 次
+                                </td>
+                                <td style="text-align: right; color: rgba(255,255,255,0.7);">
+                                    ${totalMin} 分鐘
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            }
+
+            // 3. Load Timeline Chart
+            const timelineResp = await fetch('/api/stats/timeline');
+            if (timelineResp.ok) {
+                const timelineData = await timelineResp.json();
+                renderTimelineChart(timelineData);
+            }
+
+        } catch (err) {
+            console.error('Error loading statistics:', err);
+        } finally {
+            if (manual && refreshIcon) {
+                setTimeout(() => {
+                    refreshIcon.classList.remove('fa-spin');
+                }, 600);
+            }
+        }
+    }
+
+    function renderTimelineChart(data) {
+        const labels = data.map(d => {
+            // Convert YYYY-MM-DD to MM/DD for cleaner display
+            const parts = d.play_date.split('-');
+            return parts.length >= 3 ? `${parts[1]}/${parts[2]}` : d.play_date;
+        });
+        const values = data.map(d => d.play_count);
+
+        const ctx = document.getElementById('timelineChart').getContext('2d');
+        
+        if (timelineChart) {
+            timelineChart.data.labels = labels;
+            timelineChart.data.datasets[0].data = values;
+            timelineChart.update('none'); // silent update
+            return;
+        }
+
+        // Custom Gradient
+        const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+        gradient.addColorStop(0, 'rgba(99, 102, 241, 0.4)');
+        gradient.addColorStop(1, 'rgba(139, 92, 246, 0.0)');
+
+        timelineChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '每日播放次數',
+                    data: values,
+                    borderColor: '#6366f1',
+                    borderWidth: 3,
+                    backgroundColor: gradient,
+                    fill: true,
+                    tension: 0.4,
+                    pointBackgroundColor: '#8b5cf6',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 2,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                    shadowColor: 'rgba(99, 102, 241, 0.5)',
+                    shadowBlur: 10
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                        titleColor: '#ffffff',
+                        bodyColor: '#a5b4fc',
+                        borderColor: 'rgba(255, 255, 255, 0.1)',
+                        borderWidth: 1,
+                        padding: 12,
+                        cornerRadius: 10,
+                        displayColors: false,
+                        titleFont: {
+                            family: 'Outfit',
+                            size: 14,
+                            weight: 'bold'
+                        },
+                        bodyFont: {
+                            family: 'Outfit',
+                            size: 13
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        },
+                        ticks: {
+                            color: 'rgba(255, 255, 255, 0.5)',
+                            font: {
+                                family: 'Outfit',
+                                size: 12
+                            },
+                            stepSize: 1,
+                            precision: 0
+                        },
+                        border: {
+                            dash: [5, 5]
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            color: 'rgba(255, 255, 255, 0.5)',
+                            font: {
+                                family: 'Outfit',
+                                size: 12
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+    }
+</script>
+
+<%- include('footer') %>

@@ -1,0 +1,141 @@
+<%- include('header') %>
+
+<div class="page-header animate-fade-in">
+    <div>
+        <h1>Floating Lyrics Web</h1>
+        <p class="subtitle">即時追蹤您的 Spotify 等系統播放器並同步歌詞</p>
+    </div>
+    
+    <!-- Mode Switcher -->
+    <div class="mode-tabs">
+        <button class="mode-tab active" onclick="switchMode('web')">
+            <i class="fa-brands fa-chrome"></i> 網頁監視版
+        </button>
+        <button class="mode-tab" onclick="switchMode('desktop')">
+            <i class="fa-solid fa-desktop"></i> 桌面極簡版
+        </button>
+    </div>
+</div>
+
+<!-- Toast Notification -->
+<div id="toast" class="toast hidden">
+    <i id="toast-icon" class="fa-solid fa-circle-info"></i>
+    <span id="toast-message"></span>
+</div>
+
+<!-- ================= 網頁版即時監控 ================= -->
+<div id="web-mode-sec" class="mode-section animate-fade-in">
+    <div class="web-player-grid" style="grid-template-columns: 1fr;">
+        <!-- 播放器與歌詞面版 -->
+        <div class="player-lyrics-card glass-panel" style="max-width: 900px; margin: 0 auto; width: 100%;">
+            
+            <div class="status-banner">
+                <div class="pulsing-dot" id="sync-dot"></div>
+                <span id="sync-status-text">正在等待系統音樂播放 (Spotify / YouTube)...</span>
+            </div>
+
+            <div class="player-upper">
+                <!-- 黑膠唱片動畫 -->
+                <div class="vinyl-container">
+                    <div class="vinyl" id="vinyl-disc">
+                        <img src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=300&auto=format&fit=crop" alt="Album Cover" id="album-cover">
+                        <div class="vinyl-center"></div>
+                    </div>
+                </div>
+                
+                <!-- 歌曲資訊與播放控制 -->
+                <div class="player-controls-pane">
+                    <h2 class="current-title" id="current-title">--</h2>
+                    <h4 class="current-artist" id="current-artist">--</h4>
+                    
+                    <div class="progress-container">
+                        <span class="time-label" id="current-time">0:00</span>
+                        <div class="slider-wrapper">
+                            <!-- 唯讀進度條 -->
+                            <input type="range" id="progress-slider" min="0" max="100" value="0" disabled style="pointer-events: none;">
+                            <div class="progress-bar-fill" id="progress-fill"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 滾動歌詞面板 -->
+            <div class="lyrics-view-container">
+                <div class="lyrics-header">
+                    <h4><i class="fa-solid fa-lines-leaning"></i> 同步歌詞</h4>
+                    <span class="lyrics-tip"><i class="fa-solid fa-rotate"></i> 自動跟隨系統進度</span>
+                </div>
+                <div class="lyrics-scroll-pane" id="lyrics-scroll" style="height: 400px; font-size: 24px;">
+                    <div class="lyrics-empty" id="lyrics-placeholder">
+                        <i class="fa-solid fa-music"></i>
+                        <p>等待播放...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 桌面極簡版啟動 ================= -->
+<div id="desktop-mode-sec" class="mode-section hidden animate-fade-in">
+    <div class="advanced-card glass-panel">
+        <div class="adv-glow"></div>
+        <div class="adv-badge"><i class="fa-solid fa-crown"></i> 桌面去背懸浮視窗</div>
+        
+        <div class="adv-body">
+            <div class="adv-icon-large">
+                <i class="fa-brands fa-python"></i>
+                <div class="connection-line"></div>
+                <i class="fa-solid fa-window-restore"></i>
+            </div>
+            
+            <h2>啟動 PyQt6 桌面端</h2>
+            <p class="adv-desc">
+                啟動原生的 PyQt6 桌面應用程式，享受完全去背的懸浮歌詞視窗，並且支援手動點擊修正漢字假名 (Furigana)。
+            </p>
+            
+            <div class="action-zone">
+                <button class="launch-btn" id="launch-desktop-btn" onclick="launchPyQt6()">
+                    <i class="fa-solid fa-rocket"></i> 啟動 PyQt6 桌面端
+                </button>
+                <div id="launch-status" class="launch-status-log"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .status-banner {
+        background: rgba(99, 102, 241, 0.1);
+        border: 1px solid rgba(99, 102, 241, 0.2);
+        padding: 10px 15px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 20px;
+        font-size: 13px;
+        color: #c7d2fe;
+    }
+    .pulsing-dot {
+        width: 10px;
+        height: 10px;
+        background-color: #f43f5e;
+        border-radius: 50%;
+        box-shadow: 0 0 10px #f43f5e;
+    }
+    .pulsing-dot.active {
+        background-color: #10b981;
+        box-shadow: 0 0 15px #10b981;
+        animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+        70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    .lyrics-line { font-size: 22px; margin-bottom: 8px; }
+</style>
+
+<script src="/js/app.js"></script>
+<%- include('footer') %>

@@ -24,11 +24,19 @@ DB_FILE = 'lyrics_data.db'
 SETTINGS_FILE = 'settings.json'
 
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+conn.execute("PRAGMA journal_mode=WAL;")
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS cache (artist TEXT, title TEXT, lyrics TEXT, PRIMARY KEY (artist, title))''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS word_corrections (artist TEXT, title TEXT, word TEXT, hira TEXT, PRIMARY KEY (artist, title, word))''')
 # 【新增】創建獨立儲存每首歌時間偏移的資料表
 cursor.execute('''CREATE TABLE IF NOT EXISTS sync_offsets (artist TEXT, title TEXT, offset REAL, PRIMARY KEY (artist, title))''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS listening_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist TEXT,
+    title TEXT,
+    duration INTEGER DEFAULT 180,
+    played_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)''')
 conn.commit()
 
 def load_settings():
@@ -397,6 +405,12 @@ class FloatingLyricsApp(QWidget):
             
             if title and artist:
                 self.header_label.setText(f"{title} - {artist}")
+                # 【新增】記錄播放歷史
+                try:
+                    cursor.execute("INSERT INTO listening_history (artist, title, duration) VALUES (?, ?, 180)", (artist, title))
+                    conn.commit()
+                except Exception as e:
+                    print("Error inserting history:", e)
             else:
                 self.header_label.setText("正在等待音樂播放...")
                 

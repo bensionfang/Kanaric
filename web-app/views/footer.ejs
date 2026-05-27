@@ -1,0 +1,18 @@
+            </div>
+        </main>
+    </div>
+
+    <!-- Live Clock Script -->
+    <script>
+        function updateClock() {
+            const clockEl = document.getElementById('live-clock');
+            if (clockEl) {
+                const now = new Date();
+                clockEl.textContent = now.toLocaleTimeString('zh-TW', { hour12: false });
+            }
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+    </script>
+</body>
+</html>
