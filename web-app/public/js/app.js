@@ -7,6 +7,10 @@ let songDurationSeconds = 180; // Estimated or default
 document.addEventListener('DOMContentLoaded', () => {
     // Start polling the system media every 500ms
     setInterval(pollSystemMedia, 500);
+    
+    // Initial load and auto refresh of sidebar leaderboard
+    loadSidebarLeaderboard();
+    setInterval(loadSidebarLeaderboard, 15000);
 });
 
 function switchMode(mode) {
@@ -68,6 +72,7 @@ async function pollSystemMedia() {
             document.getElementById('current-artist').textContent = data.artist || 'Unknown Artist';
             
             fetchAndParseLyrics(data.title, data.artist);
+            loadSidebarLeaderboard();
         } else if (!data.title && lastMediaTitle) {
             // Stopped completely
             lastMediaTitle = "";
@@ -76,6 +81,7 @@ async function pollSystemMedia() {
             document.getElementById('current-artist').textContent = "--";
             parsedLyrics = [];
             renderLyrics();
+            loadSidebarLeaderboard();
         }
         
         // Update Progress
@@ -255,4 +261,90 @@ function escapeHtml(text) {
     if (!text) return '';
     const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
     return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+}
+
+// -------------------------------------------------------------
+// Sidebar Leaderboard Logic
+// -------------------------------------------------------------
+let sidebarType = 'tracks';
+let sidebarRange = 'all';
+
+async function loadSidebarLeaderboard() {
+    const listContainer = document.getElementById('sidebar-leaderboard-list');
+    if (!listContainer) return;
+
+    try {
+        const resp = await fetch(`/api/leaderboard?type=${sidebarType}&range=${sidebarRange}`);
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.length === 0) {
+                listContainer.innerHTML = `<div class="song-item-empty">此區間暫無播放紀錄</div>`;
+                return;
+            }
+
+            listContainer.innerHTML = data.map((item, index) => {
+                let displayTitle = '';
+                let displaySub = '';
+
+                if (sidebarType === 'tracks') {
+                    displayTitle = item.title;
+                    displaySub = item.artist;
+                } else if (sidebarType === 'artists') {
+                    displayTitle = item.artist;
+                    displaySub = '不重複藝人';
+                } else if (sidebarType === 'albums') {
+                    displayTitle = item.album;
+                    displaySub = item.artist;
+                }
+
+                // Make active playing song stand out on the leaderboard!
+                const isActive = sidebarType === 'tracks' && 
+                                 displayTitle === lastMediaTitle && 
+                                 displaySub === lastMediaArtist;
+
+                return `
+                    <div class="song-item ${isActive ? 'active' : ''}">
+                        <div class="song-icon">
+                            ${index + 1}
+                        </div>
+                        <div class="song-meta-text">
+                            <span class="song-item-title">${escapeHtml(displayTitle)}</span>
+                            <span class="song-item-artist">${escapeHtml(displaySub)}</span>
+                        </div>
+                        <div style="font-size: 11px; font-weight: 500; color: var(--accent-main); text-align: right; min-width: 45px;">
+                            ${item.count}次
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+    } catch (e) {
+        listContainer.innerHTML = `<div class="song-item-empty" style="color: #f87171;">載入排行失敗</div>`;
+    }
+}
+
+function changeSidebarType(type) {
+    sidebarType = type;
+    const tabs = document.querySelectorAll('#sidebar-type-tabs .mode-tab');
+    tabs.forEach(tab => {
+        if (tab.getAttribute('data-type') === type) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+    loadSidebarLeaderboard();
+}
+
+function changeSidebarRange(range) {
+    sidebarRange = range;
+    const tabs = document.querySelectorAll('#sidebar-range-tabs .mode-tab');
+    tabs.forEach(tab => {
+        if (tab.getAttribute('data-range') === range) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+    loadSidebarLeaderboard();
 }

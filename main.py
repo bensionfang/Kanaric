@@ -25,83 +25,20 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLa
                              QDialog, QTextEdit, QGridLayout, QMessageBox, QListWidget, QListWidgetItem)
 from PyQt6.QtGui import QFont, QAction, QPixmap, QImage, QColor
 
-kks = pykakasi.kakasi()
-
-# ================= 0. 羅馬拼音轉換工具 =================
-def romaji_to_hiragana(text):
-    text = text.lower()
-    text = re.sub(r'([bcdfghjklmpqrstvwxyz])\1', r'っ\1', text)
-    
-    mapping = {
-        'kya':'きゃ', 'kyu':'きゅ', 'kyo':'きょ',
-        'sha':'しゃ', 'shu':'しゅ', 'sho':'しょ',
-        'cha':'ちゃ', 'chu':'ちゅ', 'cho':'ちょ',
-        'nya':'にゃ', 'nyu':'にゅ', 'nyo':'にょ',
-        'hya':'ひゃ', 'hyu':'ひゅ', 'hyo':'ひょ',
-        'mya':'みゃ', 'myu':'みゅ', 'myo':'みょ',
-        'rya':'りゃ', 'ryu':'りゅ', 'ryo':'りょ',
-        'gya':'ぎゃ', 'gyu':'ぎゅ', 'gyo':'ぎょ',
-        'ja':'じゃ', 'ju':'じゅ', 'jo':'じょ', 'jya':'じゃ', 'jyu':'じゅ', 'jyo':'じょ',
-        'bya':'びゃ', 'byu':'びゅ', 'byo':'びょ',
-        'pya':'ぴゃ', 'pyu':'ぴゅ', 'pyo':'ぴょ',
-        'shi':'し', 'chi':'ち', 'tsu':'つ',
-        'ka':'か', 'ki':'き', 'ku':'く', 'ke':'け', 'ko':'こ',
-        'sa':'さ', 'su':'す', 'se':'せ', 'so':'そ',
-        'ta':'た', 'te':'て', 'to':'と',
-        'na':'な', 'ni':'に', 'nu':'ぬ', 'ne':'ね', 'no':'の',
-        'ha':'は', 'hi':'ひ', 'fu':'ふ', 'hu':'ふ', 'he':'へ', 'ho':'ほ',
-        'ma':'ま', 'mi':'み', 'mu':'む', 'me':'め', 'mo':'も',
-        'ya':'や', 'yu':'ゆ', 'yo':'よ',
-        'ra':'ら', 'ri':'り', 'ru':'る', 're':'れ', 'ro':'ろ',
-        'wa':'わ', 'wo':'を', 'n':'ん',
-        'ga':'が', 'gi':'ぎ', 'gu':'ぐ', 'ge':'げ', 'go':'ご',
-        'za':'ざ', 'ji':'じ', 'zu':'ず', 'ze':'ぜ', 'zo':'ぞ',
-        'da':'だ', 'de':'で', 'do':'ど',
-        'ba':'ば', 'bi':'び', 'bu':'ぶ', 'be':'べ', 'bo':'ぼ',
-        'pa':'ぱ', 'pi':'ぴ', 'pu':'ぷ', 'pe':'ぺ', 'po':'ぽ',
-        'a':'あ', 'i':'い', 'u':'う', 'e':'え', 'o':'お',
-        '-':'ー'
-    }
-    keys = sorted(mapping.keys(), key=len, reverse=True)
-    pattern = re.compile('|'.join(map(re.escape, keys)))
-    return pattern.sub(lambda m: mapping[m.group(0)], text)
-
-def text_to_romaji_query(text):
-    if not text: return ""
-    result = kks.convert(text)
-    out = [item['hepburn'] for item in result if item['hepburn']]
-    joined = " ".join(out)
-    return re.sub(r'\s+', ' ', joined).strip()
+from utils import romaji_to_hiragana, text_to_romaji_query, kks
+from config import config, DB_FILE
+from media import MediaWorker
+from fetcher import LyricsFetcher
 
 # ================= 1. 資料庫與設定檔初始化 =================
-DB_FILE = 'lyrics_data.db'
-SETTINGS_FILE = 'settings.json'
-
-conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-conn.execute("PRAGMA journal_mode=WAL;")
-cursor = conn.cursor()
-cursor.execute('''CREATE TABLE IF NOT EXISTS cache (artist TEXT, title TEXT, lyrics TEXT, PRIMARY KEY (artist, title))''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS word_corrections (artist TEXT, title TEXT, word TEXT, hira TEXT, PRIMARY KEY (artist, title, word))''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS sync_offsets (artist TEXT, title TEXT, offset REAL, PRIMARY KEY (artist, title))''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS listening_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    artist TEXT,
-    title TEXT,
-    duration INTEGER DEFAULT 180,
-    played_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)''')
-conn.commit()
+from db import db
 
 def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f: return json.load(f)
-        except: pass
-    return {"font_size": 28, "font_family": "Microsoft JhengHei", "custom_css_path": "",
-            "mini_mode": False, "dynamic_color": True, "display_lines": 2, "pin_window": False}
+    return config.get_all()
 
 def save_settings(settings):
-    with open(SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(settings, f)
+    config.settings = settings
+    config.save_settings()
 
 # ================= 2. 點擊式假名排版核心 =================
 def build_clickable_furigana_html(text, artist, title, line_index, is_japanese=True):
@@ -124,9 +61,8 @@ def build_clickable_furigana_html(text, artist, title, line_index, is_japanese=T
         orig = item['orig']
         hira = item['hira']
 
-        cursor.execute("SELECT hira FROM word_corrections WHERE artist=? AND title=? AND word=?", (artist, title, orig))
-        db_row = cursor.fetchone()
-        if db_row: hira = db_row[0]
+        db_hira = db.get_word_correction(artist, title, orig)
+        if db_hira: hira = db_hira
 
         words_data.append({'orig': orig, 'hira': hira})
         
@@ -173,184 +109,6 @@ def build_clickable_furigana_html(text, artist, title, line_index, is_japanese=T
     row2 += "</tr>"
     html += row1 + row2 + "</table>"
     return html, words_data
-
-# ================= 3. 媒體擷取 =================
-class MediaWorker(QThread):
-    media_updated = pyqtSignal(str, str, float, bytes, bool)
-
-    def run(self):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(self.poll_media())
-
-    async def poll_media(self):
-        sessions = await GlobalSystemMediaTransportControlsSessionManager.request_async()
-        last_real_pos = -1.0
-        last_real_pos_time = time.time()
-        
-        while True:
-            current_session = sessions.get_current_session()
-            if current_session:
-                info = await current_session.try_get_media_properties_async()
-                timeline = current_session.get_timeline_properties()
-                playback_info = current_session.get_playback_info()
-                
-                title = info.title if info.title else ""
-                artist = info.artist if info.artist else ""
-                real_pos = timeline.position.total_seconds() if timeline else 0.0
-                is_playing = (playback_info and playback_info.playback_status == 4) 
-                
-                thumb_bytes = b''
-                if info.thumbnail:
-                    try:
-                        stream = await info.thumbnail.open_read_async()
-                        reader = DataReader(stream)
-                        await reader.load_async(stream.size)
-                        buf = bytearray(stream.size)
-                        reader.read_bytes(buf)
-                        thumb_bytes = bytes(buf)
-                    except: pass
-
-                current_time = time.time()
-                if real_pos != last_real_pos:
-                    last_real_pos = real_pos
-                    last_real_pos_time = current_time
-                    interpolated_pos = real_pos
-                else:
-                    interpolated_pos = real_pos + (current_time - last_real_pos_time) if is_playing else real_pos
-                        
-                self.media_updated.emit(title, artist, interpolated_pos, thumb_bytes, is_playing)
-            await asyncio.sleep(0.05)
-
-# ================= 4. 歌詞抓取與智慧翻譯 =================
-class LyricsFetcher(QThread):
-    lyrics_fetched = pyqtSignal(str, list)
-    def __init__(self, title, artist):
-        super().__init__()
-        self.title, self.artist = title, artist
-        
-    def generate_queries(self, t, a):
-        queries = []
-        seen = set()
-        
-        def add_q(qt, qa):
-            if (qt, qa) not in seen and qt and qa:
-                seen.add((qt, qa))
-                queries.append((qt, qa))
-                
-        add_q(t, a)
-        
-        rt = text_to_romaji_query(t)
-        ra = text_to_romaji_query(a)
-        
-        rt_valid = rt and rt.lower() != t.lower()
-        ra_valid = ra and ra.lower() != a.lower()
-        
-        if rt_valid:
-            add_q(rt, a)
-            add_q(rt.replace(" ", ""), a)
-            
-        if ra_valid:
-            add_q(t, ra)
-            
-        if rt_valid and ra_valid:
-            add_q(rt, ra)
-            add_q(rt.replace(" ", ""), ra)
-            
-        return queries
-
-    def run(self):
-        try:
-            cached_lyric = None
-            cursor.execute("SELECT lyrics FROM cache WHERE title=? AND artist=?", (self.title, self.artist))
-            row = cursor.fetchone()
-            if row:
-                cached_lyric = row[0]
-                self.lyrics_fetched.emit(cached_lyric, []) 
-                return
-
-            clean_title = re.sub(r'\(feat\..*?\)|\- Remastered.*|\- Live.*', '', self.title, flags=re.IGNORECASE).strip()
-            best_lyric, options = None, []
-
-            for qt, qa in self.generate_queries(clean_title, self.artist):
-                best_lyric, options = self.search_lrclib(qt, qa)
-                if best_lyric: break
-
-            if not best_lyric:
-                try:
-                    itunes_url = "https://itunes.apple.com/search"
-                    params = {"term": f"{clean_title} {self.artist}", "entity": "song", "limit": 1, "country": "jp"}
-                    resp = requests.get(itunes_url, params=params, timeout=5)
-                    if resp.status_code == 200:
-                        results = resp.json().get("results", [])
-                        if results:
-                            jp_title = results[0].get("trackName", clean_title)
-                            jp_artist = results[0].get("artistName", self.artist)
-                            
-                            if jp_title != clean_title or jp_artist != self.artist:
-                                for qt, qa in self.generate_queries(jp_title, jp_artist):
-                                    best_lyric, options = self.search_lrclib(qt, qa)
-                                    if best_lyric: break
-                except Exception as e:
-                    pass 
-
-            if best_lyric and not cached_lyric:
-                cursor.execute("INSERT OR REPLACE INTO cache VALUES (?, ?, ?)", (self.artist, self.title, best_lyric))
-                conn.commit()
-                self.lyrics_fetched.emit(best_lyric, options)
-            elif options:
-                self.lyrics_fetched.emit("OPTIONS_ONLY", options)
-            else:
-                self.lyrics_fetched.emit("", []) 
-                
-        except Exception as e: 
-            self.lyrics_fetched.emit("", [])
-
-    def search_lrclib(self, target_title, target_artist):
-        headers = {"User-Agent": "Mozilla/5.0"}
-        url = "https://lrclib.net/api/search"
-        try:
-            response = requests.get(url, params={"q": f"{target_title} {target_artist}"}, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                valid_lyrics = []
-                for t in data:
-                    if t.get("syncedLyrics"):
-                        valid_lyrics.append({
-                            'title': t.get('trackName', ''),
-                            'artist': t.get('artistName', ''),
-                            'album': t.get('albumName', ''),
-                            'duration': t.get('duration', 0),
-                            'lyrics': t.get("syncedLyrics")
-                        })
-                        
-                if valid_lyrics:
-                    def get_score(item):
-                        score = 0
-                        item_title = item['title'].lower()
-                        item_artist = item['artist'].lower()
-                        t_title = target_title.lower()
-                        t_artist = target_artist.lower()
-
-                        if t_title == item_title:
-                            score += 1000
-                        elif t_title in item_title or item_title in t_title:
-                            score += 500
-                            
-                        if t_artist == item_artist:
-                            score += 500
-                        elif t_artist in item_artist or item_artist in t_artist:
-                            score += 200
-                            
-                        if re.search(r'[\u3040-\u30FF]', item['lyrics']):
-                            score += 100
-                            
-                        return score
-
-                    valid_lyrics.sort(key=get_score, reverse=True)
-                    return valid_lyrics[0]['lyrics'], valid_lyrics[:5]
-        except: pass
-        return None, []
 
 # ================= 5. 事件穿透捲動區塊 =================
 class TransparentScrollArea(QScrollArea):
@@ -399,6 +157,12 @@ class FloatingLyricsApp(QWidget):
         self.media_worker = MediaWorker()
         self.media_worker.media_updated.connect(self.update_media_info)
         self.media_worker.start()
+        
+        from hotkeys import HotkeyManager
+        self.hotkey_manager = HotkeyManager()
+        self.hotkey_manager.toggle_visibility_signal.connect(self.toggle_visibility_from_hotkey)
+        self.hotkey_manager.adjust_sync_forward_signal.connect(lambda: self.adjust_sync(0.5))
+        self.hotkey_manager.adjust_sync_backward_signal.connect(lambda: self.adjust_sync(-0.5))
 
     def start_lyric_fetcher(self):
         if hasattr(self, 'fetcher') and self.fetcher is not None:
@@ -541,11 +305,18 @@ class FloatingLyricsApp(QWidget):
     def hide_window(self):
         self.hide()
 
+    def toggle_visibility_from_hotkey(self):
+        if self.isHidden():
+            self.show_window()
+            self.activateWindow()
+        else:
+            self.hide_window()
+
     def force_quit(self):
         self.tray_icon.hide()
         QApplication.instance().quit()
 
-    def update_media_info(self, title, artist, position, thumb_bytes, is_playing):
+    def update_media_info(self, title, artist, album, position, thumb_bytes, is_playing):
         if is_playing:
             if self.isHidden() and title != "": self.show_window() 
             self.hide_timer.stop()
@@ -559,16 +330,13 @@ class FloatingLyricsApp(QWidget):
             self.search_title = title
             self.search_artist = artist
             
-            cursor.execute("SELECT offset FROM sync_offsets WHERE artist=? AND title=?", (self.search_artist, self.search_title))
-            db_row = cursor.fetchone()
-            self.current_sync_offset = db_row[0] if db_row else 0.0
+            self.current_sync_offset = db.get_sync_offset(self.search_artist, self.search_title)
             
             if title and artist:
                 self.header_label.setText(f"{title} - {artist}")
                 # 【新增】記錄播放歷史
                 try:
-                    cursor.execute("INSERT INTO listening_history (artist, title, duration) VALUES (?, ?, 180)", (artist, title))
-                    conn.commit()
+                    db.add_listening_history(artist, title, album, 180)
                 except Exception as e:
                     print("Error inserting history:", e)
             elif title:
@@ -682,9 +450,7 @@ A：點擊右上角的「✕」只會將視窗隱藏至背景。若要完全退�
             selected = list_widget.selectedItems()
             if selected:
                 lrc_text = selected[0].data(Qt.ItemDataRole.UserRole)
-                cursor.execute("INSERT OR REPLACE INTO cache VALUES (?, ?, ?)", 
-                               (self.search_artist, self.search_title, lrc_text))
-                conn.commit()
+                db.save_cached_lyrics(self.search_artist, self.search_title, lrc_text)
                 self.parse_and_load_lyrics(lrc_text)
                 dialog.accept()
                 
@@ -745,9 +511,7 @@ A：點擊右上角的「✕」只會將視窗隱藏至背景。若要完全退�
                 if not re.search(r'\[\d{2}:\d{2}\.\d{2,3}\]', lrc_text):
                     QMessageBox.warning(dialog, "格式錯誤", "未偵測到有效的 LRC 時間標記，但系統仍會為您存檔。")
                 
-                cursor.execute("INSERT OR REPLACE INTO cache VALUES (?, ?, ?)", 
-                               (self.search_artist, self.search_title, lrc_text))
-                conn.commit()
+                db.save_cached_lyrics(self.search_artist, self.search_title, lrc_text)
                 self.parse_and_load_lyrics(lrc_text)
             dialog.accept()
             
@@ -760,8 +524,7 @@ A：點擊右上角的「✕」只會將視窗隱藏至背景。若要完全退�
         if not self.search_title: 
             return
             
-        cursor.execute("DELETE FROM cache WHERE title=? AND artist=?", (self.search_title, self.search_artist))
-        conn.commit()
+        db.delete_cached_lyrics(self.search_artist, self.search_title)
         
         self.lyrics_data = []
         self.current_lyrics_options = []
@@ -783,9 +546,7 @@ A：點擊右上角的「✕」只會將視窗隱藏至背景。若要完全退�
             else:
                 self.header_label.setText("正在等待音樂播放...")
             
-        cursor.execute("SELECT offset FROM sync_offsets WHERE artist=? AND title=?", (self.search_artist, self.search_title))
-        db_row = cursor.fetchone()
-        self.current_sync_offset = db_row[0] if db_row else 0.0
+        self.current_sync_offset = db.get_sync_offset(self.search_artist, self.search_title)
         
         self.lyrics_data = []
         self.current_lyrics_options = []
@@ -932,9 +693,7 @@ A：點擊右上角的「✕」只會將視窗隱藏至背景。若要完全退�
 
             if ok and new_input.strip():
                 new_hira = romaji_to_hiragana(new_input.strip())
-                cursor.execute("INSERT OR REPLACE INTO word_corrections VALUES (?, ?, ?, ?)", 
-                               (self.search_artist, self.search_title, orig_word, new_hira))
-                conn.commit()
+                db.save_word_correction(self.search_artist, self.search_title, orig_word, new_hira)
                 self.parse_and_load_lyrics(self.current_lrc_text)
 
     def refresh_lyrics_display(self, position):
@@ -1103,9 +862,7 @@ A：點擊右上角的「✕」只會將視窗隱藏至背景。若要完全退�
         else: 
             self.current_sync_offset += amount
             
-        cursor.execute("INSERT OR REPLACE INTO sync_offsets VALUES (?, ?, ?)", 
-                       (self.search_artist, self.search_title, self.current_sync_offset))
-        conn.commit()
+        db.save_sync_offset(self.search_artist, self.search_title, self.current_sync_offset)
         
         self.hint_label.setText(f"同步微調: {self.current_sync_offset:+.1f}s")
         self.last_index = -2

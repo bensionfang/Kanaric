@@ -18,12 +18,14 @@ async def poll_media():
                 
                 title = info.title if info.title else ""
                 artist = info.artist if info.artist else ""
+                album = info.album_title if info.album_title else ""
                 position = timeline.position.total_seconds() if timeline else 0.0
                 is_playing = (playback_info and playback_info.playback_status == 4)
                 
                 state = {
                     "title": title,
                     "artist": artist,
+                    "album": album,
                     "position": position,
                     "is_playing": is_playing
                 }

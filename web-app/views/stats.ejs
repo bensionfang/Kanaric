@@ -2,8 +2,7 @@
 
 <div class="page-header animate-fade-in">
     <div>
-        <h1>Stats.fm 風格聽歌統計</h1>
-        <p class="subtitle">追蹤您播放音樂的完整歷史軌跡與喜好排行</p>
+        <h1>統計數據</h1>
     </div>
     
     <button class="refresh-btn" onclick="loadStatsData(true)">
@@ -13,68 +12,81 @@
 
 <!-- ================= 數據概覽卡片 ================= -->
 <div class="stats-overview-grid animate-fade-in">
-    <!-- 卡片 1: 總播放歌曲 -->
+    <!-- 卡片 1: 播放次數 -->
     <div class="stats-card glass-panel">
-        <div class="card-icon blue"><i class="fa-solid fa-music"></i></div>
+        <div class="card-icon"><i class="fa-solid fa-play"></i></div>
         <div class="card-info">
-            <span class="card-label">累計播放曲數</span>
+            <span class="card-label">播放次數</span>
+            <h2 class="card-value" id="stat-total-plays">0</h2>
+            <span class="card-trend"><i class="fa-solid fa-arrow-trend-up"></i> 播放事件累計</span>
+        </div>
+    </div>
+
+    <!-- 卡片 2: 不同的曲目 -->
+    <div class="stats-card glass-panel">
+        <div class="card-icon"><i class="fa-solid fa-music"></i></div>
+        <div class="card-info">
+            <span class="card-label">不同的曲目</span>
             <h2 class="card-value" id="stat-total-songs">0</h2>
             <span class="card-trend"><i class="fa-solid fa-compact-disc"></i> 獨特歌曲庫</span>
         </div>
     </div>
     
-    <!-- 卡片 2: 總播放次數 -->
+    <!-- 卡片 3: 播放分鐘數 -->
     <div class="stats-card glass-panel">
-        <div class="card-icon purple"><i class="fa-solid fa-play"></i></div>
+        <div class="card-icon"><i class="fa-solid fa-clock"></i></div>
         <div class="card-info">
-            <span class="card-label">累計播放次數</span>
-            <h2 class="card-value" id="stat-total-plays">0</h2>
-            <span class="card-trend"><i class="fa-solid fa-arrow-trend-up"></i> 播放事件累計</span>
+            <span class="card-label">播放分鐘數</span>
+            <h2 class="card-value" id="stat-total-time">0 分鐘</h2>
+            <span class="card-trend"><i class="fa-solid fa-hourglass-half"></i> 累計聆聽時間</span>
         </div>
     </div>
-    
-    <!-- 卡片 3: 總聽歌時長 -->
+
+    <!-- 卡片 4: 不同的藝人 -->
     <div class="stats-card glass-panel">
-        <div class="card-icon pink"><i class="fa-solid fa-hourglass-half"></i></div>
+        <div class="card-icon"><i class="fa-solid fa-user-astronaut"></i></div>
         <div class="card-info">
-            <span class="card-label">累計聆聽時間</span>
-            <h2 class="card-value" id="stat-total-time">0 分鐘</h2>
-            <span class="card-trend"><i class="fa-solid fa-clock"></i> 自動換算為小時</span>
+            <span class="card-label">不同的藝人</span>
+            <h2 class="card-value" id="stat-total-artists">0</h2>
+            <span class="card-trend"><i class="fa-solid fa-users"></i> 獨特藝人數量</span>
+        </div>
+    </div>
+
+    <!-- 卡片 5: 不同的專輯 -->
+    <div class="stats-card glass-panel">
+        <div class="card-icon"><i class="fa-solid fa-record-vinyl"></i></div>
+        <div class="card-info">
+            <span class="card-label">不同的專輯</span>
+            <h2 class="card-value" id="stat-total-albums">0</h2>
+            <span class="card-trend"><i class="fa-solid fa-circle-dot"></i> 預估聆聽專輯</span>
+        </div>
+    </div>
+
+    <!-- 卡片 6: 每日平均播放次數 -->
+    <div class="stats-card glass-panel">
+        <div class="card-icon"><i class="fa-solid fa-calendar-day"></i></div>
+        <div class="card-info">
+            <span class="card-label">每日平均播放次數</span>
+            <h2 class="card-value" id="stat-daily-avg-plays">0 次</h2>
+            <span class="card-trend"><i class="fa-solid fa-chart-bar"></i> 單日播放活躍度</span>
+        </div>
+    </div>
+
+    <!-- 卡片 7: 每日平均播放分鐘數 -->
+    <div class="stats-card glass-panel">
+        <div class="card-icon"><i class="fa-solid fa-hourglass-start"></i></div>
+        <div class="card-info">
+            <span class="card-label">每日平均播放分鐘數</span>
+            <h2 class="card-value" id="stat-daily-avg-minutes">0 分</h2>
+            <span class="card-trend"><i class="fa-solid fa-chart-line"></i> 單日聆聽時長</span>
         </div>
     </div>
 </div>
 
 <!-- ================= 詳細分析儀表板 ================= -->
-<div class="stats-dashboard-grid animate-fade-in">
-    <!-- 左側: 播放排行榜 TOP 10 -->
-    <div class="dashboard-card glass-panel">
-        <div class="card-header">
-            <h3><i class="fa-solid fa-ranking-star"></i> 熱門聆聽排行榜 (TOP 10)</h3>
-            <span class="header-desc">播放頻率最高的熱門金曲</span>
-        </div>
-        <div class="table-container">
-            <table class="premium-table">
-                <thead>
-                    <tr>
-                        <th style="width: 80px; text-align: center;">排名</th>
-                        <th>歌曲資訊</th>
-                        <th style="width: 120px; text-align: right;">播放次數</th>
-                        <th style="width: 140px; text-align: right;">累計時間</th>
-                    </tr>
-                </thead>
-                <tbody id="top-songs-table">
-                    <tr>
-                        <td colspan="4" class="table-empty">
-                            <i class="fa-solid fa-spinner fa-spin"></i> 載入排行榜數據中...
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 右側: 近 7 日聽歌趨勢圖 -->
-    <div class="dashboard-card glass-panel">
+<div class="stats-dashboard-grid animate-fade-in" style="display: block;">
+    <!-- 近 7 日聽歌趨勢圖 -->
+    <div class="dashboard-card glass-panel" style="margin-bottom: 40px;">
         <div class="card-header">
             <h3><i class="fa-solid fa-chart-line"></i> 近 7 日聽歌活躍度</h3>
             <span class="header-desc">每日累計播放次數時間線</span>
@@ -111,6 +123,10 @@
                 const summary = await summaryResp.json();
                 document.getElementById('stat-total-songs').textContent = summary.totalSongs;
                 document.getElementById('stat-total-plays').textContent = summary.totalPlays;
+                document.getElementById('stat-total-artists').textContent = summary.totalArtists;
+                document.getElementById('stat-total-albums').textContent = summary.totalAlbums;
+                document.getElementById('stat-daily-avg-plays').textContent = `${summary.dailyAvgPlays} 次`;
+                document.getElementById('stat-daily-avg-minutes').textContent = `${summary.dailyAvgMinutes} 分`;
                 
                 // Format time into hours & minutes
                 const totalMinutes = Math.round(summary.totalTime / 60);
@@ -123,52 +139,7 @@
                 }
             }
 
-            // 2. Load Top Songs
-            const topSongsResp = await fetch('/api/stats/top-songs');
-            if (topSongsResp.ok) {
-                const topSongs = await topSongsResp.json();
-                const tableBody = document.getElementById('top-songs-table');
-                
-                if (topSongs.length === 0) {
-                    tableBody.innerHTML = `
-                        <tr>
-                            <td colspan="4" class="table-empty">
-                                <i class="fa-solid fa-circle-question"></i> 目前尚無播放紀錄，趕快播放歌曲吧！
-                            </td>
-                        </tr>
-                    `;
-                } else {
-                    tableBody.innerHTML = topSongs.map((song, index) => {
-                        let rankBadge = '';
-                        if (index === 0) rankBadge = '<span class="rank-badge rank-1"><i class="fa-solid fa-trophy"></i> 1</span>';
-                        else if (index === 1) rankBadge = '<span class="rank-badge rank-2">2</span>';
-                        else if (index === 2) rankBadge = '<span class="rank-badge rank-3">3</span>';
-                        else rankBadge = `<span class="rank-num">${index + 1}</span>`;
 
-                        const totalMin = Math.round(song.total_duration / 60);
-                        
-                        return `
-                            <tr>
-                                <td style="text-align: center;">${rankBadge}</td>
-                                <td>
-                                    <div class="song-info-cell">
-                                        <div class="song-meta">
-                                            <span class="song-title">${escapeHtml(song.title)}</span>
-                                            <span class="song-artist">${escapeHtml(song.artist)}</span>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td style="text-align: right; font-weight: 600; color: #a5b4fc;">
-                                    ${song.play_count} 次
-                                </td>
-                                <td style="text-align: right; color: rgba(255,255,255,0.7);">
-                                    ${totalMin} 分鐘
-                                </td>
-                            </tr>
-                        `;
-                    }).join('');
-                }
-            }
 
             // 3. Load Timeline Chart
             const timelineResp = await fetch('/api/stats/timeline');

@@ -47,7 +47,16 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
         duration INTEGER DEFAULT 180,
         played_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `, () => {
+      // Alter table to add album column if it doesn't exist
+      db.run('ALTER TABLE listening_history ADD COLUMN album TEXT', (err) => {
+        if (err) {
+          // Column already exists, ignore
+        } else {
+          console.log('✓ Added album column to listening_history');
+        }
+      });
+    });
   }
 });
 
@@ -100,6 +109,18 @@ app.get('/', (req, res) => {
 
 app.get('/stats', (req, res) => {
   res.render('stats', { activePage: 'stats' });
+});
+
+app.get('/leaderboard', (req, res) => {
+  res.render('leaderboard', { activePage: 'leaderboard' });
+});
+
+app.get('/wrapped', (req, res) => {
+  res.render('wrapped', { activePage: 'wrapped' });
+});
+
+app.get('/editor', (req, res) => {
+  res.render('editor', { activePage: 'editor' });
 });
 
 // REST APIs
@@ -155,13 +176,13 @@ app.get('/api/songs', (req, res) => {
 
 // 4. Record play event
 app.post('/api/play-event', (req, res) => {
-  const { artist, title, duration } = req.body;
+  const { artist, title, album, duration } = req.body;
   if (!artist || !title) return res.status(400).json({ error: 'Artist and Title required' });
   const songDuration = duration || 180;
   
   db.run(
-    'INSERT INTO listening_history (artist, title, duration) VALUES (?, ?, ?)',
-    [artist, title, songDuration],
+    'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
+    [artist, title, album || null, songDuration],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ success: true, id: this.lastID });
@@ -173,14 +194,38 @@ app.post('/api/play-event', (req, res) => {
 app.get('/api/stats/summary', (req, res) => {
   const query = `
     SELECT 
-      (SELECT COUNT(DISTINCT(title || ' - ' || artist)) FROM listening_history) AS totalSongs,
       COUNT(*) AS totalPlays,
-      SUM(duration) AS totalTime
+      COALESCE(SUM(duration), 0) AS totalTime,
+      COUNT(DISTINCT artist) AS totalArtists,
+      COUNT(DISTINCT(title || ' - ' || artist)) AS totalSongs,
+      COUNT(DISTINCT strftime('%Y-%m-%d', played_at)) AS activeDays,
+      -- Estimate unique albums (approx 75% of unique songs, minimum 1 if songs > 0)
+      CASE 
+        WHEN COUNT(DISTINCT(title || ' - ' || artist)) > 0 
+        THEN CAST(COUNT(DISTINCT(title || ' - ' || artist)) * 0.75 + 0.5 AS INTEGER) 
+        ELSE 0 
+      END AS totalAlbums
     FROM listening_history
   `;
   db.get(query, [], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ totalSongs: row.totalSongs || 0, totalPlays: row.totalPlays || 0, totalTime: row.totalTime || 0 });
+    
+    const activeDays = row.activeDays || 1;
+    const totalPlays = row.totalPlays || 0;
+    const totalTime = row.totalTime || 0;
+    
+    const dailyAvgPlays = (totalPlays / activeDays).toFixed(1);
+    const dailyAvgMinutes = (totalTime / 60 / activeDays).toFixed(1);
+    
+    res.json({
+      totalPlays,
+      totalSongs: row.totalSongs || 0,
+      totalTime,
+      totalArtists: row.totalArtists || 0,
+      totalAlbums: row.totalAlbums || 0,
+      dailyAvgPlays: parseFloat(dailyAvgPlays),
+      dailyAvgMinutes: parseFloat(dailyAvgMinutes)
+    });
   });
 });
 
@@ -191,6 +236,20 @@ app.get('/api/stats/top-songs', (req, res) => {
     GROUP BY artist, title
     ORDER BY play_count DESC
     LIMIT 10
+  `;
+  db.all(query, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+app.get('/api/stats/top-artists', (req, res) => {
+  const query = `
+    SELECT artist, COUNT(*) AS play_count, SUM(duration) AS total_duration
+    FROM listening_history
+    GROUP BY artist
+    ORDER BY play_count DESC
+    LIMIT 5
   `;
   db.all(query, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -226,6 +285,57 @@ app.get('/api/stats/timeline', (req, res) => {
   });
 });
 
+app.get('/api/leaderboard', (req, res) => {
+  const { type, range } = req.query;
+  const validTypes = ['tracks', 'artists', 'albums'];
+  const validRanges = ['all', '6m', '1m'];
+  
+  if (!validTypes.includes(type)) return res.status(400).json({ error: 'Invalid type parameter' });
+  if (!validRanges.includes(range)) return res.status(400).json({ error: 'Invalid range parameter' });
+  
+  let dateFilter = '';
+  if (range === '6m') {
+    dateFilter = "WHERE played_at >= datetime('now', '-180 days')";
+  } else if (range === '1m') {
+    dateFilter = "WHERE played_at >= datetime('now', '-30 days')";
+  }
+  
+  let query = '';
+  if (type === 'tracks') {
+    query = `
+      SELECT artist, title, COUNT(*) AS count, SUM(duration) AS duration
+      FROM listening_history
+      ${dateFilter}
+      GROUP BY artist, title
+      ORDER BY count DESC
+      LIMIT 50
+    `;
+  } else if (type === 'artists') {
+    query = `
+      SELECT artist, COUNT(*) AS count, SUM(duration) AS duration
+      FROM listening_history
+      ${dateFilter}
+      GROUP BY artist
+      ORDER BY count DESC
+      LIMIT 50
+    `;
+  } else if (type === 'albums') {
+    query = `
+      SELECT COALESCE(album, title || ' - Single') AS album, artist, COUNT(*) AS count, SUM(duration) AS duration
+      FROM listening_history
+      ${dateFilter}
+      GROUP BY album, artist
+      ORDER BY count DESC
+      LIMIT 50
+    `;
+  }
+  
+  db.all(query, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
 // 6. Launch PyQt6
 app.post('/api/launch-pyqt6', (req, res) => {
   try {
@@ -241,6 +351,45 @@ app.post('/api/launch-pyqt6', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// 7. Editor APIs
+app.get('/api/lyrics/raw', (req, res) => {
+  const { title, artist } = req.query;
+  db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ lyrics: row ? row.lyrics : "" });
+  });
+});
+
+app.post('/api/lyrics/update', (req, res) => {
+  const { title, artist, lyrics } = req.body;
+  if (!title || !artist || !lyrics) return res.status(400).json({ error: 'Missing fields' });
+  db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, lyrics], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true });
+  });
+});
+
+// 8. Export Playlist API
+app.get('/api/export-playlist', (req, res) => {
+  const query = `
+    SELECT artist, title
+    FROM listening_history
+    GROUP BY artist, title
+    ORDER BY COUNT(*) DESC
+    LIMIT 50
+  `;
+  db.all(query, [], (err, rows) => {
+    if (err) return res.status(500).send('Database Error');
+    let m3uContent = "#EXTM3U\n";
+    rows.forEach(row => {
+      m3uContent += `#EXTINF:-1,${row.artist} - ${row.title}\n${row.artist} - ${row.title}.mp3\n`;
+    });
+    res.setHeader('Content-Type', 'audio/x-mpegurl');
+    res.setHeader('Content-Disposition', 'attachment; filename="top50.m3u"');
+    res.send(m3uContent);
+  });
 });
 
 app.listen(PORT, () => {

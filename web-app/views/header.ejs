@@ -29,11 +29,23 @@
             <nav class="nav-menu">
                 <a href="/" class="nav-item <%= activePage === 'home' ? 'active' : '' %>">
                     <i class="fa-solid fa-music"></i>
-                    <span>音樂播放器</span>
+                    <span>懸浮歌詞</span>
                 </a>
                 <a href="/stats" class="nav-item <%= activePage === 'stats' ? 'active' : '' %>">
                     <i class="fa-solid fa-chart-simple"></i>
                     <span>統計數據</span>
+                </a>
+                <a href="/leaderboard" class="nav-item <%= activePage === 'leaderboard' ? 'active' : '' %>">
+                    <i class="fa-solid fa-trophy"></i>
+                    <span>排行榜</span>
+                </a>
+                <a href="/editor" class="nav-item <%= activePage === 'editor' ? 'active' : '' %>">
+                    <i class="fa-solid fa-pen-to-square"></i>
+                    <span>歌詞編輯器</span>
+                </a>
+                <a href="/api/export-playlist" class="nav-item" download="top50_playlist.m3u">
+                    <i class="fa-solid fa-file-export"></i>
+                    <span>匯出 M3U 歌單</span>
                 </a>
             </nav>
             
@@ -48,10 +60,6 @@
                 <div class="time-widget">
                     <i class="fa-regular fa-clock"></i>
                     <span id="live-clock">--:--:--</span>
-                </div>
-                <div class="user-profile">
-                    <div class="avatar"><i class="fa-solid fa-graduation-cap"></i></div>
-                    <span>期末演示模式</span>
                 </div>
             </header>
 

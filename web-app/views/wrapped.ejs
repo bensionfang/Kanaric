@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your Wrapped - Floating Lyrics</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;600;800&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Outfit', 'Noto Sans TC', sans-serif;
+      background: #0c0d14;
+      color: #ffffff;
+      overflow: hidden;
+    }
+    .carousel-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      overflow-x: hidden;
+      scroll-snap-type: x mandatory;
+    }
+    .slide {
+      min-width: 100vw;
+      height: 100vh;
+      scroll-snap-align: start;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 2rem;
+      box-sizing: border-box;
+      position: relative;
+      transition: all 0.5s ease;
+    }
+
+    .content-box {
+      background: #171822;
+      border: 1px solid #262938;
+      border-radius: 4px;
+      padding: 3rem;
+      max-width: 800px;
+      width: 90%;
+      transform: translateY(50px);
+      opacity: 0;
+      transition: all 0.5s ease-out;
+    }
+    .slide.active .content-box {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    
+    h1 {
+      font-size: 4rem;
+      font-weight: 800;
+      margin-bottom: 1rem;
+      letter-spacing: -2px;
+    }
+    h2 {
+      font-size: 2.5rem;
+      font-weight: 600;
+      margin-bottom: 2rem;
+      color: rgba(255,255,255,0.9);
+    }
+    .big-number {
+      font-size: 6rem;
+      font-weight: 800;
+      color: #3b82f6;
+      margin: 1rem 0;
+    }
+    .list-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      font-size: 1.2rem;
+    }
+    .list-item:last-child { border-bottom: none; }
+    .rank { font-weight: 800; font-size: 1.5rem; width: 40px; text-align: left; opacity: 0.5; }
+    .song-info { flex-grow: 1; text-align: left; }
+    .song-title { font-weight: 700; font-size: 1.3rem; }
+    .song-artist { font-size: 1rem; opacity: 0.7; }
+    
+    .controls {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 1rem;
+      z-index: 100;
+    }
+    .btn {
+      background: #171822;
+      border: 1px solid #262938;
+      color: #94a3b8;
+      padding: 12px 24px;
+      border-radius: 4px;
+      font-size: 1.2rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .btn:hover {
+      border-color: #ffffff;
+      color: #ffffff;
+    }
+    .btn.primary {
+      background: #3b82f6;
+      color: #ffffff;
+      border: none;
+    }
+    .btn.primary:hover {
+      background: #60a5fa;
+    }
+
+    #loading {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #0c0d14;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 999;
+      font-size: 2rem;
+      font-weight: 800;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="loading">載入你的年度回顧中...</div>
+
+  <div class="carousel-container" id="carousel">
+    <!-- Slide 1: Intro -->
+    <div class="slide slide-1 active" id="s1">
+      
+      <div class="content-box">
+        <h2>Floating-Lyrics</h2>
+        <h1>你的聽歌回顧</h1>
+        <p style="font-size: 1.5rem; opacity: 0.8;">準備好看看你最近沉迷於哪些音樂了嗎？</p>
+      </div>
+    </div>
+
+    <!-- Slide 2: Minutes -->
+    <div class="slide slide-2" id="s2">
+      
+      <div class="content-box">
+        <h2>總共聆聽時間</h2>
+        <div class="big-number" id="val-minutes">0</div>
+        <p style="font-size: 1.5rem;">分鐘的沉浸時光</p>
+      </div>
+    </div>
+
+    <!-- Slide 3: Top Artist -->
+    <div class="slide slide-3" id="s3">
+
+      <div class="content-box">
+        <h2>最愛的歌手</h2>
+        <div class="big-number" style="font-size: 4rem;" id="val-artist">載入中</div>
+        <p style="font-size: 1.5rem;">你總共播放了 <span id="val-artist-count" style="font-weight: bold;">0</span> 次</p>
+      </div>
+    </div>
+
+    <!-- Slide 4: Top Songs -->
+    <div class="slide slide-4" id="s4">
+
+      <div class="content-box">
+        <h2>最愛的單曲 Top 5</h2>
+        <div id="top-songs-container">
+          <!-- JS 注入 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 5: Summary -->
+    <div class="slide slide-5" id="s5">
+
+      <div class="content-box">
+        <h1>回顧總結</h1>
+        <p style="font-size: 1.5rem; margin-bottom: 2rem;">截圖分享給你的朋友吧！</p>
+        <div style="display: flex; justify-content: space-around; text-align: left; flex-wrap: wrap;">
+          <div style="margin: 1rem;">
+            <div style="font-size: 1rem; opacity: 0.7;">總聆聽歌曲數</div>
+            <div style="font-size: 2rem; font-weight: 800;" id="sum-songs">0</div>
+          </div>
+          <div style="margin: 1rem;">
+            <div style="font-size: 1rem; opacity: 0.7;">總播放次數</div>
+            <div style="font-size: 2rem; font-weight: 800;" id="sum-plays">0</div>
+          </div>
+        </div>
+        <div style="margin-top: 2rem;">
+          <a href="/" style="text-decoration: none;"><button class="btn primary">回到首頁</button></a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="btn-prev" style="display: none;">上一步</button>
+    <button class="btn primary" id="btn-next">下一步</button>
+  </div>
+
+  <script>
+    let currentSlide = 0;
+    const slides = document.querySelectorAll('.slide');
+    const carousel = document.getElementById('carousel');
+    const btnNext = document.getElementById('btn-next');
+    const btnPrev = document.getElementById('btn-prev');
+
+    function updateNav() {
+      btnPrev.style.display = currentSlide === 0 ? 'none' : 'block';
+      btnNext.style.display = currentSlide === slides.length - 1 ? 'none' : 'block';
+      
+      slides.forEach((s, i) => {
+        if(i === currentSlide) s.classList.add('active');
+        else s.classList.remove('active');
+      });
+      
+      carousel.scrollTo({
+        left: currentSlide * window.innerWidth,
+        behavior: 'smooth'
+      });
+    }
+
+    btnNext.addEventListener('click', () => {
+      if(currentSlide < slides.length - 1) {
+        currentSlide++;
+        updateNav();
+      }
+    });
+
+    btnPrev.addEventListener('click', () => {
+      if(currentSlide > 0) {
+        currentSlide--;
+        updateNav();
+      }
+    });
+
+    // Fetch Data
+    async function loadData() {
+      try {
+        const [summaryRes, topSongsRes, topArtistsRes] = await Promise.all([
+          fetch('/api/stats/summary'),
+          fetch('/api/stats/top-songs'),
+          fetch('/api/stats/top-artists')
+        ]);
+        
+        const summary = await summaryRes.json();
+        const topSongs = await topSongsRes.json();
+        const topArtists = await topArtistsRes.json();
+        
+        // Update DOM
+        document.getElementById('val-minutes').innerText = Math.round(summary.totalTime / 60).toLocaleString();
+        
+        if (topArtists.length > 0) {
+          document.getElementById('val-artist').innerText = topArtists[0].artist;
+          document.getElementById('val-artist-count').innerText = topArtists[0].play_count;
+        }
+
+        const songsHtml = topSongs.slice(0, 5).map((song, i) => `
+          <div class="list-item">
+            <div class="rank">#${i + 1}</div>
+            <div class="song-info">
+              <div class="song-title">${song.title}</div>
+              <div class="song-artist">${song.artist}</div>
+            </div>
+            <div style="font-weight: 800; font-size: 1.2rem;">${song.play_count} 次</div>
+          </div>
+        `).join('');
+        document.getElementById('top-songs-container').innerHTML = songsHtml;
+        
+        document.getElementById('sum-songs').innerText = summary.totalSongs.toLocaleString();
+        document.getElementById('sum-plays').innerText = summary.totalPlays.toLocaleString();
+
+        // Hide loading
+        document.getElementById('loading').style.display = 'none';
+        
+      } catch (e) {
+        console.error("Error loading wrapped data", e);
+        document.getElementById('loading').innerText = "載入失敗，請確認伺服器正常運作";
+      }
+    }
+
+    loadData();
+  </script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<%- include('header') %>
+
+<div class="page-header">
+    <div>
+        <h1>歌詞編輯器 (LRC Editor)</h1>
+        <div class="subtitle">手動修正時間軸，儲存後立即同步到桌面版</div>
+    </div>
+</div>
+
+<div class="stats-dashboard-grid">
+    <div class="dashboard-card" style="flex: 1;">
+        <div class="card-header">
+            <h3>選擇歌曲</h3>
+        </div>
+        <select id="song-select" size="10" style="width: 100%; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 10px; border-radius: 4px; font-family: monospace;">
+            <option disabled>載入中...</option>
+        </select>
+    </div>
+
+    <div class="dashboard-card" style="flex: 2;">
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 id="editor-title">尚未選擇</h3>
+            <button id="save-btn" class="ctrl-btn primary" style="padding: 0 15px; width: auto;" disabled>儲存修改</button>
+        </div>
+        <textarea id="lrc-editor" placeholder="[00:00.00] 在左側選擇一首歌以開始編輯..." disabled style="width: 100%; height: 400px; background: #0c0d14; color: var(--text-primary); border: 1px solid var(--panel-border); padding: 15px; border-radius: 4px; font-family: monospace; resize: vertical; line-height: 1.5;"></textarea>
+    </div>
+</div>
+
+<script>
+    const songSelect = document.getElementById('song-select');
+    const editorTitle = document.getElementById('editor-title');
+    const lrcEditor = document.getElementById('lrc-editor');
+    const saveBtn = document.getElementById('save-btn');
+
+    let currentArtist = "";
+    let currentTitle = "";
+
+    // Load songs list
+    fetch('/api/songs')
+        .then(res => res.json())
+        .then(data => {
+            songSelect.innerHTML = '';
+            if (data.length === 0) {
+                songSelect.innerHTML = '<option disabled>資料庫中沒有快取的歌曲</option>';
+                return;
+            }
+            data.forEach(song => {
+                const opt = document.createElement('option');
+                opt.value = JSON.stringify({ artist: song.artist, title: song.title });
+                opt.text = `${song.title} - ${song.artist}`;
+                songSelect.appendChild(opt);
+            });
+        });
+
+    songSelect.addEventListener('change', (e) => {
+        const selected = JSON.parse(e.target.value);
+        currentArtist = selected.artist;
+        currentTitle = selected.title;
+        editorTitle.innerText = `正在編輯: ${currentTitle}`;
+        lrcEditor.disabled = true;
+        lrcEditor.value = "載入中...";
+        saveBtn.disabled = true;
+
+        fetch(`/api/lyrics/raw?title=${encodeURIComponent(currentTitle)}&artist=${encodeURIComponent(currentArtist)}`)
+            .then(res => res.json())
+            .then(data => {
+                lrcEditor.value = data.lyrics;
+                lrcEditor.disabled = false;
+                saveBtn.disabled = false;
+            });
+    });
+
+    saveBtn.addEventListener('click', () => {
+        const text = lrcEditor.value;
+        saveBtn.innerText = "儲存中...";
+        saveBtn.disabled = true;
+        
+        fetch('/api/lyrics/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: currentTitle, artist: currentArtist, lyrics: text })
+        })
+        .then(res => res.json())
+        .then(data => {
+            saveBtn.innerText = "已儲存！";
+            setTimeout(() => {
+                saveBtn.innerText = "儲存修改";
+                saveBtn.disabled = false;
+            }, 2000);
+        });
+    });
+</script>
+
+<%- include('footer') %>
