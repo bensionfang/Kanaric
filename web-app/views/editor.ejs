@@ -8,11 +8,12 @@
 </div>
 
 <div class="stats-dashboard-grid">
-    <div class="dashboard-card" style="flex: 1;">
+    <div class="dashboard-card" style="flex: 1; display: flex; flex-direction: column;">
         <div class="card-header">
             <h3>選擇歌曲</h3>
         </div>
-        <select id="song-select" size="10" style="width: 100%; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 10px; border-radius: 4px; font-family: monospace;">
+        <input type="text" id="song-search" placeholder="搜尋歌名或歌手..." style="width: 100%; background: #0c0d14; color: var(--text-primary); border: 1px solid var(--panel-border); padding: 8px 12px; border-radius: 4px; margin-bottom: 10px; font-family: inherit; font-size: 14px;">
+        <select id="song-select" size="10" style="width: 100%; flex: 1; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 10px; border-radius: 4px; font-family: monospace;">
             <option disabled>載入中...</option>
         </select>
     </div>
@@ -35,22 +36,46 @@
     let currentArtist = "";
     let currentTitle = "";
 
+    const songSearch = document.getElementById('song-search');
+    let allSongs = [];
+
+    function renderSongList(filterText = "") {
+        songSelect.innerHTML = '';
+        if (allSongs.length === 0) {
+            songSelect.innerHTML = '<option disabled>資料庫中沒有快取的歌曲</option>';
+            return;
+        }
+        
+        const lowerFilter = filterText.toLowerCase();
+        const filteredSongs = allSongs.filter(song => 
+            song.title.toLowerCase().includes(lowerFilter) || 
+            song.artist.toLowerCase().includes(lowerFilter)
+        );
+
+        if (filteredSongs.length === 0) {
+            songSelect.innerHTML = '<option disabled>找不到符合的歌曲</option>';
+            return;
+        }
+
+        filteredSongs.forEach(song => {
+            const opt = document.createElement('option');
+            opt.value = JSON.stringify({ artist: song.artist, title: song.title });
+            opt.text = `${song.title} - ${song.artist}`;
+            songSelect.appendChild(opt);
+        });
+    }
+
     // Load songs list
     fetch('/api/songs')
         .then(res => res.json())
         .then(data => {
-            songSelect.innerHTML = '';
-            if (data.length === 0) {
-                songSelect.innerHTML = '<option disabled>資料庫中沒有快取的歌曲</option>';
-                return;
-            }
-            data.forEach(song => {
-                const opt = document.createElement('option');
-                opt.value = JSON.stringify({ artist: song.artist, title: song.title });
-                opt.text = `${song.title} - ${song.artist}`;
-                songSelect.appendChild(opt);
-            });
+            allSongs = data;
+            renderSongList();
         });
+
+    songSearch.addEventListener('input', (e) => {
+        renderSongList(e.target.value);
+    });
 
     songSelect.addEventListener('change', (e) => {
         const selected = JSON.parse(e.target.value);

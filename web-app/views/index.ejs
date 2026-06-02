@@ -1,17 +1,18 @@
 <%- include('header') %>
 
 <div class="page-header animate-fade-in">
-    <div>
+    <div style="display: flex; align-items: center; gap: 20px;">
         <h1>懸浮歌詞</h1>
+        <div class="status-banner" style="margin-bottom: 0; padding: 6px 12px;">
+            <div class="pulsing-dot" id="sync-dot"></div>
+            <span id="sync-status-text">正在等待系統音樂播放 (Spotify / YouTube)...</span>
+        </div>
     </div>
     
     <!-- Mode Switcher -->
     <div class="mode-tabs">
-        <button class="mode-tab active" onclick="switchMode('web')">
-            <i class="fa-brands fa-chrome"></i> 網頁
-        </button>
-        <button class="mode-tab" onclick="switchMode('desktop')">
-            <i class="fa-solid fa-desktop"></i> 桌面
+        <button class="mode-tab" id="launch-desktop-btn" onclick="launchPyQt6()">
+            <i class="fa-solid fa-desktop"></i> 桌面版
         </button>
     </div>
 </div>
@@ -28,11 +29,6 @@
         <!-- 播放器與歌詞面版 -->
         <div class="player-lyrics-card glass-panel" style="max-width: 900px; margin: 0 auto; width: 100%;">
             
-            <div class="status-banner">
-                <div class="pulsing-dot" id="sync-dot"></div>
-                <span id="sync-status-text">正在等待系統音樂播放 (Spotify / YouTube)...</span>
-            </div>
-
             <div class="player-upper">
                 <!-- 黑膠唱片動畫 -->
                 <div class="vinyl-container">
@@ -62,7 +58,9 @@
             <div class="lyrics-view-container">
                 <div class="lyrics-header">
                     <h4><i class="fa-solid fa-lines-leaning"></i> 同步歌詞</h4>
-                    <span class="lyrics-tip"><i class="fa-solid fa-rotate"></i> 自動跟隨系統進度</span>
+                    <button class="reload-lyrics-btn" onclick="reloadCurrentLyrics()" title="重新載入歌詞">
+                        <i class="fa-solid fa-rotate"></i> 重新載入歌詞
+                    </button>
                 </div>
                 <div class="lyrics-scroll-pane" id="lyrics-scroll" style="height: 400px; font-size: 24px;">
                     <div class="lyrics-empty" id="lyrics-placeholder">
@@ -75,33 +73,7 @@
     </div>
 </div>
 
-<!-- ================= 桌面極簡版啟動 ================= -->
-<div id="desktop-mode-sec" class="mode-section hidden animate-fade-in">
-    <div class="advanced-card glass-panel">
-        <div class="adv-glow"></div>
-        <div class="adv-badge"><i class="fa-solid fa-crown"></i> 桌面去背懸浮視窗</div>
-        
-        <div class="adv-body">
-            <div class="adv-icon-large">
-                <i class="fa-brands fa-python"></i>
-                <div class="connection-line"></div>
-                <i class="fa-solid fa-window-restore"></i>
-            </div>
-            
-            <h2>啟動 PyQt6 桌面端</h2>
-            <p class="adv-desc">
-                啟動原生的 PyQt6 桌面應用程式，享受完全去背的懸浮歌詞視窗，並且支援手動點擊修正漢字假名 (Furigana)。
-            </p>
-            
-            <div class="action-zone">
-                <button class="launch-btn" id="launch-desktop-btn" onclick="launchPyQt6()">
-                    <i class="fa-solid fa-rocket"></i> 啟動 PyQt6 桌面端
-                </button>
-                <div id="launch-status" class="launch-status-log"></div>
-            </div>
-        </div>
-    </div>
-</div>
+
 
 <style>
     .status-banner {
@@ -133,7 +105,10 @@
         70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
         100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
     }
-    .lyrics-line { font-size: 22px; margin-bottom: 8px; }
+    .lyrics-line { font-size: var(--lyrics-fs, 22px); margin-bottom: 8px; transition: font-size 0.3s; }
+    .lyrics-line.active { font-size: calc(var(--lyrics-fs, 22px) + 6px); font-weight: bold; }
+    ruby { ruby-align: center; }
+    rt { font-size: 14px; color: #a5b4fc; transform: translateY(-2px); }
 </style>
 
 <script src="/js/app.js"></script>

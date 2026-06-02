@@ -17,7 +17,7 @@ from winrt.windows.storage.streams import DataReader
 # =========================================================================
 
 from PyQt6.QtCore import (Qt, QThread, pyqtSignal, QParallelAnimationGroup, 
-                          QPropertyAnimation, QEasingCurve, QAbstractAnimation, QTimer, QPoint, QEvent)
+                          QPropertyAnimation, QEasingCurve, QAbstractAnimation, QTimer, QPoint, QEvent, QFileSystemWatcher)
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
                              QMenu, QFileDialog, QInputDialog, QFrame, 
                              QPushButton, QScrollArea, QGraphicsOpacityEffect, 
@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLa
 from PyQt6.QtGui import QFont, QAction, QPixmap, QImage, QColor
 
 from utils import romaji_to_hiragana, text_to_romaji_query, kks
-from config import config, DB_FILE
+from config import config, DB_FILE, SETTINGS_FILE
 from media import MediaWorker
 from fetcher import LyricsFetcher
 
@@ -143,6 +143,9 @@ class FloatingLyricsApp(QWidget):
         self.init_ui()
         self.init_tray() 
         self.apply_mode_styles()
+        
+        self.settings_watcher = QFileSystemWatcher([os.path.abspath(SETTINGS_FILE)])
+        self.settings_watcher.fileChanged.connect(self.reload_settings_from_file)
         
         self.font_update_timer = QTimer(self)
         self.font_update_timer.setSingleShot(True)
@@ -272,9 +275,17 @@ class FloatingLyricsApp(QWidget):
     def apply_font_size_change(self):
         fs = self.settings.get("font_size", 28)
         ff = self.settings.get("font_family", "Microsoft JhengHei")
+        show_furigana = str(self.settings.get("show_furigana", "true")).lower() != "false"
+        
         for i, item in enumerate(self.lyric_labels):
             label = item['label']
             html = self.lyrics_data[i][1]
+            
+            if not show_furigana:
+                clean_html = re.sub(r'<rt>.*?</rt>', '', html)
+                clean_html = clean_html.replace('<ruby>', '').replace('</ruby>', '')
+                html = clean_html
+                
             label.setText(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>{html}</div>")
         
         self.content_widget.adjustSize()
@@ -283,6 +294,16 @@ class FloatingLyricsApp(QWidget):
             if scroll_target < len(self.lyric_labels):
                 target_y = self.lyric_labels[scroll_target]['wrapper'].y()
                 self.scroll_area.verticalScrollBar().setValue(target_y)
+
+    def reload_settings_from_file(self, path):
+        try:
+            self.settings = load_settings()
+            self.apply_font_size_change()
+            
+            if SETTINGS_FILE not in self.settings_watcher.files():
+                self.settings_watcher.addPath(os.path.abspath(SETTINGS_FILE))
+        except Exception as e:
+            print("Failed to reload settings:", e)
 
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
@@ -656,7 +677,13 @@ A：點擊右上角的「✕」只會將視窗隱藏至背景。若要完全退�
                     label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
                     label.customContextMenuRequested.connect(lambda pos, w=wrapper: self.show_settings_menu(pos=w.mapToGlobal(pos)))
                     
-                    label.setText(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>{furigana_html}</div>")
+                    show_furigana = str(self.settings.get("show_furigana", "true")).lower() != "false"
+                    if not show_furigana:
+                        clean_html = re.sub(r'<rt>.*?</rt>', '', furigana_html)
+                        clean_html = clean_html.replace('<ruby>', '').replace('</ruby>', '')
+                        label.setText(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>{clean_html}</div>")
+                    else:
+                        label.setText(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>{furigana_html}</div>")
                     wl.addWidget(label)
                     
                     effect = QGraphicsOpacityEffect(wrapper)
@@ -773,7 +800,7 @@ A：點擊右上角的「✕」只會將視窗隱藏至背景。若要完全退�
         
         menu.addAction("操作說明", self.show_help_dialog)
         
-        pin_action = QAction("取消釘選視窗" if self.settings.get("pin_window") else "釘選視窗", self)
+        pin_action = QAction("取消釘選視窗" if self.settings.get("pin_window", True) else "釘選視窗", self)
         pin_action.triggered.connect(self.toggle_pin_window)
         menu.addAction(pin_action)
         menu.addSeparator()
@@ -815,7 +842,7 @@ A：點擊右上角的「✕」只會將視窗隱藏至背景。若要完全退�
             else: menu.exec(self.mapToGlobal(self.rect().center()))
 
     def toggle_pin_window(self):
-        self.settings["pin_window"] = not self.settings.get("pin_window", False)
+        self.settings["pin_window"] = not self.settings.get("pin_window", True)
         save_settings(self.settings)
         if self.settings.get("pin_window"):
             self.hide_timer.stop()

@@ -77,14 +77,19 @@ function startMediaMonitor() {
     env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
   });
   
+  let stdoutBuffer = '';
+
   monitorProcess.stdout.on('data', (data) => {
-    const lines = data.toString('utf-8').split('\n');
+    stdoutBuffer += data.toString('utf-8');
+    const lines = stdoutBuffer.split('\n');
+    stdoutBuffer = lines.pop(); // Keep the last incomplete part in the buffer
+    
     for (const line of lines) {
       if (line.trim()) {
         try {
           currentMediaState = JSON.parse(line.trim());
         } catch (e) {
-          // ignore parsing errors from partial lines
+          // ignore parsing errors
         }
       }
     }
@@ -126,8 +131,77 @@ app.get('/editor', (req, res) => {
 // REST APIs
 // 1. Get current media state
 app.get('/api/current-media', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.json(currentMediaState);
 });
+
+const SETTINGS_FILE = path.join(PARENT_DIR, 'settings.json');
+
+app.get('/api/settings', (req, res) => {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
+      res.json(JSON.parse(data));
+    } else {
+      res.json({});
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/settings', (req, res) => {
+  try {
+    let currentSettings = {};
+    if (fs.existsSync(SETTINGS_FILE)) {
+      currentSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    }
+    const newSettings = { ...currentSettings, ...req.body };
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 4), 'utf8');
+    res.json({ success: true, settings: newSettings });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+function injectFurigana(artist, title, lyrics) {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(PARENT_DIR, 'furigana_inject.py');
+    const venvPythonPath = path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe');
+    const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
+    
+    if (!fs.existsSync(scriptPath)) {
+      return resolve(lyrics);
+    }
+    
+    const pyProcess = spawn(pythonCmd, [scriptPath], {
+      cwd: PARENT_DIR,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    });
+    
+    let output = '';
+    pyProcess.stdout.on('data', (data) => { output += data.toString('utf-8'); });
+    
+    pyProcess.on('close', (code) => {
+      try {
+        const parsed = JSON.parse(output);
+        if (parsed.success && parsed.lyrics) {
+          resolve(parsed.lyrics);
+        } else {
+          resolve(lyrics);
+        }
+      } catch (e) {
+        console.error('Error parsing furigana output:', e);
+        resolve(lyrics);
+      }
+    });
+    
+    pyProcess.stdin.write(JSON.stringify({ artist, title, lyrics }));
+    pyProcess.stdin.end();
+  });
+}
 
 // 2. Fetch lyrics (checks DB, if missing fetches from lrclib)
 app.get('/api/lyrics/fetch', async (req, res) => {
@@ -139,7 +213,8 @@ app.get('/api/lyrics/fetch', async (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     
     if (row && row.lyrics) {
-      return res.json({ lyrics: row.lyrics, source: 'cache' });
+      const injected = await injectFurigana(artist, title, row.lyrics);
+      return res.json({ lyrics: injected, source: 'cache' });
     }
     
     // 2. Not in DB, fetch from lrclib
@@ -155,7 +230,8 @@ app.get('/api/lyrics/fetch', async (req, res) => {
         // Save to DB
         if (bestLyric) {
           db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, bestLyric]);
-          return res.json({ lyrics: bestLyric, source: 'lrclib' });
+          const injected = await injectFurigana(artist, title, bestLyric);
+          return res.json({ lyrics: injected, source: 'lrclib' });
         }
       }
       return res.json({ lyrics: "", source: 'not_found' });
@@ -340,12 +416,16 @@ app.get('/api/leaderboard', (req, res) => {
 app.post('/api/launch-pyqt6', (req, res) => {
   try {
     const mainPyPath = path.join(PARENT_DIR, 'main.py');
-    const venvPythonPath = path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe');
+    const venvPythonPath = path.join(PARENT_DIR, 'venv', 'Scripts', 'pythonw.exe');
     
     if (!fs.existsSync(mainPyPath)) return res.status(404).json({ error: 'main.py not found' });
-    const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
+    const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : (fs.existsSync(path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe')) ? path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe') : 'python');
     
-    const child = spawn(pythonCmd, [mainPyPath], { detached: true, stdio: 'ignore', cwd: PARENT_DIR });
+    // Minimize the active window (browser) using ctypes
+    const pythonExe = fs.existsSync(path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe')) ? path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe') : 'python';
+    spawn(pythonExe, ['-c', 'import ctypes; ctypes.windll.user32.ShowWindow(ctypes.windll.user32.GetForegroundWindow(), 6)'], { windowsHide: true });
+    
+    const child = spawn(pythonCmd, [mainPyPath], { detached: true, stdio: 'ignore', cwd: PARENT_DIR, windowsHide: true });
     child.unref();
     res.json({ success: true, pid: child.pid });
   } catch (err) {

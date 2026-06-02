@@ -39,9 +39,10 @@ class SettingsManager:
             "font_family": DEFAULT_FONT_FAMILY, 
             "custom_css_path": "",
             "mini_mode": False, 
-            "dynamic_color": True, 
-            "display_lines": 2, 
-            "pin_window": False
+            "dynamic_color": True,
+            "display_lines": 2,
+            "sync_offset": 0.0,
+            "pin_window": True
         }
 
     def save_settings(self) -> None:

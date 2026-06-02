@@ -14,12 +14,35 @@
     <link rel="stylesheet" href="/css/style.css">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        (function() {
+            const theme = localStorage.getItem('theme') || 'system';
+            if (theme === 'light' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches)) {
+                document.documentElement.classList.add('light-mode');
+            }
+            const fs = localStorage.getItem('fontsize');
+            if (fs) {
+                document.documentElement.style.setProperty('--lyrics-fs', fs + 'px');
+            }
+            if (localStorage.getItem('showFurigana') === 'false') {
+                document.documentElement.classList.add('hide-furigana');
+            }
+        })();
+    </script>
 </head>
 <body>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="app-sidebar">
+            <script>
+                if (localStorage.getItem('sidebarCollapsed') === 'true') {
+                    document.getElementById('app-sidebar').classList.add('collapsed');
+                }
+            </script>
             <div class="brand">
+                <button class="hamburger-btn" onclick="toggleSidebar()">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
                 <div class="brand-icon">
                     <i class="fa-solid fa-compact-disc fa-spin-slow"></i>
                 </div>
@@ -43,11 +66,14 @@
                     <i class="fa-solid fa-pen-to-square"></i>
                     <span>歌詞編輯器</span>
                 </a>
-                <a href="/api/export-playlist" class="nav-item" download="top50_playlist.m3u">
-                    <i class="fa-solid fa-file-export"></i>
-                    <span>匯出 M3U 歌單</span>
-                </a>
             </nav>
+            
+            <div class="sidebar-bottom" id="settings-btn-container">
+                <a href="#" class="nav-item" onclick="openSettingsModal(); return false;">
+                    <i class="fa-solid fa-gear"></i>
+                    <span>設定</span>
+                </a>
+            </div>
             
             <div class="sidebar-footer">
                 <div class="version">v2.0.0 Web Premium</div>

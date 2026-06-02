@@ -2,6 +2,128 @@
         </main>
     </div>
 
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-overlay" onclick="if(event.target===this) closeSettingsModal()">
+        <div class="modal-content glass-panel settings-modal-content">
+            <!-- Settings Sidebar -->
+            <div class="settings-sidebar">
+                <div class="settings-header">
+                    <i class="fa-solid fa-gear"></i> 設定
+                </div>
+                <div class="settings-tabs">
+                    <button class="settings-tab active" onclick="switchSettingsTab('appearance', this)"><i class="fa-solid fa-palette"></i> 外觀與顯示</button>
+                    <button class="settings-tab" onclick="switchSettingsTab('lyrics', this)"><i class="fa-solid fa-music"></i> 歌詞行為</button>
+                    <button class="settings-tab" onclick="switchSettingsTab('data', this)"><i class="fa-solid fa-database"></i> 資料與匯出</button>
+                    <button class="settings-tab" onclick="switchSettingsTab('about', this)"><i class="fa-solid fa-circle-info"></i> 關於</button>
+                </div>
+            </div>
+            
+            <!-- Settings Content -->
+            <div class="settings-main">
+                <div class="settings-close-bar">
+                    <button class="close-btn" onclick="closeSettingsModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                
+                <div class="settings-body">
+                    <!-- Appearance Tab -->
+                    <div id="tab-appearance" class="settings-pane active">
+                        <h3>外觀與顯示</h3>
+                        
+                        <div class="setting-item">
+                            <div>
+                                <div class="setting-title">整體外觀</div>
+                                <div class="setting-desc">選擇明亮、黑暗或跟隨系統主題</div>
+                            </div>
+                            <div class="segmented-control" id="theme-segmented">
+                                <button class="segment-btn active" data-theme="system" onclick="changeTheme('system', this)">系統</button>
+                                <button class="segment-btn" data-theme="light" onclick="changeTheme('light', this)">淺色</button>
+                                <button class="segment-btn" data-theme="dark" onclick="changeTheme('dark', this)">深色</button>
+                            </div>
+                        </div>
+
+                        <div class="setting-item">
+                            <div>
+                                <div class="setting-title">顯示日文假名</div>
+                                <div class="setting-desc">在漢字上方標示平假名注音</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-furigana" onchange="updateFuriganaSetting(this.checked)" checked>
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-item">
+                            <div>
+                                <div class="setting-title">基本字體大小</div>
+                                <div class="setting-desc">調整全局歌詞的文字大小</div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <input type="range" min="14" max="32" value="22" id="setting-fontsize" oninput="updateFontSize(this.value)">
+                                <div style="display: flex; align-items: center; gap: 4px;">
+                                    <input type="number" id="fontsize-input" value="22" min="14" max="32" onchange="updateFontSize(this.value)" class="styled-input-number">
+                                    <span style="color: var(--text-secondary); font-size: 13px;">px</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Lyrics Tab -->
+                    <div id="tab-lyrics" class="settings-pane" style="display: none;">
+                        <h3>歌詞行為</h3>
+                        
+                        <div class="setting-item">
+                            <div>
+                                <div class="setting-title">自動捲動至當前行</div>
+                                <div class="setting-desc">播放時自動將正在唱的歌詞置中</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-autoscroll" checked>
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Data Tab -->
+                    <div id="tab-data" class="settings-pane" style="display: none;">
+                        <h3>資料與匯出</h3>
+                        
+                        <div class="setting-item">
+                            <div>
+                                <div class="setting-title">匯出排行榜歌單</div>
+                                <div class="setting-desc">下載包含 Top 50 歌曲的 M3U 播放清單</div>
+                            </div>
+                            <a href="/api/export-playlist" class="action-btn primary-glow" download="top50_playlist.m3u" style="text-decoration: none; padding: 8px 15px; font-size: 14px;">
+                                <i class="fa-solid fa-file-export"></i> 下載 M3U
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <!-- About Tab -->
+                    <div id="tab-about" class="settings-pane" style="display: none;">
+                        <h3>關於</h3>
+                        <div class="about-content" style="text-align: center;">
+                            <div class="app-logo">
+                                <i class="fa-solid fa-compact-disc fa-spin-pulse" style="font-size: 48px; color: var(--accent-main); margin-bottom: 15px; display: inline-block;"></i>
+                            </div>
+                            <h4 style="font-size: 20px; margin-bottom: 5px;">Floating Lyrics</h4>
+                            <p style="color: var(--text-dim); margin-bottom: 20px; font-weight: 500;">v2.0.0 (Web Edition)</p>
+                            <p style="text-align: left; padding: 0 10px;">
+                                Floating Lyrics 是一款次世代的動態歌詞顯示系統。透過 Windows 原生 API 完美捕捉音樂播放狀態，不僅提供無干擾的桌面浮動歌詞，更具備這個強大的網頁控制中心。
+                            </p>
+                            <ul style="text-align: left; padding-left: 30px; margin-top: 15px; color: var(--text-secondary); font-size: 14px; line-height: 1.8; list-style-type: none;">
+                                <li>✨ <b>即時雙向連動</b>：網頁就是你的遙控器，設定無縫同步到桌面。</li>
+                                <li>🇯🇵 <b>智慧假名標音</b>：內建系統自動為日文漢字加上精準注音。</li>
+                                <li>🎨 <b>現代化設計</b>：流暢的動畫、玻璃擬物化、與自動深淺色切換。</li>
+                                <li>📝 <b>內建歌詞編輯</b>：發現時間軸錯誤？直接在網頁版即刻修正。</li>
+                            </ul>
+                            <p style="color: var(--text-dim); margin-top: 25px;">Built with Node.js, Python, and Magic. 🚀</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Live Clock Script -->
     <script>
         function updateClock() {
@@ -13,6 +135,124 @@
         }
         setInterval(updateClock, 1000);
         updateClock();
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('app-sidebar');
+            if (sidebar) {
+                sidebar.classList.toggle('collapsed');
+                localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+            }
+        }
+        
+        function openSettingsModal() {
+            const modal = document.getElementById('settings-modal');
+            if (modal) modal.classList.add('show');
+        }
+
+        function closeSettingsModal() {
+            const modal = document.getElementById('settings-modal');
+            if (modal) modal.classList.remove('show');
+        }
+        
+        async function saveSettingsToServer(key, val) {
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ [key]: val })
+                });
+            } catch (e) { console.error(e); }
+        }
+        
+        function updateFuriganaSetting(checked) {
+            localStorage.setItem('showFurigana', checked);
+            if (checked) {
+                document.documentElement.classList.remove('hide-furigana');
+            } else {
+                document.documentElement.classList.add('hide-furigana');
+            }
+            saveSettingsToServer('show_furigana', checked);
+        }
+
+        function updateFontSize(val) {
+            let num = parseInt(val);
+            if (isNaN(num)) num = 22;
+            num = Math.max(14, Math.min(32, num));
+            
+            document.documentElement.style.setProperty('--lyrics-fs', num + 'px');
+            localStorage.setItem('fontsize', num);
+            
+            const slider = document.getElementById('setting-fontsize');
+            if (slider && slider.value != num) slider.value = num;
+            
+            const input = document.getElementById('fontsize-input');
+            if (input && input.value != num) input.value = num;
+            
+            saveSettingsToServer('font_size', num);
+        }
+
+        function switchSettingsTab(tabId, btn) {
+            document.querySelectorAll('.settings-pane').forEach(p => p.style.display = 'none');
+            document.getElementById('tab-' + tabId).style.display = 'block';
+            
+            document.querySelectorAll('.settings-tab').forEach(b => b.classList.remove('active'));
+            if(btn) btn.classList.add('active');
+        }
+        
+        function changeTheme(themeValue, btn) {
+            localStorage.setItem('theme', themeValue);
+            applyTheme(themeValue);
+            
+            if (btn) {
+                const group = btn.parentElement;
+                group.querySelectorAll('.segment-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            } else {
+                document.querySelectorAll('#theme-segmented .segment-btn').forEach(b => {
+                    if (b.dataset.theme === themeValue) b.classList.add('active');
+                    else b.classList.remove('active');
+                });
+            }
+        }
+
+        function applyTheme(theme) {
+            if (theme === 'light' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches)) {
+                document.documentElement.classList.add('light-mode');
+            } else {
+                document.documentElement.classList.remove('light-mode');
+            }
+        }
+        
+        window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', e => {
+            const currentTheme = localStorage.getItem('theme') || 'system';
+            if (currentTheme === 'system') {
+                applyTheme('system');
+            }
+        });
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const sidebar = document.getElementById('app-sidebar');
+            if (sidebar && localStorage.getItem('sidebarCollapsed') === 'true') {
+                sidebar.classList.add('collapsed');
+            }
+            
+            const savedTheme = localStorage.getItem('theme') || 'system';
+            document.querySelectorAll('#theme-segmented .segment-btn').forEach(b => {
+                if (b.dataset.theme === savedTheme) b.classList.add('active');
+                else b.classList.remove('active');
+            });
+            
+            const savedFs = localStorage.getItem('fontsize') || 22;
+            const fsSlider = document.getElementById('setting-fontsize');
+            if (fsSlider) fsSlider.value = savedFs;
+            const fsInput = document.getElementById('fontsize-input');
+            if (fsInput) fsInput.value = savedFs;
+            
+            const showFurigana = localStorage.getItem('showFurigana') !== 'false';
+            const fToggle = document.getElementById('setting-furigana');
+            if (fToggle) fToggle.checked = showFurigana;
+            if (!showFurigana) document.documentElement.classList.add('hide-furigana');
+        });
     </script>
 </body>
 </html>

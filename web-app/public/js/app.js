@@ -5,31 +5,15 @@ let activeLyricIndex = -1;
 let songDurationSeconds = 180; // Estimated or default
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Start polling the system media every 500ms
-    setInterval(pollSystemMedia, 500);
+    // Start polling the system media every 100ms for smooth updates
+    setInterval(pollSystemMedia, 100);
     
     // Initial load and auto refresh of sidebar leaderboard
     loadSidebarLeaderboard();
     setInterval(loadSidebarLeaderboard, 15000);
 });
 
-function switchMode(mode) {
-    const tabs = document.querySelectorAll('.mode-tab');
-    tabs.forEach(t => t.classList.remove('active'));
-    
-    const webSec = document.getElementById('web-mode-sec');
-    const advSec = document.getElementById('desktop-mode-sec');
-    
-    if (mode === 'web') {
-        tabs[0].classList.add('active');
-        webSec.classList.remove('hidden');
-        advSec.classList.add('hidden');
-    } else {
-        tabs[1].classList.add('active');
-        webSec.classList.add('hidden');
-        advSec.classList.remove('hidden');
-    }
-}
+
 
 function showToast(message, iconClass = 'fa-solid fa-circle-info', duration = 3500) {
     const toast = document.getElementById('toast');
@@ -41,12 +25,21 @@ function showToast(message, iconClass = 'fa-solid fa-circle-info', duration = 35
     setTimeout(() => toast.classList.add('hidden'), duration);
 }
 
+function reloadCurrentLyrics() {
+    if (lastMediaTitle) {
+        showToast(`重新載入: ${lastMediaTitle}`, 'fa-solid fa-rotate', 2000);
+        fetchAndParseLyrics(lastMediaTitle, lastMediaArtist);
+    } else {
+        showToast('目前沒有播放任何歌曲', 'fa-solid fa-circle-exclamation', 2000);
+    }
+}
+
 // -------------------------------------------------------------
 // Live Sync Logic
 // -------------------------------------------------------------
 async function pollSystemMedia() {
     try {
-        const resp = await fetch('/api/current-media');
+        const resp = await fetch('/api/current-media', { cache: 'no-store' });
         if (!resp.ok) return;
         const data = await resp.json();
         
@@ -70,6 +63,13 @@ async function pollSystemMedia() {
             
             document.getElementById('current-title').textContent = data.title;
             document.getElementById('current-artist').textContent = data.artist || 'Unknown Artist';
+            
+            const coverImg = document.getElementById('album-cover');
+            if (data.thumbnail) {
+                coverImg.src = 'data:image/jpeg;base64,' + data.thumbnail;
+            } else {
+                coverImg.src = 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=300&auto=format&fit=crop';
+            }
             
             fetchAndParseLyrics(data.title, data.artist);
             loadSidebarLeaderboard();
@@ -160,7 +160,7 @@ function renderLyrics() {
     }
     
     pane.innerHTML = parsedLyrics.map((lyric, index) => {
-        return `<div class="lyrics-line" id="lyric-line-${index}">${escapeHtml(lyric.text)}</div>`;
+        return `<div class="lyrics-line" id="lyric-line-${index}">${lyric.text}</div>`;
     }).join('');
     activeLyricIndex = -1;
 }
@@ -220,33 +220,28 @@ function syncLyricsToTime(position) {
 // -------------------------------------------------------------
 async function launchPyQt6() {
     const btn = document.getElementById('launch-desktop-btn');
-    const log = document.getElementById('launch-status');
-    btn.setAttribute('disabled', 'true');
-    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 正在啟動桌面程式...`;
-    log.style.display = 'block';
-    log.textContent = '> initializing PyQt6 child process...';
+    if (btn) {
+        btn.setAttribute('disabled', 'true');
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 正在啟動...`;
+    }
     
     try {
         const resp = await fetch('/api/launch-pyqt6', { method: 'POST' });
         const result = await resp.json();
         
         if (resp.ok && result.success) {
-            log.textContent = `> SUCCESS: PyQt6 desktop launched. (PID: ${result.pid})`;
-            log.style.color = '#34d399';
-            showToast('PyQt6 桌面版程式已成功啟動！', 'fa-solid fa-rocket');
+            showToast('桌面版已成功啟動！', 'fa-solid fa-rocket');
         } else {
-            log.textContent = `> ERROR: ${result.error || 'Launch failed.'}`;
-            log.style.color = '#f87171';
             showToast('啟動桌面版失敗。', 'fa-solid fa-circle-xmark');
         }
     } catch (err) {
-        log.textContent = `> ERROR: Connection failed.`;
-        log.style.color = '#f87171';
         showToast('連線失敗。', 'fa-solid fa-circle-xmark');
     } finally {
         setTimeout(() => {
-            btn.removeAttribute('disabled');
-            btn.innerHTML = `<i class="fa-solid fa-rocket"></i> 啟動 PyQt6 桌面端`;
+            if (btn) {
+                btn.removeAttribute('disabled');
+                btn.innerHTML = `<i class="fa-solid fa-desktop"></i> 桌面版`;
+            }
         }, 1500);
     }
 }
