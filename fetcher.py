@@ -1,6 +1,7 @@
 import re
 import requests
 import logging
+import syncedlyrics
 from PyQt6.QtCore import QThread, pyqtSignal
 from utils import text_to_romaji_query
 from db import db
@@ -71,8 +72,15 @@ class LyricsFetcher(QThread):
                                 for qt, qa in self.generate_queries(jp_title, jp_artist):
                                     best_lyric, options = self.search_lrclib(qt, qa)
                                     if best_lyric: break
+                    
+                    if not best_lyric:
+                        fallback_lyric = syncedlyrics.search(f"{clean_title} {self.artist}", providers=["NetEase", "Megalobiz", "Musixmatch"])
+                        if fallback_lyric:
+                            best_lyric = fallback_lyric
+                            options = [{'title': clean_title, 'artist': self.artist, 'lyrics': fallback_lyric}]
+
                 except Exception as e:
-                    logging.warning(f"iTunes API 請求失敗: {e}")
+                    logging.warning(f"iTunes/syncedlyrics API 請求失敗: {e}")
 
             if best_lyric and not cached_lyric:
                 db.save_cached_lyrics(self.artist, self.title, best_lyric)
@@ -95,13 +103,14 @@ class LyricsFetcher(QThread):
                 data = response.json()
                 valid_lyrics = []
                 for t in data:
-                    if t.get("syncedLyrics"):
+                    best_lyric = t.get("syncedLyrics") or t.get("plainLyrics")
+                    if best_lyric:
                         valid_lyrics.append({
                             'title': t.get('trackName', ''),
                             'artist': t.get('artistName', ''),
                             'album': t.get('albumName', ''),
                             'duration': t.get('duration', 0),
-                            'lyrics': t.get("syncedLyrics")
+                            'lyrics': best_lyric
                         })
                         
                 if valid_lyrics:
@@ -124,6 +133,18 @@ class LyricsFetcher(QThread):
                             
                         if re.search(r'[\u3040-\u30FF]', item['lyrics']):
                             score += 100
+                            
+                        # Penalize translation or romanized versions
+                        penalty_keywords = ['translated', 'translation', 'romanized', '翻譯', '中文版', 'english version']
+                        if any(kw in item_title for kw in penalty_keywords):
+                            score -= 800
+                        if any(kw in item['album'].lower() for kw in penalty_keywords):
+                            score -= 500
+                            
+                        # Penalize if lyrics text explicitly marks itself as translation or romanized
+                        lower_lyrics = item['lyrics'].lower()
+                        if 'english translation' in lower_lyrics or 'romanized' in lower_lyrics or 'translation by' in lower_lyrics:
+                            score -= 800
                             
                         return score
 

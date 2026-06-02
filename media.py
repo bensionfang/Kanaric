@@ -18,6 +18,8 @@ class MediaWorker(QThread):
         sessions = await GlobalSystemMediaTransportControlsSessionManager.request_async()
         last_real_pos = -1.0
         last_real_pos_time = time.time()
+        last_song_id = ""
+        last_thumb_bytes = b''
         
         while True:
             current_session = sessions.get_current_session()
@@ -32,23 +34,29 @@ class MediaWorker(QThread):
                 real_pos = timeline.position.total_seconds() if timeline else 0.0
                 is_playing = (playback_info and playback_info.playback_status == 4) 
                 
-                thumb_bytes = b''
-                if info.thumbnail:
-                    try:
-                        stream = await info.thumbnail.open_read_async()
-                        reader = DataReader(stream)
-                        await reader.load_async(stream.size)
-                        buf = bytearray(stream.size)
-                        reader.read_bytes(buf)
-                        thumb_bytes = bytes(buf)
-                    except Exception as e:
-                        pass # Exception on thumbnails is common and often ignorable
+                song_id = f"{title}-{artist}"
+                if song_id != last_song_id:
+                    last_song_id = song_id
+                    last_thumb_bytes = b''
+                    if info.thumbnail:
+                        try:
+                            stream = await info.thumbnail.open_read_async()
+                            reader = DataReader(stream)
+                            await reader.load_async(stream.size)
+                            buf = bytearray(stream.size)
+                            reader.read_bytes(buf)
+                            last_thumb_bytes = bytes(buf)
+                        except Exception as e:
+                            pass
+                
+                thumb_bytes = last_thumb_bytes
 
                 current_time = time.time()
                 if real_pos != last_real_pos:
                     last_real_pos = real_pos
-                    last_real_pos_time = current_time
-                    interpolated_pos = real_pos
+                    # Use the exact OS timestamp when this position was valid
+                    last_real_pos_time = timeline.last_updated_time.timestamp() if timeline else current_time
+                    interpolated_pos = real_pos + (current_time - last_real_pos_time) if is_playing else real_pos
                 else:
                     interpolated_pos = real_pos + (current_time - last_real_pos_time) if is_playing else real_pos
                         

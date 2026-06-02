@@ -45,8 +45,8 @@ async def poll_media():
                 current_time = time.time()
                 if real_pos != last_real_pos:
                     last_real_pos = real_pos
-                    last_real_pos_time = current_time
-                    interpolated_pos = real_pos
+                    last_real_pos_time = timeline.last_updated_time.timestamp() if timeline else current_time
+                    interpolated_pos = real_pos + (current_time - last_real_pos_time) if is_playing else real_pos
                 else:
                     interpolated_pos = real_pos + (current_time - last_real_pos_time) if is_playing else real_pos
                 

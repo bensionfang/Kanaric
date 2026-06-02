@@ -77,9 +77,42 @@
                                 <div class="setting-desc">播放時自動將正在唱的歌詞置中</div>
                             </div>
                             <label class="toggle-switch">
-                                <input type="checkbox" id="setting-autoscroll" checked>
+                                <input type="checkbox" id="setting-autoscroll" onchange="saveSettings()" checked>
                                 <span class="slider round"></span>
                             </label>
+                        </div>
+                        
+                        <div class="setting-item" style="display: block; margin-top: 20px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <div>
+                                    <div class="setting-title">快捷鍵微調功能</div>
+                                    <div class="setting-desc">啟用後可用快捷鍵微調時間軸或切換純文字歌詞</div>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="hotkeys-enable" onchange="saveSettings()">
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                            
+                            <div style="background: var(--bg-main); padding: 12px; border-radius: 8px; border: 1px solid var(--panel-border);">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
+                                    <span style="font-size: 13px; color: var(--text-secondary);">歌詞提早 0.5 秒</span>
+                                    <input type="text" id="hk-advance" class="styled-input" readonly onclick="recordHotkey(this, 'hk-advance')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
+                                    <span style="font-size: 13px; color: var(--text-secondary);">歌詞延遲 0.5 秒</span>
+                                    <input type="text" id="hk-delay" class="styled-input" readonly onclick="recordHotkey(this, 'hk-delay')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
+                                    <span style="font-size: 13px; color: var(--text-secondary);">純文字上一句</span>
+                                    <input type="text" id="hk-plain-prev" class="styled-input" readonly onclick="recordHotkey(this, 'hk-plain-prev')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
+                                    <span style="font-size: 13px; color: var(--text-secondary);">純文字下一句</span>
+                                    <input type="text" id="hk-plain-next" class="styled-input" readonly onclick="recordHotkey(this, 'hk-plain-next')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
+                                </div>
+                                <div style="margin-top: 8px; font-size: 11px; color: var(--text-secondary); text-align: center;">* 點擊輸入框綁定，按 ESC 可取消。</div>
+                            </div>
                         </div>
                     </div>
 

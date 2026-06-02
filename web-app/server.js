@@ -30,6 +30,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
+// Python Environment Detection
+const venvPythonPath = path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe');
+const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
+
 // Database initialization
 console.log(`Connecting to SQLite database at: ${DB_PATH}`);
 const db = new sqlite3.Database(DB_PATH, (err) => {
@@ -50,11 +54,7 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
     `, () => {
       // Alter table to add album column if it doesn't exist
       db.run('ALTER TABLE listening_history ADD COLUMN album TEXT', (err) => {
-        if (err) {
-          // Column already exists, ignore
-        } else {
-          console.log('✓ Added album column to listening_history');
-        }
+        if (!err) console.log('✓ Added album column to listening_history');
       });
     });
   }
@@ -63,8 +63,6 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 // Start Media Monitor Bridge
 function startMediaMonitor() {
   const monitorScript = path.join(PARENT_DIR, 'media_monitor.py');
-  const venvPythonPath = path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe');
-  const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
   
   if (!fs.existsSync(monitorScript)) {
     console.error('media_monitor.py not found at', monitorScript);
@@ -78,6 +76,7 @@ function startMediaMonitor() {
   });
   
   let stdoutBuffer = '';
+  let lastPlayedSongId = '';
 
   monitorProcess.stdout.on('data', (data) => {
     stdoutBuffer += data.toString('utf-8');
@@ -87,7 +86,23 @@ function startMediaMonitor() {
     for (const line of lines) {
       if (line.trim()) {
         try {
-          currentMediaState = JSON.parse(line.trim());
+          const state = JSON.parse(line.trim());
+          currentMediaState = state;
+          
+          if (state.is_playing && state.title && state.artist) {
+            const songId = `${state.title}-${state.artist}`;
+            if (songId !== lastPlayedSongId) {
+              lastPlayedSongId = songId;
+              // default duration 180s since monitor doesn't provide it yet
+              db.run(
+                'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
+                [state.artist, state.title, state.album || null, 180]
+              );
+            }
+          } else if (!state.is_playing && !state.title) {
+            // reset if nothing is playing to allow tracking same song if played again later
+            lastPlayedSongId = '';
+          }
         } catch (e) {
           // ignore parsing errors
         }
@@ -169,8 +184,6 @@ app.post('/api/settings', (req, res) => {
 function injectFurigana(artist, title, lyrics) {
   return new Promise((resolve) => {
     const scriptPath = path.join(PARENT_DIR, 'furigana_inject.py');
-    const venvPythonPath = path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe');
-    const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
     
     if (!fs.existsSync(scriptPath)) {
       return resolve(lyrics);
@@ -203,10 +216,124 @@ function injectFurigana(artist, title, lyrics) {
   });
 }
 
+function fetchFallback(title, artist) {
+  return new Promise((resolve) => {
+    const pyProcess = spawn(pythonCmd, ['search_fallback.py', title, artist], {
+      cwd: PARENT_DIR,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    });
+    
+    let output = '';
+    pyProcess.stdout.on('data', (data) => { output += data.toString('utf-8'); });
+    
+    pyProcess.on('close', () => {
+      try {
+        const parsed = JSON.parse(output);
+        if (parsed.success && parsed.lyrics) {
+          resolve(parsed.lyrics);
+        } else {
+          resolve("");
+        }
+      } catch (e) {
+        resolve("");
+      }
+    });
+  });
+}
+
+// 1.5 Update Furigana Correction
+app.post('/api/furigana/correct', (req, res) => {
+  const { artist, title, orig, hira } = req.body;
+  if (!artist || !title || !orig) return res.status(400).json({ error: 'Missing parameters' });
+  
+  let finalHira = hira || '';
+  if (finalHira) {
+    const pyProcess = spawn(pythonCmd, ['-c', 'import sys, jaconv; print(jaconv.alphabet2kana(sys.argv[1]))', finalHira]);
+    
+    let out = '';
+    pyProcess.stdout.on('data', (d) => out += d.toString());
+    pyProcess.on('close', () => {
+      finalHira = out.trim();
+      saveCorrection();
+    });
+  } else {
+    saveCorrection();
+  }
+
+  function saveCorrection() {
+    db.run(
+      'INSERT OR REPLACE INTO word_corrections (artist, title, word, hira) VALUES (?, ?, ?, ?)',
+      [artist, title, orig, finalHira],
+      (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true, hira: finalHira });
+      }
+    );
+  }
+});
+
 // 2. Fetch lyrics (checks DB, if missing fetches from lrclib)
-app.get('/api/lyrics/fetch', async (req, res) => {
+
+app.get('/api/lyrics/offset', (req, res) => {
   const { title, artist } = req.query;
+  if (!title || !artist) return res.status(400).json({ error: 'Missing parameters' });
+  db.get('SELECT offset FROM sync_offsets WHERE title = ? AND artist = ?', [title, artist], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ offset: row ? row.offset : 0.0 });
+  });
+});
+
+app.post('/api/lyrics/offset', (req, res) => {
+  const { title, artist, offset } = req.body;
+  if (!title || !artist || typeof offset !== 'number') return res.status(400).json({ error: 'Missing parameters' });
+  db.run('INSERT OR REPLACE INTO sync_offsets (artist, title, offset) VALUES (?, ?, ?)', [artist, title, offset], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true, offset });
+  });
+});
+
+app.get('/api/lyrics/fetch', async (req, res) => {
+  const { title, artist, force, searchTitle, searchArtist } = req.query;
   if (!title || !artist) return res.status(400).json({ error: 'Title and artist are required' });
+  
+  const performFetch = async () => {
+    // 2. Not in DB or force fetch, fetch from lrclib
+    try {
+      const qTitle = searchTitle || title;
+      const qArtist = searchArtist || artist;
+      
+      const cleanTitle = qTitle.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
+      const apiUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(qArtist)}&track_name=${encodeURIComponent(cleanTitle)}`;
+      
+      const lrclibResp = await fetch(apiUrl);
+      let bestLyric = "";
+      if (lrclibResp.ok) {
+        const data = await lrclibResp.json();
+        bestLyric = data.syncedLyrics || data.plainLyrics || "";
+      }
+      
+      // Fallback to syncedlyrics
+      if (!bestLyric) {
+        bestLyric = await fetchFallback(cleanTitle, qArtist);
+      }
+      
+      // Save to DB under ORIGINAL title/artist
+      if (bestLyric) {
+        db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, bestLyric]);
+        const injected = await injectFurigana(artist, title, bestLyric);
+        return res.json({ lyrics: injected, source: 'lrclib' });
+      }
+      
+      return res.json({ lyrics: "", source: 'not_found' });
+    } catch (e) {
+      console.error('Error fetching lyrics:', e);
+      return res.json({ lyrics: "", source: 'error' });
+    }
+  };
+
+  if (force === 'true') {
+    return performFetch();
+  }
   
   // 1. Check DB first
   db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
@@ -217,29 +344,96 @@ app.get('/api/lyrics/fetch', async (req, res) => {
       return res.json({ lyrics: injected, source: 'cache' });
     }
     
-    // 2. Not in DB, fetch from lrclib
-    try {
-      const cleanTitle = title.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
-      const apiUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(cleanTitle)}`;
-      
-      const lrclibResp = await fetch(apiUrl);
-      if (lrclibResp.ok) {
-        const data = await lrclibResp.json();
-        const bestLyric = data.syncedLyrics || data.plainLyrics || "";
-        
-        // Save to DB
-        if (bestLyric) {
-          db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, bestLyric]);
-          const injected = await injectFurigana(artist, title, bestLyric);
-          return res.json({ lyrics: injected, source: 'lrclib' });
-        }
-      }
-      return res.json({ lyrics: "", source: 'not_found' });
-    } catch (e) {
-      console.error('Error fetching lyrics from lrclib:', e);
-      return res.json({ lyrics: "", source: 'error' });
-    }
+// Not found, fetch
+    return performFetch();
   });
+});
+
+app.get('/api/lyrics/options', async (req, res) => {
+  const { title, artist } = req.query;
+  if (!title || !artist) return res.status(400).json({ error: 'Title and artist are required' });
+  
+  try {
+    const cleanTitle = title.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
+    const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' ' + artist)}`;
+    
+    const resp = await fetch(searchUrl);
+    if (!resp.ok) return res.json({ options: [] });
+    
+    const data = await resp.json();
+    let valid_lyrics = [];
+    
+    for (const t of data) {
+      const best = t.syncedLyrics || t.plainLyrics;
+      if (best) {
+        valid_lyrics.push({
+          title: t.trackName || '',
+          artist: t.artistName || '',
+          album: t.albumName || '',
+          duration: t.duration || 0,
+          lyrics: best
+        });
+      }
+    }
+    
+    // Scoring logic (matching python fetcher.py)
+    const penalty_keywords = ['translated', 'translation', 'romanized', '翻譯', '中文版', 'english version'];
+    valid_lyrics.forEach(item => {
+      let score = 0;
+      const iTitle = item.title.toLowerCase();
+      const iArtist = item.artist.toLowerCase();
+      const tTitle = cleanTitle.toLowerCase();
+      const tArtist = artist.toLowerCase();
+      
+      if (tTitle === iTitle) score += 1000;
+      else if (iTitle.includes(tTitle) || tTitle.includes(iTitle)) score += 500;
+      
+      if (tArtist === iArtist) score += 500;
+      else if (iArtist.includes(tArtist) || tArtist.includes(iArtist)) score += 200;
+      
+      if (/[\u3040-\u30FF]/.test(item.lyrics)) score += 100;
+      
+      if (penalty_keywords.some(kw => iTitle.includes(kw))) score -= 800;
+      if (penalty_keywords.some(kw => item.album.toLowerCase().includes(kw))) score -= 500;
+      
+      const lowerLyrics = item.lyrics.toLowerCase();
+      if (lowerLyrics.includes('english translation') || lowerLyrics.includes('romanized') || lowerLyrics.includes('translation by')) score -= 800;
+      
+      item.score = score;
+    });
+    
+    valid_lyrics.sort((a, b) => b.score - a.score);
+    const top5 = valid_lyrics.slice(0, 5).map(x => ({
+      title: x.title,
+      artist: x.artist,
+      album: x.album,
+      duration: x.duration,
+      lyrics: x.lyrics,
+      score: x.score
+    }));
+    
+    res.json({ options: top5 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/lyrics/custom', async (req, res) => {
+  const { title, artist, lyrics } = req.body;
+  if (!title || !artist || !lyrics) return res.status(400).json({ error: 'Missing parameters' });
+  
+  try {
+    await new Promise((resolve, reject) => {
+      db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, lyrics], function(err) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    const injected = await injectFurigana(artist, title, lyrics);
+    res.json({ success: true, lyrics: injected });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // 3. Get all cached songs
@@ -416,16 +610,15 @@ app.get('/api/leaderboard', (req, res) => {
 app.post('/api/launch-pyqt6', (req, res) => {
   try {
     const mainPyPath = path.join(PARENT_DIR, 'main.py');
-    const venvPythonPath = path.join(PARENT_DIR, 'venv', 'Scripts', 'pythonw.exe');
-    
     if (!fs.existsSync(mainPyPath)) return res.status(404).json({ error: 'main.py not found' });
-    const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : (fs.existsSync(path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe')) ? path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe') : 'python');
+    
+    const venvPythonW = path.join(PARENT_DIR, 'venv', 'Scripts', 'pythonw.exe');
+    const launchCmd = fs.existsSync(venvPythonW) ? venvPythonW : pythonCmd;
     
     // Minimize the active window (browser) using ctypes
-    const pythonExe = fs.existsSync(path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe')) ? path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe') : 'python';
-    spawn(pythonExe, ['-c', 'import ctypes; ctypes.windll.user32.ShowWindow(ctypes.windll.user32.GetForegroundWindow(), 6)'], { windowsHide: true });
+    spawn(pythonCmd, ['-c', 'import ctypes; ctypes.windll.user32.ShowWindow(ctypes.windll.user32.GetForegroundWindow(), 6)'], { windowsHide: true });
     
-    const child = spawn(pythonCmd, [mainPyPath], { detached: true, stdio: 'ignore', cwd: PARENT_DIR, windowsHide: true });
+    const child = spawn(launchCmd, [mainPyPath], { detached: true, stdio: 'ignore', cwd: PARENT_DIR, windowsHide: true });
     child.unref();
     res.json({ success: true, pid: child.pid });
   } catch (err) {
