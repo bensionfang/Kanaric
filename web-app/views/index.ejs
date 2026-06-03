@@ -58,9 +58,23 @@
             <div class="lyrics-view-container">
                 <div class="lyrics-header">
                     <h4><i class="fa-solid fa-lines-leaning"></i> 同步歌詞</h4>
-                    <button class="reload-lyrics-btn" onclick="reloadCurrentLyrics()" title="重新載入歌詞">
-                        <i class="fa-solid fa-rotate"></i> 重新載入歌詞
-                    </button>
+                    <div>
+                        <button class="fullscreen-btn" onclick="toggleFullscreen()" title="視窗放大模式">
+                            <i class="fa-solid fa-expand icon-expand"></i>
+                            <i class="fa-solid fa-compress icon-compress"></i>
+                            <span class="text-normal">視窗放大</span>
+                            <span class="text-maximized">退出</span>
+                        </button>
+                        <button class="advanced-lyrics-btn" onclick="openLyricsModal()" title="進階歌詞選項">
+                            <i class="fa-solid fa-sliders"></i>
+                            <span>進階</span>
+                        </button>
+                        <button class="reload-lyrics-btn" onclick="reloadCurrentLyrics()" title="重新載入歌詞">
+                            <i class="fa-solid fa-rotate"></i>
+                            <span class="text-normal">重新載入歌詞</span>
+                            <span class="text-maximized">重搜</span>
+                        </button>
+                    </div>
                 </div>
                 <div class="lyrics-scroll-pane" id="lyrics-scroll" style="height: 400px; font-size: 24px;">
                     <div class="lyrics-empty" id="lyrics-placeholder">
@@ -151,5 +165,5 @@
     rt { font-size: 14px; color: #a5b4fc; transform: translateY(-2px); }
 </style>
 
-<script src="/js/app.js?v=13"></script>
+<script src="/js/app.js?v=20"></script>
 <%- include('footer') %>

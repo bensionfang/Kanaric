@@ -3,14 +3,43 @@ let lastMediaArtist = "";
 let parsedLyrics = [];
 let activeLyricIndex = -1;
 let songDurationSeconds = 180; // Estimated or default
+let isUnsyncedLyrics = false;
+
+// Client-side interpolation state
+let currentInterpolatedPosition = 0;
+let lastServerPosition = -1;
+let lastFrameTime = performance.now();
+let isCurrentlyPlaying = false;
 
 document.addEventListener('DOMContentLoaded', () => {
     // Start polling the system media every 100ms for smooth updates
     setInterval(pollSystemMedia, 100);
     
+    // High-frequency rAF loop for smooth lyrics interpolation
+    function syncLoop() {
+        const now = performance.now();
+        const dt = (now - lastFrameTime) / 1000;
+        lastFrameTime = now;
+        
+        if (isCurrentlyPlaying && parsedLyrics.length > 0) {
+            currentInterpolatedPosition += dt;
+            syncLyricsToTime(currentInterpolatedPosition);
+            updatePlaybackProgress(currentInterpolatedPosition);
+        }
+        requestAnimationFrame(syncLoop);
+    }
+    requestAnimationFrame(syncLoop);
+    
     // Initial load and auto refresh of sidebar leaderboard
     loadSidebarLeaderboard();
     setInterval(loadSidebarLeaderboard, 15000);
+
+    // Initialize zoom mode if persisted
+    if (localStorage.getItem('zoomModeActive') === 'true') {
+        document.body.classList.add('window-maximized');
+        const playerCard = document.querySelector('.player-lyrics-card');
+        if (playerCard) playerCard.classList.add('window-maximized');
+    }
 });
 
 
@@ -35,6 +64,129 @@ function reloadCurrentLyrics() {
 }
 
 // -------------------------------------------------------------
+// Advanced Lyrics Modal
+// -------------------------------------------------------------
+function openLyricsModal() {
+    const modal = document.getElementById('lyrics-options-modal');
+    modal.classList.remove('hidden');
+    modal.classList.add('show');
+    // Pre-fill manual search fields with current song
+    if (lastMediaTitle) {
+        const titleInput = document.getElementById('manual-title');
+        const artistInput = document.getElementById('manual-artist');
+        if (titleInput && !titleInput.value) titleInput.value = lastMediaTitle;
+        if (artistInput && !artistInput.value) artistInput.value = lastMediaArtist;
+    }
+}
+
+function closeLyricsModal() {
+    const modal = document.getElementById('lyrics-options-modal');
+    modal.classList.remove('show');
+    setTimeout(() => modal.classList.add('hidden'), 300);
+}
+
+async function performGetOptions() {
+    if (!lastMediaTitle) {
+        showToast('目前沒有播放任何歌曲', 'fa-solid fa-circle-exclamation', 2000);
+        return;
+    }
+    const listEl = document.getElementById('lyrics-options-list');
+    listEl.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-spinner fa-spin"></i> 搜尋中...</div>`;
+    try {
+        const resp = await fetch(`/api/lyrics/options?title=${encodeURIComponent(lastMediaTitle)}&artist=${encodeURIComponent(lastMediaArtist)}`);
+        const data = await resp.json();
+        if (!data.options || data.options.length === 0) {
+            listEl.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-face-frown"></i> 找不到備選歌詞</div>`;
+            return;
+        }
+        listEl.innerHTML = data.options.map((opt, i) => `
+            <div style="background: var(--bg-main); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px 12px; cursor: pointer; transition: border-color 0.2s; display: flex; justify-content: space-between; align-items: center;"
+                 onmouseenter="this.style.borderColor='var(--accent-main)'" onmouseleave="this.style.borderColor='var(--panel-border)'"
+                 onclick="applyLyricsOption(${i})">
+                <div style="flex: 1; min-width: 0;">
+                    <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.title}</div>
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.artist}${opt.album ? ' · ' + opt.album : ''}</div>
+                </div>
+                <div style="margin-left: 10px; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${opt.isSynced ? 'background: rgba(76, 175, 80, 0.15); color: #4caf50;' : 'background: rgba(158, 158, 158, 0.15); color: #9e9e9e;'}">
+                    ${opt.isSynced ? 'LRC' : 'TXT'}
+                </div>
+            </div>
+        `).join('');
+        // Store options for later use
+        window._lyricsOptions = data.options;
+    } catch (e) {
+        listEl.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-triangle-exclamation"></i> 載入失敗</div>`;
+    }
+}
+
+async function applyLyricsOption(index) {
+    const opt = window._lyricsOptions && window._lyricsOptions[index];
+    if (!opt) return;
+    closeLyricsModal();
+    showToast(`套用: ${opt.title}`, 'fa-solid fa-check', 2000);
+    // Save as custom lyrics for current song
+    try {
+        await fetch('/api/lyrics/custom', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: lastMediaTitle, artist: lastMediaArtist, lyrics: opt.lyrics })
+        });
+        parseLrcLyrics(opt.lyrics);
+        renderLyrics();
+    } catch (e) {
+        showToast('套用失敗', 'fa-solid fa-xmark', 2000);
+    }
+}
+
+async function performManualSearch() {
+    const title = document.getElementById('manual-title').value.trim();
+    const artist = document.getElementById('manual-artist').value.trim();
+    if (!title) { showToast('請輸入歌曲名稱', 'fa-solid fa-circle-exclamation', 2000); return; }
+    closeLyricsModal();
+    showToast(`搜尋: ${title}`, 'fa-solid fa-search', 2000);
+    try {
+        const resp = await fetch(`/api/lyrics/fetch?title=${encodeURIComponent(lastMediaTitle || title)}&artist=${encodeURIComponent(lastMediaArtist || artist)}&force=true&searchTitle=${encodeURIComponent(title)}&searchArtist=${encodeURIComponent(artist)}`);
+        const data = await resp.json();
+        if (data.lyrics) {
+            parseLrcLyrics(data.lyrics);
+            renderLyrics();
+            showToast('歌詞載入成功', 'fa-solid fa-check', 2000);
+        } else {
+            showToast('找不到歌詞', 'fa-solid fa-face-frown', 2500);
+        }
+    } catch (e) {
+        showToast('搜尋失敗', 'fa-solid fa-xmark', 2000);
+    }
+}
+
+async function performCustomLyrics() {
+    const lyricsText = document.getElementById('custom-lyrics-text').value.trim();
+    if (!lyricsText) { showToast('請貼上歌詞內容', 'fa-solid fa-circle-exclamation', 2000); return; }
+    if (!lastMediaTitle) { showToast('目前沒有播放任何歌曲', 'fa-solid fa-circle-exclamation', 2000); return; }
+    closeLyricsModal();
+    try {
+        const resp = await fetch('/api/lyrics/custom', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: lastMediaTitle, artist: lastMediaArtist, lyrics: lyricsText })
+        });
+        const data = await resp.json();
+        if (data.lyrics) {
+            parseLrcLyrics(data.lyrics);
+            renderLyrics();
+            showToast('自訂歌詞套用成功', 'fa-solid fa-check', 2000);
+        } else {
+            parseLrcLyrics(lyricsText);
+            renderLyrics();
+            showToast('歌詞套用成功', 'fa-solid fa-check', 2000);
+        }
+    } catch (e) {
+        showToast('套用失敗', 'fa-solid fa-xmark', 2000);
+    }
+}
+
+
+// -------------------------------------------------------------
 // Live Sync Logic
 // -------------------------------------------------------------
 async function pollSystemMedia() {
@@ -48,15 +200,29 @@ async function pollSystemMedia() {
         
         if (data.is_playing) {
             dot.classList.add('active');
-            statusText.textContent = `⚡ 即時同步中...`;
+            statusText.textContent = `即時同步中...`;
             document.getElementById('vinyl-disc').classList.add('playing');
         } else {
             dot.classList.remove('active');
             statusText.textContent = data.title ? `音樂已暫停` : `等待播放...`;
             document.getElementById('vinyl-disc').classList.remove('playing');
         }
-        
-        // Track changed?
+
+        // Update interpolation state from server
+        isCurrentlyPlaying = data.is_playing;
+        if (data.title) {
+            if (data.position !== lastServerPosition) {
+                const diff = data.position - currentInterpolatedPosition;
+                if (Math.abs(diff) > 1.5 || data.title !== lastMediaTitle) {
+                    // Hard sync on seek or track change
+                    currentInterpolatedPosition = data.position;
+                } else {
+                    // Smoothly correct 50% of the small drift
+                    currentInterpolatedPosition += diff * 0.5;
+                }
+                lastServerPosition = data.position;
+            }
+        }
         if (data.title && (data.title !== lastMediaTitle || data.artist !== lastMediaArtist)) {
             lastMediaTitle = data.title;
             lastMediaArtist = data.artist;
@@ -84,11 +250,7 @@ async function pollSystemMedia() {
             loadSidebarLeaderboard();
         }
         
-        // Update Progress
-        if (data.title) {
-            updatePlaybackProgress(data.position);
-            syncLyricsToTime(data.position);
-        }
+        // Progress is now handled by the rAF interpolation loop
         
     } catch (err) {
         // Ignore polling errors
@@ -124,20 +286,26 @@ async function fetchAndParseLyrics(title, artist) {
 
 function parseLrcLyrics(lrcText) {
     parsedLyrics = [];
+    isUnsyncedLyrics = false;
     if (!lrcText) return;
     
     const lines = lrcText.split('\n');
     const timeReg = /\[(\d+):(\d+)(?:\.(\d+))?\]/g;
     
+    let hasTags = false;
+    
     lines.forEach(line => {
         line = line.trim();
         if (!line) return;
-        timeReg.lastIndex = 0;
+        
         let match;
         const text = line.replace(/\[\d+:\d+(?:\.\d+)?\]/g, '').trim();
         
         timeReg.lastIndex = 0;
+        let lineHasTag = false;
         while ((match = timeReg.exec(line)) !== null) {
+            hasTags = true;
+            lineHasTag = true;
             const minutes = parseInt(match[1]);
             const seconds = parseInt(match[2]);
             const ms = match[3] ? parseInt(match[3]) : 0;
@@ -145,7 +313,19 @@ function parseLrcLyrics(lrcText) {
             parsedLyrics.push({ time: timeInSeconds, text: text || '♫' });
         }
     });
-    parsedLyrics.sort((a, b) => a.time - b.time);
+    
+    if (!hasTags) {
+        // If no LRC tags were found, treat it as unsynced plain text
+        isUnsyncedLyrics = true;
+        lines.forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed) {
+                parsedLyrics.push({ time: -1, text: trimmed });
+            }
+        });
+    } else {
+        parsedLyrics.sort((a, b) => a.time - b.time);
+    }
 }
 
 function renderLyrics() {
@@ -160,7 +340,7 @@ function renderLyrics() {
     }
     
     pane.innerHTML = parsedLyrics.map((lyric, index) => {
-        return `<div class="lyrics-line" id="lyric-line-${index}">${lyric.text}</div>`;
+        return `<div class="lyrics-line ${isUnsyncedLyrics ? 'active' : ''}" id="lyric-line-${index}">${lyric.text}</div>`;
     }).join('');
     activeLyricIndex = -1;
 }
@@ -180,7 +360,7 @@ function updatePlaybackProgress(position) {
 }
 
 function syncLyricsToTime(position) {
-    if (parsedLyrics.length === 0) return;
+    if (parsedLyrics.length === 0 || isUnsyncedLyrics) return;
     
     let foundIndex = -1;
     for (let i = 0; i < parsedLyrics.length; i++) {
@@ -474,3 +654,33 @@ async function saveRubyEdit() {
         showToast('儲存失敗', 'fa-solid fa-xmark', 2000);
     }
 }
+
+// -------------------------------------------------------------
+// Window Maximize / Zoom Mode Logic
+// -------------------------------------------------------------
+function toggleFullscreen() {
+    const playerCard = document.querySelector('.player-lyrics-card');
+    const btn = document.querySelector('.fullscreen-btn');
+    const reloadBtn = document.querySelector('.reload-lyrics-btn');
+    const isMaximized = playerCard.classList.contains('window-maximized');
+    
+    // Disable pointer events on the buttons container during transition to prevent accidental clicks
+    const btnContainer = document.querySelector('.lyrics-header > div');
+    if (btnContainer) {
+        btnContainer.style.pointerEvents = 'none';
+        setTimeout(() => {
+            btnContainer.style.pointerEvents = 'auto';
+        }, 400);
+    }
+    
+    if (!isMaximized) {
+        document.body.classList.add('window-maximized');
+        playerCard.classList.add('window-maximized');
+        localStorage.setItem('zoomModeActive', 'true');
+    } else {
+        document.body.classList.remove('window-maximized');
+        playerCard.classList.remove('window-maximized');
+        localStorage.setItem('zoomModeActive', 'false');
+    }
+}
+

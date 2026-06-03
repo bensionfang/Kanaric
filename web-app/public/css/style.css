@@ -611,8 +611,32 @@ body {
 }
 
 .lyrics-empty {
-    position: absolute; top: 50%; left: 0; transform: translateY(-50%);
-    color: var(--text-dim); font-size: 12px;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--text-secondary);
+    font-size: 15px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    text-align: center;
+    opacity: 0.8;
+}
+
+.lyrics-empty i {
+    font-size: 36px;
+    color: var(--accent-main);
+    margin-bottom: 5px;
+    opacity: 0.9;
+}
+
+.lyrics-empty p {
+    margin: 0;
+    font-weight: 500;
 }
 
 .lyrics-line {
@@ -828,6 +852,27 @@ body {
     transform: translateY(0);
 }
 
+.nav-btn {
+    background: var(--bg-secondary);
+    border: 1px solid var(--panel-border);
+    color: var(--text-primary);
+    padding: 10px 15px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.nav-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-main);
+    color: var(--accent-main);
+}
+
 .close-btn {
     background: transparent;
     border: none;
@@ -1032,7 +1077,9 @@ html.hide-furigana rt {
     display: none !important;
 }
 
-.reload-lyrics-btn {
+.reload-lyrics-btn,
+.fullscreen-btn,
+.advanced-lyrics-btn {
     background: transparent;
     border: none;
     color: var(--text-secondary);
@@ -1045,15 +1092,23 @@ html.hide-furigana rt {
     padding: 4px 8px;
     border-radius: 4px;
 }
-.reload-lyrics-btn:hover {
+.reload-lyrics-btn:hover,
+.fullscreen-btn:hover,
+.advanced-lyrics-btn:hover {
     color: var(--text-primary);
     background: rgba(255, 255, 255, 0.05);
 }
-html.light-mode .reload-lyrics-btn:hover {
+html.light-mode .reload-lyrics-btn:hover,
+html.light-mode .fullscreen-btn:hover,
+html.light-mode .advanced-lyrics-btn:hover {
     background: rgba(0, 0, 0, 0.05);
 }
 
 .hidden { display: none !important; }
+
+body.window-maximized .advanced-lyrics-btn {
+    display: none !important;
+}
 
 
 /* Window Maximized Immersive Mode */
@@ -1073,129 +1128,195 @@ body.window-maximized #web-mode-sec {
     transform: none !important;
 }
 
-body.window-maximized .player-lyrics-card {
-    background: var(--bg-main) !important;
-    border: none !important;
+.lyrics-header > div {
     display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    gap: 0;
-    height: 100vh;
-    max-width: 100% !important;
-    border-radius: 0;
+    flex-direction: row-reverse;
+    gap: 8px;
 }
 
-body.window-maximized .player-upper {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    padding: 15px 120px 15px 30px;
-    gap: 20px;
-    background: rgba(0,0,0,0.2);
-    border-bottom: 1px solid var(--panel-border);
-    position: relative;
-}
-
-body.window-maximized .vinyl-container {
-    width: 60px;
-    height: 60px;
-    margin: 0;
-}
-
-body.window-maximized .vinyl-center {
-    width: 15px;
-    height: 15px;
-}
-
-body.window-maximized .player-controls-pane {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 30px;
-    flex: 1;
-    margin: 0;
-}
-
-body.window-maximized .current-title {
-    font-size: 20px;
-    margin: 0;
-}
-
-body.window-maximized .current-artist {
-    font-size: 14px;
-    margin: 0;
-    opacity: 0.8;
-}
-
-body.window-maximized .progress-container {
-    flex: 1;
-    margin: 0;
-}
-
-body.window-maximized .lyrics-header h4 {
-    display: none;
-}
-
-body.window-maximized .lyrics-header {
-    margin: 0;
-    padding: 0;
-    height: 0;
-    border: none;
-    overflow: visible;
-}
-
-body.window-maximized .lyrics-header > div {
-    position: absolute;
-    top: 15px;
-    right: 30px;
-    z-index: 10000;
-    flex-direction: column !important;
-    gap: 6px !important;
-}
-
-body.window-maximized .lyrics-header .advanced-lyrics-btn {
+/* ==========================================
+   Window Maximized / Focus Zoom Mode Styles
+   ========================================== */
+body.window-maximized #app-sidebar,
+body.window-maximized .sidebar {
     display: none !important;
 }
 
-body.window-maximized .lyrics-header .fullscreen-btn,
-body.window-maximized .lyrics-header .reload-lyrics-btn {
-    padding: 6px 12px !important;
-    font-size: 12px !important;
-    width: 100%;
-    justify-content: center;
+body.window-maximized .main-content {
+    margin-left: 0 !important;
+    padding: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+}
+
+body.window-maximized .page-header {
+    display: none !important;
+}
+
+body.window-maximized .mode-tabs {
+    display: none !important;
+}
+
+body.window-maximized .top-bar {
+    display: none !important;
+}
+
+body.window-maximized .progress-container {
+    display: none !important;
+}
+
+body.window-maximized .vinyl-container {
+    width: 100px !important;
+    height: 100px !important;
+    display: block !important;
+    margin: 0 !important;
+}
+
+body.window-maximized .player-lyrics-card {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    z-index: 99999 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    border: none !important;
+    background: var(--bg-main) !important;
+    gap: 0 !important;
+}
+
+body.window-maximized .player-upper {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    padding: 12px 30px !important;
+    gap: 20px !important;
+    border-bottom: 1px solid var(--panel-border) !important;
+    background: rgba(0, 0, 0, 0.2) !important;
+}
+
+body.window-maximized .player-controls-pane {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    flex-wrap: wrap !important;
+    text-align: left !important;
+    flex: 1 !important;
+    margin: 0 !important;
+    gap: 0 8px !important;
+    gap: 8px !important;
+    row-gap: 0 !important;
+}
+
+body.window-maximized .current-title {
+    font-size: 22px !important;
+    margin: 0 !important;
+    font-weight: 600 !important;
+    display: block !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 50vw !important;
+}
+
+
+body.window-maximized .current-artist {
+    font-size: 14px !important;
+    margin: 0 !important;
+    opacity: 0.65 !important;
+    display: block !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 35vw !important;
+    align-self: center !important;
+}
+
+body.window-maximized .lyrics-header {
+    position: relative !important;
+    padding: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    overflow: visible !important;
+}
+
+body.window-maximized .lyrics-header h4 {
+    display: none !important;
+}
+
+body.window-maximized .lyrics-header > div {
+    position: fixed !important;
+    top: 28px !important;
+    right: 30px !important;
+    z-index: 999999 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-end !important;
+    gap: 8px !important;
 }
 
 body.window-maximized .lyrics-view-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
 }
 
 body.window-maximized .lyrics-scroll-pane {
-    flex: 1;
+    flex: 1 !important;
     height: auto !important;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 20px 30px 60px;
-    position: relative;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    border-left: none !important;
+    padding: 24px 30px 40px !important;
 }
 
 body.window-maximized .lyrics-line {
-    font-size: calc(var(--lyrics-fs, 22px) + 8px);
+    font-size: 36px !important;
+    line-height: 1.8 !important;
+    margin-bottom: 18px !important;
 }
 
 body.window-maximized .lyrics-line.active {
-    font-size: calc(var(--lyrics-fs, 22px) + 12px);
+    font-size: 46px !important;
 }
 
-body.window-maximized .lyrics-line rt { 
-    font-size: 0.5em !important; 
-    line-height: 1; 
+body.window-maximized rt {
+    font-size: 20px !important;
 }
 
-body.window-maximized .lyrics-scroll-pane.pure-text-mode .lyrics-line { 
-    font-size: calc(var(--lyrics-fs, 22px) + 16px) !important; 
-    font-weight: 600 !important; 
-    color: var(--text-primary) !important; 
+/* Flicker-free button text toggling */
+.fullscreen-btn .icon-compress,
+.fullscreen-btn .text-maximized,
+.reload-lyrics-btn .text-maximized {
+    display: none !important;
 }
+
+.fullscreen-btn .icon-expand,
+.fullscreen-btn .text-normal,
+.reload-lyrics-btn .text-normal {
+    display: inline !important;
+}
+
+body.window-maximized .fullscreen-btn .icon-expand,
+body.window-maximized .fullscreen-btn .text-normal,
+body.window-maximized .reload-lyrics-btn .text-normal {
+    display: none !important;
+}
+
+body.window-maximized .fullscreen-btn .icon-compress,
+body.window-maximized .fullscreen-btn .text-maximized,
+body.window-maximized .reload-lyrics-btn .text-maximized {
+    display: inline !important;
+}
+

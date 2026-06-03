@@ -371,7 +371,8 @@ app.get('/api/lyrics/options', async (req, res) => {
           artist: t.artistName || '',
           album: t.albumName || '',
           duration: t.duration || 0,
-          lyrics: best
+          lyrics: best,
+          isSynced: !!t.syncedLyrics
         });
       }
     }
@@ -409,7 +410,8 @@ app.get('/api/lyrics/options', async (req, res) => {
       album: x.album,
       duration: x.duration,
       lyrics: x.lyrics,
-      score: x.score
+      score: x.score,
+      isSynced: x.isSynced
     }));
     
     res.json({ options: top5 });

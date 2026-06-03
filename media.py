@@ -56,9 +56,14 @@ class MediaWorker(QThread):
                     last_real_pos = real_pos
                     # Use the exact OS timestamp when this position was valid
                     last_real_pos_time = timeline.last_updated_time.timestamp() if timeline else current_time
-                    interpolated_pos = real_pos + (current_time - last_real_pos_time) if is_playing else real_pos
-                else:
-                    interpolated_pos = real_pos + (current_time - last_real_pos_time) if is_playing else real_pos
+                
+                time_elapsed = current_time - last_real_pos_time
+                if time_elapsed > 1.5:
+                    time_elapsed = 1.5
+                elif time_elapsed < 0:
+                    time_elapsed = 0.0
+                
+                interpolated_pos = real_pos + time_elapsed if is_playing else real_pos
                         
                 self.media_updated.emit(title, artist, album, interpolated_pos, thumb_bytes, is_playing)
             await asyncio.sleep(0.05)
