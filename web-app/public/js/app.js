@@ -10,6 +10,8 @@ let currentInterpolatedPosition = 0;
 let lastServerPosition = -1;
 let lastFrameTime = performance.now();
 let isCurrentlyPlaying = false;
+let syncOffset = 0;
+let isUserScrolling = false;
 
 document.addEventListener('DOMContentLoaded', () => {
     // Start polling the system media every 100ms for smooth updates
@@ -23,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (isCurrentlyPlaying && parsedLyrics.length > 0) {
             currentInterpolatedPosition += dt;
-            syncLyricsToTime(currentInterpolatedPosition);
+            syncLyricsToTime(currentInterpolatedPosition + syncOffset);
             updatePlaybackProgress(currentInterpolatedPosition);
         }
         requestAnimationFrame(syncLoop);
@@ -39,6 +41,14 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.classList.add('window-maximized');
         const playerCard = document.querySelector('.player-lyrics-card');
         if (playerCard) playerCard.classList.add('window-maximized');
+    }
+
+    // Initialize alignment if persisted
+    const alignMode = localStorage.getItem('lyricsAlignMode');
+    if (alignMode === 'left') {
+        document.getElementById('lyrics-scroll').classList.add('align-left');
+        const icon = document.getElementById('align-icon-modal');
+        if (icon) { icon.classList.remove('fa-align-left'); icon.classList.add('fa-align-center'); }
     }
 });
 
@@ -107,8 +117,11 @@ async function performGetOptions() {
                     <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.title}</div>
                     <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.artist}${opt.album ? ' · ' + opt.album : ''}</div>
                 </div>
-                <div style="margin-left: 10px; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${opt.isSynced ? 'background: rgba(76, 175, 80, 0.15); color: #4caf50;' : 'background: rgba(158, 158, 158, 0.15); color: #9e9e9e;'}">
-                    ${opt.isSynced ? 'LRC' : 'TXT'}
+                <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                    <div style="margin-left: 10px; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${opt.isSynced ? 'background: rgba(76, 175, 80, 0.15); color: #4caf50;' : 'background: rgba(158, 158, 158, 0.15); color: #9e9e9e;'}">
+                        ${opt.isSynced ? 'LRC' : 'TXT'}
+                    </div>
+                    ${opt.provider ? `<div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; opacity: 0.8;">${opt.provider}</div>` : ''}
                 </div>
             </div>
         `).join('');
@@ -126,12 +139,17 @@ async function applyLyricsOption(index) {
     showToast(`套用: ${opt.title}`, 'fa-solid fa-check', 2000);
     // Save as custom lyrics for current song
     try {
-        await fetch('/api/lyrics/custom', {
+        const resp = await fetch('/api/lyrics/custom', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: lastMediaTitle, artist: lastMediaArtist, lyrics: opt.lyrics })
         });
-        parseLrcLyrics(opt.lyrics);
+        const data = await resp.json();
+        if (data.lyrics) {
+            parseLrcLyrics(data.lyrics);
+        } else {
+            parseLrcLyrics(opt.lyrics);
+        }
         renderLyrics();
     } catch (e) {
         showToast('套用失敗', 'fa-solid fa-xmark', 2000);
@@ -185,8 +203,32 @@ async function performCustomLyrics() {
     }
 }
 
+// Detect manual user scrolling
+function handleManualScroll() {
+    if (!isUserScrolling) {
+        isUserScrolling = true;
+        const panel = document.getElementById('sync-resume-panel');
+        if (panel) panel.style.display = 'flex';
+    }
+}
 
-// -------------------------------------------------------------
+document.getElementById('lyrics-scroll').addEventListener('wheel', handleManualScroll, { passive: true });
+document.getElementById('lyrics-scroll').addEventListener('touchmove', handleManualScroll, { passive: true });
+
+function resumeSync() {
+    isUserScrolling = false;
+    const panel = document.getElementById('sync-resume-panel');
+    if (panel) panel.style.display = 'none';
+    
+    if (activeLyricIndex >= 0) {
+        const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
+        const pane = document.getElementById('lyrics-scroll');
+        if (currentLine && pane) {
+            const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
+            pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: 'smooth' });
+        }
+    }
+}// -------------------------------------------------------------
 // Live Sync Logic
 // -------------------------------------------------------------
 async function pollSystemMedia() {
@@ -237,8 +279,23 @@ async function pollSystemMedia() {
                 coverImg.src = 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=300&auto=format&fit=crop';
             }
             
+            fetch('/api/lyrics/offset?title=' + encodeURIComponent(data.title) + '&artist=' + encodeURIComponent(data.artist || ''))
+                .then(r => r.json())
+                .then(d => {
+                    syncOffset = d.offset || 0;
+                    updateOffsetDisplay();
+                }).catch(e => { syncOffset = 0; updateOffsetDisplay(); });
+            
             fetchAndParseLyrics(data.title, data.artist);
             loadSidebarLeaderboard();
+            window._lyricsOptions = [];
+            const listEl = document.getElementById('lyrics-options-list');
+            if (listEl) listEl.innerHTML = '';
+            
+            const manualTitleEl = document.getElementById('manual-title');
+            const manualArtistEl = document.getElementById('manual-artist');
+            if (manualTitleEl) manualTitleEl.value = data.title;
+            if (manualArtistEl) manualArtistEl.value = data.artist || '';
         } else if (!data.title && lastMediaTitle) {
             // Stopped completely
             lastMediaTitle = "";
@@ -293,10 +350,16 @@ function parseLrcLyrics(lrcText) {
     const timeReg = /\[(\d+):(\d+)(?:\.(\d+))?\]/g;
     
     let hasTags = false;
+    window.currentSourceProvider = "";
     
     lines.forEach(line => {
         line = line.trim();
         if (!line) return;
+        
+        if (line.startsWith("[source:")) {
+            window.currentSourceProvider = line.substring(8, line.length - 1);
+            return;
+        }
         
         let match;
         const text = line.replace(/\[\d+:\d+(?:\.\d+)?\]/g, '').trim();
@@ -308,8 +371,11 @@ function parseLrcLyrics(lrcText) {
             lineHasTag = true;
             const minutes = parseInt(match[1]);
             const seconds = parseInt(match[2]);
-            const ms = match[3] ? parseInt(match[3]) : 0;
-            const timeInSeconds = minutes * 60 + seconds + (ms / 100);
+            let msFraction = 0;
+            if (match[3]) {
+                msFraction = parseFloat('0.' + match[3]);
+            }
+            const timeInSeconds = minutes * 60 + seconds + msFraction;
             parsedLyrics.push({ time: timeInSeconds, text: text || '♫' });
         }
     });
@@ -325,6 +391,25 @@ function parseLrcLyrics(lrcText) {
         });
     } else {
         parsedLyrics.sort((a, b) => a.time - b.time);
+        
+        // Merge lines with similar time tags (translations/romaji)
+        const mergedLyrics = [];
+        for (let i = 0; i < parsedLyrics.length; i++) {
+            const current = parsedLyrics[i];
+            const prev = mergedLyrics[mergedLyrics.length - 1];
+            
+            // If time diff is very small (< 0.05s), treat as a translation line
+            if (prev && Math.abs(current.time - prev.time) < 0.05) {
+                if (!prev.translation) {
+                    prev.translation = current.text;
+                } else {
+                    prev.translation += ' / ' + current.text;
+                }
+            } else {
+                mergedLyrics.push({ time: current.time, text: current.text, translation: null });
+            }
+        }
+        parsedLyrics = mergedLyrics;
     }
 }
 
@@ -339,9 +424,19 @@ function renderLyrics() {
         return;
     }
     
-    pane.innerHTML = parsedLyrics.map((lyric, index) => {
-        return `<div class="lyrics-line ${isUnsyncedLyrics ? 'active' : ''}" id="lyric-line-${index}">${lyric.text}</div>`;
+    let html = parsedLyrics.map((lyric, index) => {
+        let content = `<span>${lyric.text}</span>`;
+        if (lyric.translation) {
+            content += `<div class="lyrics-translation">${lyric.translation}</div>`;
+        }
+        return `<div class="lyrics-line ${isUnsyncedLyrics ? 'active' : ''}" id="lyric-line-${index}">${content}</div>`;
     }).join('');
+    
+    if (window.currentSourceProvider) {
+        html += `<div style="text-align: center; color: rgba(255,255,255,0.4); font-size: 14px; margin-top: 30px;">歌詞提供者: ${window.currentSourceProvider}</div>`;
+    }
+    
+    pane.innerHTML = html;
     activeLyricIndex = -1;
 }
 
@@ -384,16 +479,127 @@ function syncLyricsToTime(position) {
             if (currentLine) {
                 currentLine.classList.add('active');
                 
-                const pane = document.getElementById('lyrics-scroll');
-                const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
-                pane.scrollTo({
-                    top: Math.max(0, scrollOffset),
-                    behavior: 'smooth'
-                });
+                // Only scroll if the user is not manually scrolling
+                if (!isUserScrolling) {
+                    const pane = document.getElementById('lyrics-scroll');
+                    const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
+                    pane.scrollTo({
+                        top: Math.max(0, scrollOffset),
+                        behavior: 'smooth'
+                    });
+                }
             }
         }
     }
 }
+
+// -------------------------------------------------------------
+// Time Offset Adjustment Logic
+// -------------------------------------------------------------
+function updateOffsetDisplay() {
+    const el = document.getElementById('offset-display');
+    if (!el) return;
+    const ms = Math.round(syncOffset * 1000);
+    el.textContent = ms > 0 ? `+${ms} ms` : `${ms} ms`;
+}
+
+function adjustSyncOffset(delta) {
+    syncOffset += delta;
+    updateOffsetDisplay();
+    saveSyncOffset();
+    if (parsedLyrics.length > 0 && currentInterpolatedPosition >= 0) {
+        syncLyricsToTime(currentInterpolatedPosition + syncOffset);
+    }
+}
+
+function resetSyncOffset() {
+    syncOffset = 0;
+    updateOffsetDisplay();
+    saveSyncOffset();
+    if (parsedLyrics.length > 0 && currentInterpolatedPosition >= 0) {
+        syncLyricsToTime(currentInterpolatedPosition + syncOffset);
+    }
+}
+
+let _saveOffsetTimeout = null;
+function saveSyncOffset() {
+    if (!lastMediaTitle) return;
+    clearTimeout(_saveOffsetTimeout);
+    _saveOffsetTimeout = setTimeout(() => {
+        fetch('/api/lyrics/offset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: lastMediaTitle, artist: lastMediaArtist, offset: syncOffset })
+        }).catch(e => console.error("Failed to save offset", e));
+    }, 500);
+}
+
+let activeHotkeys = {
+    advance: '[',
+    delay: ']',
+    plainPrev: 'ArrowUp',
+    plainNext: 'ArrowDown'
+};
+
+window.updateActiveHotkeys = function() {
+    activeHotkeys.advance = localStorage.getItem('hk-advance') || '[';
+    activeHotkeys.delay = localStorage.getItem('hk-delay') || ']';
+    activeHotkeys.plainPrev = localStorage.getItem('hk-plain-prev') || 'ArrowUp';
+    activeHotkeys.plainNext = localStorage.getItem('hk-plain-next') || 'ArrowDown';
+};
+window.updateActiveHotkeys();
+
+document.addEventListener('keydown', (e) => {
+    // Ignore keydown if typing in an input or textarea
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    
+    let keyName = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+    if (keyName === ' ') keyName = 'Space';
+    
+    let prefix = '';
+    if (e.ctrlKey) prefix += 'Ctrl+';
+    if (e.altKey) prefix += 'Alt+';
+    if (e.shiftKey && e.key.length > 1) prefix += 'Shift+';
+    
+    const fullKey = prefix + keyName;
+    
+    if (fullKey === activeHotkeys.delay) {
+        e.preventDefault();
+        adjustSyncOffset(-0.1);
+    } else if (fullKey === activeHotkeys.advance) {
+        e.preventDefault();
+        adjustSyncOffset(0.1);
+    } else if (fullKey === activeHotkeys.plainPrev) {
+        e.preventDefault();
+        if (activeLyricIndex > 0) {
+            handleManualScroll();
+            activeLyricIndex--;
+            updateLyricsHighlight(activeLyricIndex);
+            
+            // Scroll to it
+            const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
+            const pane = document.getElementById('lyrics-scroll');
+            if (currentLine && pane) {
+                const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
+                pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: 'smooth' });
+            }
+        }
+    } else if (fullKey === activeHotkeys.plainNext) {
+        e.preventDefault();
+        if (activeLyricIndex < parsedLyrics.length - 1) {
+            handleManualScroll();
+            activeLyricIndex++;
+            updateLyricsHighlight(activeLyricIndex);
+            
+            const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
+            const pane = document.getElementById('lyrics-scroll');
+            if (currentLine && pane) {
+                const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
+                pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: 'smooth' });
+            }
+        }
+    }
+});
 
 // -------------------------------------------------------------
 // Desktop Launch Logic
@@ -682,5 +888,17 @@ function toggleFullscreen() {
         playerCard.classList.remove('window-maximized');
         localStorage.setItem('zoomModeActive', 'false');
     }
+    
+    // Re-center the lyrics after the transition
+    setTimeout(() => {
+        if (activeLyricIndex >= 0) {
+            const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
+            const pane = document.getElementById('lyrics-scroll');
+            if (currentLine && pane) {
+                const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
+                pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: 'smooth' });
+            }
+        }
+    }, 300);
 }
 

@@ -11,10 +11,10 @@
     --text-secondary: #94a3b8;
     --text-dim: #475569;
     
-    /* Accents */
-    --accent-main: #3b82f6;
-    --accent-bg: rgba(59, 130, 246, 0.12);
-    --accent-hover: #60a5fa;
+    /* Accents (Spotify Green Theme) */
+    --accent-main: #1DB954;
+    --accent-bg: rgba(29, 185, 84, 0.12);
+    --accent-hover: #1ED760;
     --accent-text-on-hover: #ffffff;
     
     /* Transitions */
@@ -29,9 +29,9 @@ html.light-mode {
     --text-primary: #1e293b;
     --text-secondary: #64748b;
     --text-dim: #94a3b8;
-    --accent-main: #3b82f6;
-    --accent-bg: rgba(59, 130, 246, 0.15);
-    --accent-hover: #2563eb;
+    --accent-main: #1DB954;
+    --accent-bg: rgba(29, 185, 84, 0.15);
+    --accent-hover: #1aa34a;
 }
 
 /* Reset & Global */
@@ -1008,6 +1008,11 @@ input:checked + .slider { background-color: var(--accent-main); }
 input:checked + .slider:before { transform: translateX(20px); }
 .slider.round { border-radius: 24px; }
 .slider.round:before { border-radius: 50%; }
+
+/* Range Slider Accent Color */
+input[type="range"] {
+    accent-color: var(--accent-main);
+}
 
 .about-content p { line-height: 1.6; font-size: 14px; color: var(--text-secondary); }
 

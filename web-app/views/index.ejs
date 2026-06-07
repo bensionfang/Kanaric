@@ -82,6 +82,23 @@
                         <p>等待播放...</p>
                     </div>
                 </div>
+                
+                <!-- Resume Sync Button -->
+                <div id="sync-resume-panel" class="sync-resume-panel" style="display: none;">
+                    <button onclick="resumeSync()" title="恢復同步">
+                        <i class="fa-solid fa-arrow-down"></i> 恢復同步
+                    </button>
+                </div>
+
+                <!-- Time Offset Panel -->
+                <div class="offset-panel" id="offset-panel">
+                    <span style="font-size: 11px; color: var(--text-secondary); position: absolute; top: -18px; right: 10px; opacity: 0; transition: opacity 0.3s;" id="offset-tooltip">快捷鍵: [ 和 ]</span>
+                    <button onclick="adjustSyncOffset(-0.5)" title="提早 0.5s"><i class="fa-solid fa-backward-fast"></i></button>
+                    <button onclick="adjustSyncOffset(-0.1)" title="提早 0.1s"><i class="fa-solid fa-backward-step"></i></button>
+                    <span id="offset-display" onclick="resetSyncOffset()" title="點擊歸零" style="cursor: pointer;">0 ms</span>
+                    <button onclick="adjustSyncOffset(0.1)" title="延遲 0.1s"><i class="fa-solid fa-forward-step"></i></button>
+                    <button onclick="adjustSyncOffset(0.5)" title="延遲 0.5s"><i class="fa-solid fa-forward-fast"></i></button>
+                </div>
             </div>
         </div>
     </div>
@@ -140,7 +157,85 @@
         gap: 10px;
         margin-bottom: 20px;
         font-size: 13px;
-        color: #c7d2fe;
+        color: #86efac;
+    }
+    .offset-panel {
+        position: absolute;
+        bottom: 20px;
+        right: 25px;
+        background: rgba(30, 30, 40, 0.85);
+        backdrop-filter: blur(8px);
+        padding: 6px 12px;
+        border-radius: 20px;
+        border: 1px solid var(--panel-border);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        z-index: 10;
+        opacity: 0.3;
+        transition: opacity 0.3s, transform 0.3s;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .lyrics-view-container { position: relative; }
+    .lyrics-view-container:hover .offset-panel {
+        opacity: 1;
+    }
+    .offset-panel:hover #offset-tooltip { opacity: 1; }
+    
+    .sync-resume-panel {
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--accent-main);
+        color: #ffffff;
+        padding: 6px 16px;
+        border-radius: 20px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        z-index: 10;
+        box-shadow: 0 4px 12px rgba(29, 185, 84, 0.4);
+        animation: slideUp 0.3s ease-out;
+    }
+    @keyframes slideUp {
+        from { transform: translate(-50%, 20px); opacity: 0; }
+        to { transform: translate(-50%, 0); opacity: 1; }
+    }
+    .sync-resume-panel button {
+        background: transparent;
+        border: none;
+        color: #ffffff;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .sync-resume-panel button:hover { opacity: 0.9; }
+
+    .offset-panel button {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 12px;
+        padding: 4px;
+        border-radius: 4px;
+        transition: color 0.2s, background 0.2s;
+    }
+    .offset-panel button:hover {
+        color: var(--text-primary);
+        background: rgba(255,255,255,0.1);
+    }
+    #offset-display {
+        color: var(--text-primary);
+        font-weight: bold;
+        min-width: 55px;
+        text-align: center;
+        font-family: monospace;
+        font-size: 13px;
     }
     .pulsing-dot {
         width: 10px;
@@ -159,10 +254,14 @@
         70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
         100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
     }
-    .lyrics-line { font-size: var(--lyrics-fs, 22px); line-height: 1.8; margin-bottom: 8px; transition: font-size 0.3s; }
+    .lyrics-scroll-pane.align-left { text-align: left; padding-left: 20px; }
+    .lyrics-line { font-size: var(--lyrics-fs, 22px); line-height: 1.8; margin-bottom: 12px; transition: font-size 0.3s; display: flex; flex-direction: column; align-items: center; }
+    .lyrics-scroll-pane.align-left .lyrics-line { align-items: flex-start; }
     .lyrics-line.active { font-size: calc(var(--lyrics-fs, 22px) + 6px); font-weight: bold; line-height: 1.8; }
+    .lyrics-translation { font-size: calc(var(--lyrics-fs, 22px) - 6px); color: var(--text-secondary); margin-top: -4px; transition: font-size 0.3s, color 0.3s; font-weight: normal; }
+    .lyrics-line.active .lyrics-translation { font-size: calc(var(--lyrics-fs, 22px) - 2px); color: var(--text-primary); opacity: 0.8; }
     ruby { ruby-align: center; }
-    rt { font-size: 14px; color: #a5b4fc; transform: translateY(-2px); }
+    rt { font-size: 14px; color: #86efac; transform: translateY(-2px); font-weight: normal; }
 </style>
 
 <script src="/js/app.js?v=20"></script>

@@ -42,7 +42,8 @@ class SettingsManager:
             "dynamic_color": True,
             "display_lines": 2,
             "sync_offset": 0.0,
-            "pin_window": True
+            "pin_window": True,
+            "preferred_source": "NetEase"
         }
 
     def save_settings(self) -> None:

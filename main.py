@@ -196,8 +196,31 @@ class FloatingLyricsApp(QWidget):
         ff = self.settings.get("font_family", "Noto Sans JP")
         self.header_label.setStyleSheet(f"color: #b3b3b3; font-size: 14px; font-weight: bold; font-family: \"{ff}\";")
         top_hbox.addWidget(self.header_label)
-        
         top_hbox.addStretch()
+        
+        self.offset_minus = QPushButton("-")
+        self.offset_minus.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.offset_minus.setToolTip("歌詞提早 0.1s")
+        self.offset_minus.setStyleSheet("QPushButton { background: transparent; color: rgba(255,255,255,100); font-size: 16px; font-weight: bold; border: none; padding: 2px 5px; } QPushButton:hover { color: white; }")
+        self.offset_minus.clicked.connect(lambda: self.adjust_sync(-0.1))
+        top_hbox.addWidget(self.offset_minus)
+
+        self.offset_label = QLabel("0 ms")
+        self.offset_label.setStyleSheet("color: rgba(255,255,255,100); font-size: 12px; font-weight: bold; font-family: monospace;")
+        self.offset_label.setToolTip("點擊重置時間同步")
+        self.offset_label.mousePressEvent = lambda e: self.adjust_sync('reset')
+        self.offset_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        top_hbox.addWidget(self.offset_label)
+
+        self.offset_plus = QPushButton("+")
+        self.offset_plus.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.offset_plus.setToolTip("歌詞延遲 0.1s")
+        self.offset_plus.setStyleSheet("QPushButton { background: transparent; color: rgba(255,255,255,100); font-size: 16px; font-weight: bold; border: none; padding: 2px 5px; } QPushButton:hover { color: white; }")
+        self.offset_plus.clicked.connect(lambda: self.adjust_sync(0.1))
+        top_hbox.addWidget(self.offset_plus)
+        
+        # Add a small spacing
+        top_hbox.addSpacing(10)
         
         self.hint_label = QLabel("")
         self.hint_label.setStyleSheet("color: #ffff00; font-size: 14px;")
@@ -366,6 +389,8 @@ class FloatingLyricsApp(QWidget):
                 self.search_artist = artist
                 
                 self.current_sync_offset = db.get_sync_offset(self.search_artist, self.search_title)
+                ms_val = int(self.current_sync_offset * 1000)
+                self.offset_label.setText(f"{'+' if ms_val > 0 else ''}{ms_val} ms")
                 
                 if title and artist:
                     self.header_label.setText(f"{title} - {artist}")
@@ -390,6 +415,7 @@ class FloatingLyricsApp(QWidget):
                 except Exception as e:
                     print("Error inserting history:", e)
         
+        self.last_position = position
         if self.lyrics_data:
             self.refresh_lyrics_display(position)
 
@@ -445,9 +471,11 @@ class FloatingLyricsApp(QWidget):
         
         list_widget = QListWidget()
         for opt in self.current_lyrics_options:
-            minutes = opt['duration'] // 60
-            seconds = opt['duration'] % 60
-            display_text = f"[{minutes:02}:{seconds:02}] {opt['title']} - {opt['artist']} - {opt['album']}"
+            minutes = opt.get('duration', 0) // 60
+            seconds = opt.get('duration', 0) % 60
+            has_sync = bool(re.search(r'\[\d{2}:\d{2}', opt.get('lyrics', '')))
+            tag = "[動態 LRC]" if has_sync else "[純文字]"
+            display_text = f"{tag} [{minutes:02}:{seconds:02}] {opt.get('title', '')} - {opt.get('artist', '')}"
             item = QListWidgetItem(display_text)
             item.setData(Qt.ItemDataRole.UserRole, opt['lyrics'])
             list_widget.addItem(item)
@@ -549,6 +577,7 @@ class FloatingLyricsApp(QWidget):
         self.start_lyric_fetcher()
 
     def trigger_lyric_search(self, manual_label=False):
+        self.current_lyrics_options = []
         if manual_label:
             orig_text = f"{self.media_title} - {self.media_artist}" if self.media_artist else self.media_title
             search_text = f"{self.search_title} - {self.search_artist}" if self.search_artist else self.search_title
@@ -562,6 +591,8 @@ class FloatingLyricsApp(QWidget):
                 self.header_label.setText("正在等待音樂播放...")
             
         self.current_sync_offset = db.get_sync_offset(self.search_artist, self.search_title)
+        ms_val = int(self.current_sync_offset * 1000)
+        self.offset_label.setText(f"{'+' if ms_val > 0 else ''}{ms_val} ms")
         
         self.lyrics_data = []
         self.current_lyrics_options = []
@@ -608,6 +639,7 @@ class FloatingLyricsApp(QWidget):
             item = self.content_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
         self.lyric_labels = []
+        self.lyrics_data = []
         self.last_index = -2 
 
     def handle_fetched_lyrics(self, text, options_list):
@@ -625,17 +657,24 @@ class FloatingLyricsApp(QWidget):
             
         self.clear_lyrics()
         self.current_lrc_text = lrc_text 
-        pattern = re.compile(r'\[(\d{2}):(\d{2}\.\d{2,3})\](.*)')
+        pattern = re.compile(r'\[(\d{2}):(\d{2}(?:\.\d{1,3})?)\](.*)')
         fs = self.settings.get("font_size", 28)
         ff = self.settings.get("font_family", "Noto Sans JP")
         line_idx = 0
         
-        is_japanese_song = bool(re.search(r'[\u3040-\u30FF]', lrc_text))
-        has_time_tags = bool(re.search(r'\[\d{2}:\d{2}(?:\.\d{2,3})?\]', lrc_text))
+        source_provider = ""
         
+        is_japanese_song = True
+        has_time_tags = bool(re.search(r'\[\d{2}:\d{2}', lrc_text))
+        
+        parsed_lines = []
         for line in lrc_text.split('\n'):
             line = line.strip()
             if not line:
+                continue
+
+            if line.startswith("[source:"):
+                source_provider = line[8:-1]
                 continue
 
             match = pattern.match(line)
@@ -650,6 +689,30 @@ class FloatingLyricsApp(QWidget):
                 text = ""
 
             if text:
+                parsed_lines.append({"seconds": seconds, "text": text, "translation": None})
+                
+        # Sort and merge translations
+        if has_time_tags:
+            parsed_lines.sort(key=lambda x: x["seconds"])
+            merged_lines = []
+            for item in parsed_lines:
+                if merged_lines and abs(item["seconds"] - merged_lines[-1]["seconds"]) < 0.05:
+                    if not merged_lines[-1]["translation"]:
+                        merged_lines[-1]["translation"] = item["text"]
+                    else:
+                        merged_lines[-1]["translation"] += " / " + item["text"]
+                else:
+                    merged_lines.append(item)
+            parsed_lines = merged_lines
+
+        alignment = self.settings.get("text_alignment", "left")
+
+        for line_idx, item in enumerate(parsed_lines):
+            seconds = item["seconds"]
+            text = item["text"]
+            translation = item["translation"]
+
+            if text:
                     furigana_html, words_data = build_clickable_furigana_html(text, self.search_artist, self.search_title, line_idx, is_japanese_song)
                     self.lyrics_data.append((seconds, furigana_html, text, words_data))
                     
@@ -658,7 +721,8 @@ class FloatingLyricsApp(QWidget):
                     wl.setContentsMargins(0, 0, 0, 0)
 
                     label = QLabel()
-                    label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter) 
+                    align_flag = Qt.AlignmentFlag.AlignCenter if alignment == "center" else (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                    label.setAlignment(align_flag) 
                     
                     label.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
                     label.setOpenExternalLinks(False)
@@ -667,14 +731,20 @@ class FloatingLyricsApp(QWidget):
                     label.customContextMenuRequested.connect(lambda pos, w=wrapper: self.show_settings_menu(pos=w.mapToGlobal(pos)))
                     
                     show_furigana = str(self.settings.get("show_furigana", "true")).lower() != "false"
+                    
+                    trans_html = ""
+                    if translation:
+                        t_size = max(10, int(fs * 0.5))
+                        trans_html = f"<div align='{alignment}' style='font-size: {t_size}px; color: rgba(255,255,255,160); margin-top: -2px; font-weight: normal;'>{translation}</div>"
+                        
                     if not show_furigana:
                         clean_html = re.sub(r'<rt>.*?</rt>', '', furigana_html)
                         clean_html = clean_html.replace('<ruby>', '').replace('</ruby>', '')
-                        label.setText(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>{clean_html}</div>")
+                        label.setText(f"<div align='{alignment}' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>{clean_html}{trans_html}</div>")
                     else:
                         f_size = max(10, int(fs * 0.6))
                         sized_furigana = furigana_html.replace("<tr class='kanji-row'>", f"<tr class='kanji-row' style='font-size: {fs}px;'>")
-                        label.setText(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {f_size}px; font-weight: bold;'>{sized_furigana}</div>")
+                        label.setText(f"<div align='{alignment}' style='font-family: \"{ff}\"; color: #ffffff; font-size: {f_size}px; font-weight: bold;'>{sized_furigana}{trans_html}</div>")
                     wl.addWidget(label)
                     
                     effect = QGraphicsOpacityEffect(wrapper)
@@ -685,6 +755,12 @@ class FloatingLyricsApp(QWidget):
                     self.lyric_labels.append({'wrapper': wrapper, 'label': label})
                     line_idx += 1
                     
+        if source_provider:
+            source_label = QLabel(f"歌詞提供者: {source_provider}")
+            source_label.setStyleSheet(f"color: rgba(255, 255, 255, 120); font-size: {max(12, int(fs*0.45))}px; padding-top: 20px; font-weight: normal; font-family: \"{ff}\";")
+            source_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            self.content_layout.addWidget(source_label)
+            
         self.content_layout.addSpacing(self.height()) 
 
     def on_word_clicked(self, link):
@@ -793,6 +869,7 @@ class FloatingLyricsApp(QWidget):
         menu.addSeparator()
         
         search_menu = menu.addMenu("歌詞抓取與補救")
+        search_menu.addAction("設定優先搜尋來源", self.set_preferred_source)
         search_menu.addAction("選擇備選歌詞", self.choose_alternative_lyrics)
         search_menu.addAction("手動搜尋", self.manual_search_lyrics)
         search_menu.addAction("還原自動偵測", self.reset_manual_search)
@@ -805,6 +882,11 @@ class FloatingLyricsApp(QWidget):
         sync_menu.addAction("重置時間同步", lambda: self.adjust_sync('reset'))
         
         ui_menu = menu.addMenu("視窗外觀與排版")
+        
+        align_str = "切換置中對齊" if self.settings.get("text_alignment", "left") == "left" else "切換置左對齊"
+        align_action = QAction(align_str, self)
+        align_action.triggered.connect(self.toggle_text_alignment)
+        ui_menu.addAction(align_action)
         
         color_action = QAction("關閉主題色" if self.settings.get("dynamic_color") else "開啟主題色", self)
         color_action.triggered.connect(self.toggle_dynamic_color)
@@ -823,6 +905,14 @@ class FloatingLyricsApp(QWidget):
         else: 
             if self.settings_btn.isVisible(): menu.exec(self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft()))
             else: menu.exec(self.mapToGlobal(self.rect().center()))
+
+    def toggle_text_alignment(self):
+        current = self.settings.get("text_alignment", "left")
+        new_align = "center" if current == "left" else "left"
+        self.settings["text_alignment"] = new_align
+        self.save_settings(self.settings)
+        if self.current_lrc_text:
+            self.parse_and_load_lyrics(self.current_lrc_text)
 
     def toggle_pin_window(self):
         self.settings["pin_window"] = not self.settings.get("pin_window", True)
@@ -866,16 +956,31 @@ class FloatingLyricsApp(QWidget):
 
     def adjust_sync(self, amount):
         if not self.search_title: return 
-        
-        if amount == 'reset': 
+        if amount == 'reset':
             self.current_sync_offset = 0.0
-        else: 
+        else:
             self.current_sync_offset += amount
-            
         db.save_sync_offset(self.search_artist, self.search_title, self.current_sync_offset)
-        
+        ms_val = int(self.current_sync_offset * 1000)
+        self.offset_label.setText(f"{'+' if ms_val > 0 else ''}{ms_val} ms")
         self.hint_label.setText(f"同步微調: {self.current_sync_offset:+.1f}s")
+        if hasattr(self, 'last_position'):
+            self.refresh_lyrics_display(self.last_position)
         self.last_index = -2
+
+    def set_preferred_source(self):
+        current = self.settings.get("preferred_source", "NetEase")
+        sources = ["NetEase", "Lrclib", "Musixmatch", "QQMusic"]
+        try:
+            current_idx = sources.index(current)
+        except ValueError:
+            current_idx = 0
+            
+        val, ok = QInputDialog.getItem(self, "設定優先搜尋來源", "請選擇優先尋找歌詞的平台：", sources, current_idx, False)
+        if ok and val:
+            self.settings["preferred_source"] = val
+            save_settings(self.settings)
+            self.hint_label.setText(f"已將優先來源設為: {val}")
 
     def set_custom_font(self):
         current_font = QFont(self.settings.get("font_family", "Noto Sans JP"))

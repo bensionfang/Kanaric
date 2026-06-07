@@ -1,1 +1,16 @@
-{"font_size": 30, "font_family": "Noto Sans JP", "custom_css_path": "", "mini_mode": false, "dynamic_color": true, "sync_offset": 0, "pin_window": true, "show_furigana": true}
+{
+    "font_size": 30,
+    "font_family": "Noto Sans JP",
+    "custom_css_path": "",
+    "mini_mode": false,
+    "dynamic_color": true,
+    "sync_offset": 0,
+    "pin_window": true,
+    "show_furigana": true,
+    "hotkeys_enable": false,
+    "autoscroll": true,
+    "hk-advance": "[",
+    "hk-delay": "]",
+    "hk-plain-prev": "ArrowUp",
+    "hk-plain-next": "ArrowDown"
+}

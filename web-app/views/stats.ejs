@@ -118,7 +118,7 @@
 
         try {
             // 1. Load Summary
-            const summaryResp = await fetch('/api/stats/summary');
+            const summaryResp = await fetch('/api/stats/summary?t=' + Date.now());
             if (summaryResp.ok) {
                 const summary = await summaryResp.json();
                 document.getElementById('stat-total-songs').textContent = summary.totalSongs;
@@ -142,7 +142,7 @@
 
 
             // 3. Load Timeline Chart
-            const timelineResp = await fetch('/api/stats/timeline');
+            const timelineResp = await fetch('/api/stats/timeline?t=' + Date.now());
             if (timelineResp.ok) {
                 const timelineData = await timelineResp.json();
                 renderTimelineChart(timelineData);
@@ -178,8 +178,8 @@
 
         // Custom Gradient
         const gradient = ctx.createLinearGradient(0, 0, 0, 300);
-        gradient.addColorStop(0, 'rgba(99, 102, 241, 0.4)');
-        gradient.addColorStop(1, 'rgba(139, 92, 246, 0.0)');
+        gradient.addColorStop(0, 'rgba(29, 185, 84, 0.4)');
+        gradient.addColorStop(1, 'rgba(29, 185, 84, 0.0)');
 
         timelineChart = new Chart(ctx, {
             type: 'line',
@@ -188,17 +188,17 @@
                 datasets: [{
                     label: '每日播放次數',
                     data: values,
-                    borderColor: '#6366f1',
+                    borderColor: '#1DB954',
                     borderWidth: 3,
                     backgroundColor: gradient,
                     fill: true,
                     tension: 0.4,
-                    pointBackgroundColor: '#8b5cf6',
+                    pointBackgroundColor: '#1ED760',
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 2,
                     pointRadius: 5,
                     pointHoverRadius: 7,
-                    shadowColor: 'rgba(99, 102, 241, 0.5)',
+                    shadowColor: 'rgba(29, 185, 84, 0.5)',
                     shadowBlur: 10
                 }]
             },
@@ -212,7 +212,7 @@
                     tooltip: {
                         backgroundColor: 'rgba(15, 23, 42, 0.95)',
                         titleColor: '#ffffff',
-                        bodyColor: '#a5b4fc',
+                        bodyColor: '#86efac',
                         borderColor: 'rgba(255, 255, 255, 0.1)',
                         borderWidth: 1,
                         padding: 12,

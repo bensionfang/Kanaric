@@ -230,12 +230,12 @@ function fetchFallback(title, artist) {
       try {
         const parsed = JSON.parse(output);
         if (parsed.success && parsed.lyrics) {
-          resolve(parsed.lyrics);
+          resolve({ lyrics: parsed.lyrics, source: parsed.source || 'Fallback' });
         } else {
-          resolve("");
+          resolve(null);
         }
       } catch (e) {
-        resolve("");
+        resolve(null);
       }
     });
   });
@@ -307,21 +307,31 @@ app.get('/api/lyrics/fetch', async (req, res) => {
       
       const lrclibResp = await fetch(apiUrl);
       let bestLyric = "";
+      let isLrclib = false;
       if (lrclibResp.ok) {
         const data = await lrclibResp.json();
         bestLyric = data.syncedLyrics || data.plainLyrics || "";
+        if (bestLyric) isLrclib = true;
       }
       
-      // Fallback to syncedlyrics
+      // Fallback to syncedlyrics & QQMusic
       if (!bestLyric) {
-        bestLyric = await fetchFallback(cleanTitle, qArtist);
+        const fbData = await fetchFallback(cleanTitle, qArtist);
+        if (fbData && fbData.lyrics) {
+          bestLyric = fbData.lyrics;
+          isLrclib = false;
+          // pass source to caller via side-effect or just handle below
+          lrclibResp.fallbackSource = fbData.source;
+        }
       }
       
       // Save to DB under ORIGINAL title/artist
       if (bestLyric) {
+        const sourceName = isLrclib ? 'Lrclib' : (lrclibResp.fallbackSource || 'Fallback');
+        bestLyric = `[source:${sourceName}]\n${bestLyric}`;
         db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, bestLyric]);
         const injected = await injectFurigana(artist, title, bestLyric);
-        return res.json({ lyrics: injected, source: 'lrclib' });
+        return res.json({ lyrics: injected, source: sourceName });
       }
       
       return res.json({ lyrics: "", source: 'not_found' });
@@ -357,11 +367,29 @@ app.get('/api/lyrics/options', async (req, res) => {
     const cleanTitle = title.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
     const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' ' + artist)}`;
     
+    let valid_lyrics = [];
+    
+    // Fetch QQ Music Options via fallback python script
+    try {
+      const fbData = await fetchFallback(title, artist);
+      if (fbData && fbData.lyrics) {
+        valid_lyrics.push({
+          title: title,
+          artist: artist,
+          album: '',
+          duration: 0,
+          lyrics: `[source:${fbData.source}]\n${fbData.lyrics}`,
+          isSynced: /\[\d{2}:\d{2}/.test(fbData.lyrics),
+          provider: fbData.source,
+          score: 1500 // give high score to QQMusic fallback
+        });
+      }
+    } catch(e) {}
+    
     const resp = await fetch(searchUrl);
     if (!resp.ok) return res.json({ options: [] });
     
     const data = await resp.json();
-    let valid_lyrics = [];
     
     for (const t of data) {
       const best = t.syncedLyrics || t.plainLyrics;
@@ -371,8 +399,9 @@ app.get('/api/lyrics/options', async (req, res) => {
           artist: t.artistName || '',
           album: t.albumName || '',
           duration: t.duration || 0,
-          lyrics: best,
-          isSynced: !!t.syncedLyrics
+          lyrics: `[source:Lrclib]\n${best}`,
+          isSynced: !!t.syncedLyrics,
+          provider: 'Lrclib'
         });
       }
     }
@@ -403,7 +432,10 @@ app.get('/api/lyrics/options', async (req, res) => {
       item.score = score;
     });
     
-    valid_lyrics.sort((a, b) => b.score - a.score);
+    valid_lyrics.sort((a, b) => {
+      if (a.isSynced !== b.isSynced) return b.isSynced ? 1 : -1;
+      return b.score - a.score;
+    });
     const top5 = valid_lyrics.slice(0, 5).map(x => ({
       title: x.title,
       artist: x.artist,
@@ -411,6 +443,7 @@ app.get('/api/lyrics/options', async (req, res) => {
       duration: x.duration,
       lyrics: x.lyrics,
       score: x.score,
+      provider: x.provider,
       isSynced: x.isSynced
     }));
     
