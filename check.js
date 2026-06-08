@@ -1,116 +1,4 @@
-<%- include('header') %>
 
-<div class="page-header">
-    <div>
-        <h1>歌詞編輯器 (LRC Editor)</h1>
-        <div class="subtitle">手動修正時間軸，儲存後立即同步到桌面版</div>
-    </div>
-</div>
-
-<div class="stats-dashboard-grid">
-    <div class="dashboard-card" style="flex: 1; display: flex; flex-direction: column;">
-        <div class="card-header">
-            <h3>選擇歌曲</h3>
-        </div>
-        <input type="text" id="song-search" placeholder="搜尋歌名或歌手..." style="width: 100%; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 8px 12px; border-radius: 4px; margin-bottom: 10px; font-family: inherit; font-size: 14px;">
-        <select id="song-select" size="10" style="width: 100%; flex: 1; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 10px; border-radius: 4px; font-family: monospace;">
-            <option disabled>載入中...</option>
-        </select>
-    </div>
-
-    <div class="dashboard-card" style="flex: 2;">
-        <div class="card-header" style="display: flex; flex-direction: row !important; justify-content: space-between; align-items: center; gap: 15px; border-bottom: none; padding-bottom: 0;">
-            <div id="editor-title" style="font-size: 20px; font-weight: bold; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">請選擇歌曲...</div>
-            <div style="display: flex; gap: 12px; flex-shrink: 0;">
-                <button id="advanced-btn" class="ctrl-btn" style="height: 38px; padding: 0 16px; font-size: 14px; width: auto; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--panel-border); border-radius: 6px;" onclick="openEditorOptionsModal()" disabled><i class="fa-solid fa-magnifying-glass-plus"></i> 尋找更多歌詞</button>
-                <button id="save-btn" class="ctrl-btn primary" style="height: 38px; padding: 0 20px; font-size: 14px; font-weight: 600; width: auto; border-radius: 6px;" disabled>儲存修改</button>
-            </div>
-        </div>
-        <div id="lrc-editor-container" style="width: 100%; height: 500px; background: var(--bg-main); border: 1px solid var(--panel-border); padding: 15px; border-radius: 4px; overflow-y: auto;">
-            <div style="color: var(--text-secondary); text-align: center; margin-top: 200px;">在左側選擇一首歌以開始編輯...</div>
-        </div>
-    </div>
-</div>
-
-<!-- Editor Advanced Options Modal -->
-<div id="editor-options-modal" class="modal-overlay hidden">
-    <div class="modal-content" style="padding: 20px; position: relative;">
-        <button onclick="closeEditorOptionsModal()" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer; transition: color 0.3s;"><i class="fa-solid fa-xmark"></i></button>
-        <h3><i class="fa-solid fa-magnifying-glass-plus"></i> 尋找更多歌詞</h3>
-        <div class="modal-actions" style="display:flex; flex-direction:column; gap: 15px; margin-top: 15px;">
-            <div style="padding-top: 5px;">
-                <h4 style="margin-bottom: 10px; font-size: 14px;"><i class="fa-solid fa-list"></i> 取得備選歌詞</h4>
-                <div id="editor-options-list" style="margin-top: 10px; max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;"></div>
-            </div>
-
-
-            <div style="border-top: 1px solid var(--panel-border); padding-top: 15px;">
-                <h4 style="margin-bottom: 10px; font-size: 14px;"><i class="fa-solid fa-paste"></i> 貼上自訂歌詞</h4>
-                <textarea id="editor-custom-text" placeholder="貼上 LRC 格式或純文字歌詞..." style="width:100%; height:80px; margin-bottom:10px; background: var(--bg-main); border: 1px solid var(--panel-border); padding: 8px; color: var(--text-color); border-radius: 4px; resize: none;"></textarea>
-                <button onclick="editorCustomLyrics()" class="nav-btn" style="width: 100%; justify-content: center;"><i class="fa-solid fa-check"></i> 載入自訂歌詞到編輯器</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<style>
-    .lrc-row {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 8px;
-        align-items: center;
-        background: var(--panel-bg);
-        padding: 6px 10px;
-        border-radius: 6px;
-        border: 1px solid var(--panel-border);
-        transition: border-color 0.2s;
-    }
-    .lrc-row:focus-within {
-        border-color: var(--accent-main);
-    }
-    .lrc-time {
-        width: 90px;
-        background: transparent;
-        border: 1px solid var(--panel-border);
-        color: var(--text-primary);
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-family: monospace;
-        font-size: 14px;
-        text-align: center;
-    }
-    .lrc-text {
-        flex: 1;
-        background: transparent;
-        border: 1px solid transparent;
-        color: var(--text-primary);
-        padding: 4px 8px;
-        font-size: 15px;
-        border-radius: 4px;
-        transition: background 0.2s;
-    }
-    .lrc-text:focus {
-        background: var(--bg-main);
-        border-color: var(--panel-border);
-        outline: none;
-    }
-    .lrc-btn {
-        background: transparent;
-        border: none;
-        color: var(--text-secondary);
-        cursor: pointer;
-        padding: 4px 8px;
-        border-radius: 4px;
-        transition: color 0.2s, background 0.2s;
-    }
-    .lrc-btn:hover {
-        background: var(--bg-main);
-    }
-    .lrc-btn.add:hover { color: #1DB954; }
-    .lrc-btn.del:hover { color: #ef4444; }
-</style>
-
-<script>
     const songSelect = document.getElementById('song-select');
     const editorTitle = document.getElementById('editor-title');
     const editorContainer = document.getElementById('lrc-editor-container');
@@ -121,18 +9,13 @@
     let currentTitle = "";
     
     function openEditorOptionsModal() {
-        const modal = document.getElementById('editor-options-modal');
-        modal.classList.remove('hidden');
-        modal.classList.add('show');
-        
-        // Auto fetch options
-        editorGetOptions();
+        document.getElementById('editor-options-modal').classList.remove('hidden');
+        document.getElementById('editor-manual-title').value = currentTitle || '';
+        document.getElementById('editor-manual-artist').value = currentArtist || '';
     }
 
     function closeEditorOptionsModal() {
-        const modal = document.getElementById('editor-options-modal');
-        modal.classList.remove('show');
-        setTimeout(() => modal.classList.add('hidden'), 300);
+        document.getElementById('editor-options-modal').classList.add('hidden');
     }
 
     function applyLyricsToEditor(lyrics) {
@@ -148,12 +31,32 @@
         });
     }
 
+    function editorForceRefetch() {
+        if (!currentTitle) return;
+        closeEditorOptionsModal();
+        fetch(`/api/lyrics/fetch?force=true&title=${encodeURIComponent(currentTitle)}&artist=${encodeURIComponent(currentArtist)}`)
+            .then(res => res.json())
+            .then(data => {
+                if(data.lyrics) loadRawLyrics();
+            });
+    }
+
     function editorCustomLyrics() {
         const text = document.getElementById('editor-custom-text').value.trim();
         if (text) applyLyricsToEditor(text);
     }
 
-
+    function editorManualSearch() {
+        const title = document.getElementById('editor-manual-title').value.trim();
+        const artist = document.getElementById('editor-manual-artist').value.trim();
+        if (!title) return;
+        closeEditorOptionsModal();
+        fetch(`/api/lyrics/fetch?force=true&title=${encodeURIComponent(currentTitle)}&artist=${encodeURIComponent(currentArtist)}&searchTitle=${encodeURIComponent(title)}&searchArtist=${encodeURIComponent(artist)}`)
+            .then(res => res.json())
+            .then(data => {
+                if(data.lyrics) loadRawLyrics();
+            });
+    }
 
     async function editorGetOptions() {
         if (!currentTitle) return;
@@ -172,20 +75,7 @@
                     btn.style.flexDirection = 'column';
                     btn.style.alignItems = 'flex-start';
                     btn.style.padding = '8px 12px';
-                    btn.innerHTML = `
-                        <div style="display: flex; width: 100%; justify-content: space-between; align-items: center;">
-                            <div style="flex: 1; min-width: 0; text-align: left;">
-                                <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.title}</div>
-                                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.artist}${opt.album ? ' [' + opt.album + ']' : ''}</div>
-                            </div>
-                            <div style="display:flex; flex-direction:column; align-items:flex-end; flex-shrink: 0; margin-left: 10px;">
-                                <div style="padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${opt.isSynced ? 'background: rgba(76, 175, 80, 0.15); color: #4caf50;' : 'background: rgba(158, 158, 158, 0.15); color: #9e9e9e;'}">
-                                    ${opt.isSynced ? 'LRC' : 'TXT'}
-                                </div>
-                                <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; opacity: 0.8;">${opt.provider || 'Unknown'}</div>
-                            </div>
-                        </div>
-                    `;
+                    btn.innerHTML = `<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.title}</div><div style="font-size: 11px; color: var(--text-secondary);">${opt.artist} [${opt.album}] - ${opt.source}</div>`;
                     btn.onclick = () => { applyLyricsToEditor(opt.lyrics); };
                     listEl.appendChild(btn);
                 });
@@ -378,7 +268,10 @@
         loadRawLyrics();
     });
 
-
+    advancedBtn.addEventListener('click', () => {
+        openEditorOptionsModal();
+        editorGetOptions();
+    });
 
     saveBtn.addEventListener('click', () => {
         saveBtn.innerText = "儲存中...";
@@ -416,6 +309,3 @@
             }, 2000);
         });
     });
-</script>
-
-<%- include('footer') %>

@@ -12,6 +12,7 @@ async def poll_media():
     last_real_pos_time = time.time()
     last_song_id = ""
     current_thumb_b64 = ""
+    last_sent_thumb_id = ""
     
     while True:
         try:
@@ -60,9 +61,11 @@ async def poll_media():
                     "artist": artist,
                     "album": album,
                     "position": interpolated_pos,
-                    "is_playing": is_playing,
-                    "thumbnail": current_thumb_b64
+                    "is_playing": is_playing
                 }
+                if song_id != last_sent_thumb_id:
+                    state["thumbnail"] = current_thumb_b64
+                    last_sent_thumb_id = song_id
             else:
                 state = {
                     "title": "",

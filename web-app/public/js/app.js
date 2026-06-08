@@ -87,6 +87,9 @@ function openLyricsModal() {
         if (titleInput && !titleInput.value) titleInput.value = lastMediaTitle;
         if (artistInput && !artistInput.value) artistInput.value = lastMediaArtist;
     }
+    
+    // Automatically fetch options
+    performGetOptions();
 }
 
 function closeLyricsModal() {
@@ -113,15 +116,17 @@ async function performGetOptions() {
             <div style="background: var(--bg-main); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px 12px; cursor: pointer; transition: border-color 0.2s; display: flex; justify-content: space-between; align-items: center;"
                  onmouseenter="this.style.borderColor='var(--accent-main)'" onmouseleave="this.style.borderColor='var(--panel-border)'"
                  onclick="applyLyricsOption(${i})">
-                <div style="flex: 1; min-width: 0;">
-                    <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.title}</div>
-                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.artist}${opt.album ? ' · ' + opt.album : ''}</div>
-                </div>
-                <div style="display:flex; flex-direction:column; align-items:flex-end;">
-                    <div style="margin-left: 10px; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${opt.isSynced ? 'background: rgba(76, 175, 80, 0.15); color: #4caf50;' : 'background: rgba(158, 158, 158, 0.15); color: #9e9e9e;'}">
-                        ${opt.isSynced ? 'LRC' : 'TXT'}
+                <div style="display: flex; width: 100%; justify-content: space-between; align-items: center;">
+                    <div style="flex: 1; min-width: 0; text-align: left;">
+                        <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.title}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.artist}${opt.album ? ' [' + opt.album + ']' : ''}</div>
                     </div>
-                    ${opt.provider ? `<div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; opacity: 0.8;">${opt.provider}</div>` : ''}
+                    <div style="display:flex; flex-direction:column; align-items:flex-end; flex-shrink: 0; margin-left: 10px;">
+                        <div style="padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${opt.isSynced ? 'background: rgba(76, 175, 80, 0.15); color: #4caf50;' : 'background: rgba(158, 158, 158, 0.15); color: #9e9e9e;'}">
+                            ${opt.isSynced ? 'LRC' : 'TXT'}
+                        </div>
+                        <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; opacity: 0.8;">${opt.provider || 'Unknown'}</div>
+                    </div>
                 </div>
             </div>
         `).join('');
@@ -156,52 +161,8 @@ async function applyLyricsOption(index) {
     }
 }
 
-async function performManualSearch() {
-    const title = document.getElementById('manual-title').value.trim();
-    const artist = document.getElementById('manual-artist').value.trim();
-    if (!title) { showToast('請輸入歌曲名稱', 'fa-solid fa-circle-exclamation', 2000); return; }
-    closeLyricsModal();
-    showToast(`搜尋: ${title}`, 'fa-solid fa-search', 2000);
-    try {
-        const resp = await fetch(`/api/lyrics/fetch?title=${encodeURIComponent(lastMediaTitle || title)}&artist=${encodeURIComponent(lastMediaArtist || artist)}&force=true&searchTitle=${encodeURIComponent(title)}&searchArtist=${encodeURIComponent(artist)}`);
-        const data = await resp.json();
-        if (data.lyrics) {
-            parseLrcLyrics(data.lyrics);
-            renderLyrics();
-            showToast('歌詞載入成功', 'fa-solid fa-check', 2000);
-        } else {
-            showToast('找不到歌詞', 'fa-solid fa-face-frown', 2500);
-        }
-    } catch (e) {
-        showToast('搜尋失敗', 'fa-solid fa-xmark', 2000);
-    }
-}
 
-async function performCustomLyrics() {
-    const lyricsText = document.getElementById('custom-lyrics-text').value.trim();
-    if (!lyricsText) { showToast('請貼上歌詞內容', 'fa-solid fa-circle-exclamation', 2000); return; }
-    if (!lastMediaTitle) { showToast('目前沒有播放任何歌曲', 'fa-solid fa-circle-exclamation', 2000); return; }
-    closeLyricsModal();
-    try {
-        const resp = await fetch('/api/lyrics/custom', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: lastMediaTitle, artist: lastMediaArtist, lyrics: lyricsText })
-        });
-        const data = await resp.json();
-        if (data.lyrics) {
-            parseLrcLyrics(data.lyrics);
-            renderLyrics();
-            showToast('自訂歌詞套用成功', 'fa-solid fa-check', 2000);
-        } else {
-            parseLrcLyrics(lyricsText);
-            renderLyrics();
-            showToast('歌詞套用成功', 'fa-solid fa-check', 2000);
-        }
-    } catch (e) {
-        showToast('套用失敗', 'fa-solid fa-xmark', 2000);
-    }
-}
+
 
 // Detect manual user scrolling
 function handleManualScroll() {
@@ -363,6 +324,7 @@ function parseLrcLyrics(lrcText) {
         
         let match;
         const text = line.replace(/\[\d+:\d+(?:\.\d+)?\]/g, '').trim();
+        if (text.startsWith('#TITLE#')) return;
         
         timeReg.lastIndex = 0;
         let lineHasTag = false;
@@ -385,7 +347,7 @@ function parseLrcLyrics(lrcText) {
         isUnsyncedLyrics = true;
         lines.forEach(line => {
             const trimmed = line.trim();
-            if (trimmed) {
+            if (trimmed && !trimmed.startsWith('#TITLE#')) {
                 parsedLyrics.push({ time: -1, text: trimmed });
             }
         });

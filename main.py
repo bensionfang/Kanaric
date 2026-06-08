@@ -34,6 +34,7 @@ from fetcher import LyricsFetcher
 from db import db
 
 def load_settings():
+    config.settings = config._load_settings()
     return config.get_all()
 
 def save_settings(settings):
@@ -46,7 +47,7 @@ def build_clickable_furigana_html(text, artist, title, line_index, is_japanese=T
         html = '<table border="0" cellpadding="0" cellspacing="0" align="left" style="margin: 0px;">'
         row1 = "<tr class='furigana-row'><td align='center' style='padding: 0;'></td></tr>"
         text_escaped = text.replace(' ', '&nbsp;')
-        row2 = f"<tr class='kanji-row'><td align='center' style='white-space: nowrap; padding: 0;'>{text_escaped}</td></tr>"
+        row2 = f"<tr class='kanji-row'><td align='center' style='white-space: nowrap; padding: 0;'><span class='kanji-text'>{text_escaped}</span></td></tr>"
         html += row1 + row2 + "</table>"
         return html, []
 
@@ -99,11 +100,11 @@ def build_clickable_furigana_html(text, artist, title, line_index, is_japanese=T
             a_end = "</a>"
             
             if not p_hira:
-                row1 += f"<td align='center' style='padding: 0;'></td>"
-                row2 += f"<td align='center' style='white-space: nowrap; padding: 0;'>{a_start}{p_orig_escaped}{a_end}</td>"
+                row1 += f"<td align='center' valign='bottom' style='padding: 0;'></td>"
+                row2 += f"<td align='center' valign='top' style='white-space: nowrap; padding: 0;'>{a_start}<span class='kanji-text'>{p_orig_escaped}</span>{a_end}</td>"
             else:
-                row1 += f"<td align='center' style='padding: 0; color: #a5b4fc;'>{a_start}{p_hira}{a_end}</td>"
-                row2 += f"<td align='center' style='white-space: nowrap; padding: 0;'>{a_start}{p_orig_escaped}{a_end}</td>"
+                row1 += f"<td align='center' valign='bottom' style='padding: 0; color: #a5b4fc;'>{a_start}{p_hira}{a_end}</td>"
+                row2 += f"<td align='center' valign='top' style='white-space: nowrap; padding: 0;'>{a_start}<span class='kanji-text'>{p_orig_escaped}</span>{a_end}</td>"
             
     row1 += "</tr>"
     row2 += "</tr>"
@@ -166,13 +167,23 @@ class FloatingLyricsApp(QWidget):
         self.hotkey_manager.toggle_visibility_signal.connect(self.toggle_visibility_from_hotkey)
         self.hotkey_manager.adjust_sync_forward_signal.connect(lambda: self.adjust_sync(0.5))
         self.hotkey_manager.adjust_sync_backward_signal.connect(lambda: self.adjust_sync(-0.5))
+        
+        self.show_status("靈動島已啟動！等待音樂中...")
+        self.hide_timer.start()
 
     def start_lyric_fetcher(self):
+        if not hasattr(self, '_orphan_fetchers'):
+            self._orphan_fetchers = []
+        self._orphan_fetchers = [f for f in self._orphan_fetchers if f.isRunning()]
+            
         if hasattr(self, 'fetcher') and self.fetcher is not None:
             try:
                 self.fetcher.lyrics_fetched.disconnect()
             except TypeError:
                 pass 
+            if self.fetcher.isRunning():
+                self._orphan_fetchers.append(self.fetcher)
+                
         self.fetcher = LyricsFetcher(self.search_title, self.search_artist)
         self.fetcher.lyrics_fetched.connect(self.handle_fetched_lyrics)
         self.fetcher.start()
@@ -180,7 +191,10 @@ class FloatingLyricsApp(QWidget):
     def init_ui(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.resize(800, 80) 
+        
+        self.is_snapped_to_top = True
+        screen = QApplication.primaryScreen().geometry()
+        self.setGeometry((screen.width() - 800) // 2, 0, 800, 80)
         
         self.container = QFrame(self)
         main_layout = QVBoxLayout(self)
@@ -207,8 +221,21 @@ class FloatingLyricsApp(QWidget):
         self.scroll_area.viewport().installEventFilter(self)
         
         self.content_widget = QWidget()
-        self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(10, 0, 10, 0)
+        self.content_layout = QVBoxLayout()
+        self.content_layout.setContentsMargins(20, 20, 20, 20)
+        self.content_layout.setSpacing(10)
+
+        self.intro_wrapper = QWidget()
+        intro_layout = QVBoxLayout(self.intro_wrapper)
+        intro_layout.setContentsMargins(0, 0, 0, 0)
+        intro_layout.setSpacing(0)
+        self.intro_label = QLabel("<div align='left' style='color: #ffffff; font-size: 22px;'>無播放中的媒體</div>")
+        intro_layout.addWidget(self.intro_label)
+        self.content_layout.addWidget(self.intro_wrapper)
+
+        self.content_widget = QWidget()
+        self.content_widget.setObjectName("contentWidget")
+        self.content_widget.setLayout(self.content_layout)
         self.content_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
             
         self.scroll_area.setWidget(self.content_widget)
@@ -250,11 +277,11 @@ class FloatingLyricsApp(QWidget):
                 clean_html = re.sub(r'<rt>.*?</rt>', '', html)
                 clean_html = clean_html.replace('<ruby>', '').replace('</ruby>', '')
                 html = clean_html
-                label.setText(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>{html}</div>")
+                label.setText(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px;'>{html}</div>")
             else:
                 f_size = max(10, int(fs * 0.6))
-                sized_html = html.replace("<tr class='kanji-row'>", f"<tr class='kanji-row' style='font-size: {fs}px;'>")
-                label.setText(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {f_size}px; font-weight: bold;'>{sized_html}</div>")
+                sized_html = html.replace("<span class='kanji-text'>", f"<span class='kanji-text' style='font-size: {fs}px;'>")
+                label.setText(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {f_size}px;'>{sized_html}</div>")
         
         self.content_widget.adjustSize()
         if self.lyric_labels:
@@ -374,7 +401,7 @@ class FloatingLyricsApp(QWidget):
         dialog.resize(650, 650)
         dialog.setStyleSheet("""
             QDialog { background-color: #2b2b2b; color: white; }
-            QPushButton { background-color: #444; color: white; padding: 8px; border-radius: 4px; font-weight: bold; }
+            QPushButton { background-color: #444; color: white; padding: 8px; border-radius: 4px; }
             QPushButton:hover { background-color: #555; }
             QTextEdit { background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #444; border-radius: 4px; padding: 10px; font-size: 14px; }
         """)
@@ -542,14 +569,20 @@ class FloatingLyricsApp(QWidget):
         self.start_lyric_fetcher()
 
     def apply_mode_styles(self):
+        if not hasattr(self, 'theme_color'):
+            self.theme_color = (0, 0, 0, 150)
         r, g, b, a = self.theme_color
         radius = 40
-        base_style = f"QFrame {{ background-color: rgba({r}, {g}, {b}, {a}); border-radius: {radius}px; }}"
-        self.scroll_area.setStyleSheet("background: transparent; border: none;")
-        self.content_widget.setStyleSheet("background: transparent;")
-            
-        self.container.setStyleSheet(base_style)
-        self.resize(800, 80)
+        if getattr(self, 'is_snapped_to_top', False):
+            base_style = f"QFrame {{ background-color: rgba({r}, {g}, {b}, {a}); border-bottom-left-radius: {radius}px; border-bottom-right-radius: {radius}px; border-top-left-radius: 0px; border-top-right-radius: 0px; }}"
+        else:
+            base_style = f"QFrame {{ background-color: rgba({r}, {g}, {b}, {a}); border-radius: {radius}px; }}"
+        
+        if getattr(self, 'last_base_style', '') != base_style:
+            self.container.setStyleSheet(base_style)
+            self.scroll_area.setStyleSheet("background: transparent; border: none;")
+            self.content_widget.setStyleSheet("background: transparent;")
+            self.last_base_style = base_style
 
     def extract_dominant_color(self, image_bytes):
         if not image_bytes or not self.settings.get("dynamic_color"):
@@ -569,12 +602,16 @@ class FloatingLyricsApp(QWidget):
         self.clear_lyrics()
         fs = self.settings.get("font_size", 22)
         ff = self.settings.get("font_family", "Noto Sans JP")
-        label = QLabel(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>{text}</div>")
+        label = QLabel(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px;'>{text}</div>")
         label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter) 
         self.content_layout.addWidget(label)
         self.content_layout.addStretch()
 
     def clear_lyrics(self):
+        if hasattr(self, 'anim_group'):
+            self.anim_group.stop()
+            self.anim_group.clear()
+            
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
@@ -614,7 +651,7 @@ class FloatingLyricsApp(QWidget):
         artist_disp = getattr(self, 'media_artist', self.search_artist)
         if not title_disp: title_disp = "Floating Lyrics"
         
-        self.intro_label = QLabel(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>🎵 {title_disp} - {artist_disp}</div>")
+        self.intro_label = QLabel(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px;'>{title_disp} - {artist_disp}</div>")
         self.intro_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         intro_ly.addWidget(self.intro_label)
         
@@ -652,6 +689,8 @@ class FloatingLyricsApp(QWidget):
                 text = ""
 
             if text:
+                if "#TITLE#" in text:
+                    continue
                 parsed_lines.append({"seconds": seconds, "text": text, "translation": None})
                 
         # Sort and merge translations
@@ -702,11 +741,11 @@ class FloatingLyricsApp(QWidget):
                     if not show_furigana:
                         clean_html = re.sub(r'<rt>.*?</rt>', '', furigana_html)
                         clean_html = clean_html.replace('<ruby>', '').replace('</ruby>', '')
-                        label.setText(f"<div align='{alignment}' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>{clean_html}{trans_html}</div>")
+                        label.setText(f"<div align='{alignment}' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px;'>{clean_html}{trans_html}</div>")
                     else:
                         f_size = max(10, int(fs * 0.6))
-                        sized_furigana = furigana_html.replace("<tr class='kanji-row'>", f"<tr class='kanji-row' style='font-size: {fs}px;'>")
-                        label.setText(f"<div align='{alignment}' style='font-family: \"{ff}\"; color: #ffffff; font-size: {f_size}px; font-weight: bold;'>{sized_furigana}{trans_html}</div>")
+                        sized_furigana = furigana_html.replace("<span class='kanji-text'>", f"<span class='kanji-text' style='font-size: {fs}px;'>")
+                        label.setText(f"<div align='{alignment}' style='font-family: \"{ff}\"; color: #ffffff; font-size: {f_size}px;'>{sized_furigana}{trans_html}</div>")
                     wl.addWidget(label)
                     
                     effect = QGraphicsOpacityEffect(wrapper)
@@ -765,9 +804,11 @@ class FloatingLyricsApp(QWidget):
         
         is_plain_text = len(self.lyrics_data) > 0 and self.lyrics_data[0][0] < 0
 
-        if hasattr(self, 'anim_group') and self.anim_group.state() == QAbstractAnimation.State.Running:
+        if hasattr(self, 'anim_group'):
             self.anim_group.stop()
-        self.anim_group = QParallelAnimationGroup()
+            self.anim_group.clear()
+            self.anim_group.deleteLater()
+        self.anim_group = QParallelAnimationGroup(self)
 
         target_y = 0
         target_width_hint = 0
@@ -776,16 +817,25 @@ class FloatingLyricsApp(QWidget):
         if is_plain_text or index >= 0:
             if self.lyric_labels:
                 scroll_target = max(0, min(index, len(self.lyric_labels) - 1))
-                target_y = self.lyric_labels[scroll_target]['wrapper'].y()
+                target_y = max(0, self.lyric_labels[scroll_target]['wrapper'].y() - 6)
                 active_labels = self.lyric_labels[scroll_target:scroll_target + lines_to_show]
                 if active_labels:
                     target_width_hint = max(lbl['label'].sizeHint().width() for lbl in active_labels)
-                    target_height_hint = sum(lbl['label'].sizeHint().height() for lbl in active_labels)
+                    target_height_hint = sum(lbl['label'].sizeHint().height() for lbl in active_labels) + 15
         else:
             if hasattr(self, 'intro_wrapper'):
                 target_y = self.intro_wrapper.y()
                 target_width_hint = self.intro_label.sizeHint().width()
                 target_height_hint = self.intro_label.sizeHint().height()
+                
+                if lines_to_show >= 2 and self.lyric_labels:
+                    extra_lines = lines_to_show - 1
+                    active_labels = self.lyric_labels[0:extra_lines]
+                    if active_labels:
+                        lyric_width = max(lbl['label'].sizeHint().width() for lbl in active_labels)
+                        lyric_height = sum(lbl['label'].sizeHint().height() for lbl in active_labels)
+                        target_width_hint = max(target_width_hint, lyric_width)
+                        target_height_hint += lyric_height + 15
 
         scroll_anim = QPropertyAnimation(self.scroll_area.verticalScrollBar(), b"value")
         scroll_anim.setDuration(400)
@@ -798,21 +848,23 @@ class FloatingLyricsApp(QWidget):
         current_geom = self.geometry()
         center_x = current_geom.center().x()
         base_width_padding = 130 # Album art + margins
-        base_height_padding = 40 # Top/bottom margins
+        base_height_padding = 20 # vbox margins (10 top, 10 bottom)
         
         target_width = min(1200, max(300, base_width_padding + target_width_hint))
         target_height = max(80, base_height_padding + target_height_hint)
         
         target_x = center_x - target_width // 2
         
-        target_geom = QRect(target_x, current_geom.y(), target_width, target_height)
+        target_y_pos = 0 if getattr(self, 'is_snapped_to_top', False) else current_geom.y()
+        target_geom = QRect(target_x, target_y_pos, target_width, target_height)
         
-        self.geom_anim = QPropertyAnimation(self, b"geometry")
-        self.geom_anim.setDuration(400)
-        self.geom_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.geom_anim.setStartValue(current_geom)
-        self.geom_anim.setEndValue(target_geom)
-        self.anim_group.addAnimation(self.geom_anim)
+        if getattr(self, 'drag_pos', None) is None:
+            geom_anim = QPropertyAnimation(self, b"geometry")
+            geom_anim.setDuration(400)
+            geom_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            geom_anim.setStartValue(current_geom)
+            geom_anim.setEndValue(target_geom)
+            self.anim_group.addAnimation(geom_anim)
 
         if hasattr(self, 'intro_wrapper'):
             intro_eff = self.intro_wrapper.graphicsEffect()
@@ -846,8 +898,25 @@ class FloatingLyricsApp(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.MouseButton.LeftButton and self.drag_pos is not None:
-            self.move(event.globalPosition().toPoint() - self.drag_pos)
+        if event.buttons() == Qt.MouseButton.LeftButton and getattr(self, 'drag_pos', None) is not None:
+            new_pos = event.globalPosition().toPoint() - self.drag_pos
+            old_snap = getattr(self, 'is_snapped_to_top', False)
+            
+            snap_threshold = 10 if old_snap else 5
+            
+            if new_pos.y() < snap_threshold:
+                new_pos.setY(0)
+                self.is_snapped_to_top = True
+            else:
+                self.is_snapped_to_top = False
+                
+            self.move(new_pos)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_pos = None
+            self.apply_mode_styles()
+            QTimer.singleShot(0, lambda: self.animate_to_index(getattr(self, 'last_index', -1)))
             event.accept()
 
     def keyPressEvent(self, event):

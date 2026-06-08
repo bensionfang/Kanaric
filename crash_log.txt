@@ -1,14 +1,10 @@
 Traceback (most recent call last):
-  File "C:\Users\USER\Desktop\Floating-Lyrics\media.py", line 15, in run
-    loop.run_until_complete(self.poll_media())
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\USER\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\base_events.py", line 719, in run_until_complete
-    return future.result()
-           ~~~~~~~~~~~~~^^
-  File "C:\Users\USER\Desktop\Floating-Lyrics\media.py", line 27, in poll_media
-    if current_session:
-           ^^^^^^^^^^^^
-  File "C:\Users\USER\Desktop\Floating-Lyrics\venv\Lib\site-packages\winrt\runtime\_internals.py", line 245, in wait
-    return op.get_results()
-           ~~~~~~~~~~~~~~^^
-OSError: [WinError -2147023174] RPC 伺服器無法使用。
+  File "C:\Users\USER\Desktop\Floating-Lyrics\main.py", line 1095, in <module>
+    window = FloatingLyricsApp()
+  File "C:\Users\USER\Desktop\Floating-Lyrics\main.py", line 144, in __init__
+    self.init_ui()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\USER\Desktop\Floating-Lyrics\main.py", line 247, in init_ui
+    self.hide_timer.setInterval(3000)
+    ^^^^^^^^^^^^^^^
+AttributeError: 'FloatingLyricsApp' object has no attribute 'hide_timer'

@@ -50,3 +50,35 @@ def text_to_romaji_query(text: str) -> str:
     out = [item['hepburn'] for item in result if item['hepburn']]
     joined = " ".join(out)
     return re.sub(r'\s+', ' ', joined).strip()
+
+import re
+def auto_mark_title_lines(lrc_text):
+    if not lrc_text: return lrc_text
+    keywords = ["作詞", "作词", "作曲", "編曲", "编曲", "製作", "制作", "混音", "演唱", "原唱", "vocal", "lyric", "music", "arrange", "mix", "mastering", "和聲", "和声", "企劃", "企划"]
+    lines = lrc_text.split('\n')
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            new_lines.append(line)
+            continue
+            
+        match = re.match(r'^(\[(?:\d+:\d+(?:\.\d+)?)\])+(.+)$', stripped)
+        if match:
+            tags = match.group(1)
+            text = match.group(2).strip()
+            if not text.startswith("#TITLE#"):
+                lower_text = text.lower()
+                is_title = False
+                for kw in keywords:
+                    if kw in lower_text and len(text) < 40:
+                        # Ensure it's acting like a label (e.g., followed by colon, space, or is mostly just the keyword)
+                        if re.search(r'[:：]', text) or re.search(rf'{kw}\s+', text) or len(text) < len(kw) + 5:
+                            is_title = True
+                            break
+                if is_title:
+                    text = "#TITLE#" + text
+            new_lines.append(f"{tags}{text}")
+        else:
+            new_lines.append(stripped)
+    return '\n'.join(new_lines)

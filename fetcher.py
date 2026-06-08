@@ -5,7 +5,7 @@ import base64
 import json
 import syncedlyrics
 from PyQt6.QtCore import QThread, pyqtSignal
-from utils import text_to_romaji_query
+from utils import text_to_romaji_query, auto_mark_title_lines
 from db import db
 from config import ITUNES_TIMEOUT, API_TIMEOUT, config
 
@@ -170,6 +170,8 @@ class LyricsFetcher(QThread):
                     logging.warning(f"iTunes API 請求失敗: {e}")
 
             final_lyric = best_synced_lyric or best_plain_lyric
+            if final_lyric:
+                final_lyric = auto_mark_title_lines(final_lyric)
             
             # Sort options: synced lyrics first
             all_options.sort(key=lambda x: bool(re.search(r'\[\d{2}:\d{2}', x.get('lyrics', ''))), reverse=True)

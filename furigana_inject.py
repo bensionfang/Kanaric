@@ -92,14 +92,20 @@ def process_lrc(artist, title, lrc_text):
         if match:
             tags = match.group(1)
             text = match.group(2).strip()
-            ruby_text = build_ruby_html(text, artist, title)
+            if text.startswith("#TITLE#"):
+                ruby_text = text
+            else:
+                ruby_text = build_ruby_html(text, artist, title)
             new_lines.append(f"{tags}{ruby_text}")
         elif re.match(r'^\[[a-zA-Z]+:.*\]$', line):
             # It's an LRC metadata tag like [ar:Artist], leave it alone
             new_lines.append(line)
         else:
             # It's either plain text lyrics without tags, or a malformed line. Process it.
-            ruby_text = build_ruby_html(line, artist, title)
+            if line.startswith("#TITLE#"):
+                ruby_text = line
+            else:
+                ruby_text = build_ruby_html(line, artist, title)
             new_lines.append(ruby_text)
             
     return '\n'.join(new_lines)

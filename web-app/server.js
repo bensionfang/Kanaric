@@ -87,7 +87,7 @@ function startMediaMonitor() {
       if (line.trim()) {
         try {
           const state = JSON.parse(line.trim());
-          currentMediaState = state;
+          currentMediaState = { ...currentMediaState, ...state };
           
           if (state.is_playing && state.title && state.artist) {
             const songId = `${state.title}-${state.artist}`;
@@ -180,6 +180,46 @@ app.post('/api/settings', (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+function autoMarkTitleLines(lrcText) {
+  if (!lrcText) return lrcText;
+  const keywords = ["作詞", "作词", "作曲", "編曲", "编曲", "製作", "制作", "混音", "演唱", "原唱", "vocal", "lyric", "music", "arrange", "mix", "mastering", "和聲", "和声", "企劃", "企划"];
+  const lines = lrcText.split('\n');
+  const newLines = [];
+  for (let line of lines) {
+    let stripped = line.trim();
+    if (!stripped) {
+      newLines.push(line);
+      continue;
+    }
+    const match = stripped.match(/^(\[(?:\d+:\d+(?:\.\d+)?)\])+(.+)$/);
+    if (match) {
+      const tags = match[1];
+      let text = match[2].trim();
+      if (!text.startsWith("#TITLE#")) {
+        const lowerText = text.toLowerCase();
+        let isTitle = false;
+        for (let kw of keywords) {
+          if (lowerText.includes(kw) && text.length < 40) {
+            // Ensure it's acting like a label
+            const kwRegex = new RegExp(`${kw}\\s+`, 'i');
+            if (/[:：]/.test(text) || kwRegex.test(lowerText) || text.length < kw.length + 5) {
+              isTitle = true;
+              break;
+            }
+          }
+        }
+        if (isTitle) {
+          text = "#TITLE#" + text;
+        }
+      }
+      newLines.push(`${tags}${text}`);
+    } else {
+      newLines.push(stripped);
+    }
+  }
+  return newLines.join('\n');
+}
 
 function injectFurigana(artist, title, lyrics) {
   return new Promise((resolve) => {
@@ -334,7 +374,13 @@ app.get('/api/lyrics/fetch', async (req, res) => {
       if (bestLyric) {
         const sourceName = isLrclib ? 'Lrclib' : (lrclibResp.fallbackSource || 'Fallback');
         bestLyric = `[source:${sourceName}]\n${bestLyric}`;
-        db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, bestLyric]);
+        bestLyric = autoMarkTitleLines(bestLyric);
+        await new Promise((resolve, reject) => {
+          db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, bestLyric], (err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
         const injected = await injectFurigana(artist, title, bestLyric);
         return res.json({ lyrics: injected, source: sourceName });
       }
@@ -693,9 +739,11 @@ app.post('/api/launch-pyqt6', (req, res) => {
     const launchCmd = fs.existsSync(venvPythonW) ? venvPythonW : pythonCmd;
     
     // Minimize the active window (browser) using ctypes
-    spawn(pythonCmd, ['-c', 'import ctypes; ctypes.windll.user32.ShowWindow(ctypes.windll.user32.GetForegroundWindow(), 6)'], { windowsHide: true });
+    spawn(pythonCmd, ['-c', 'import ctypes; ctypes.windll.user32.ShowWindow(ctypes.windll.user32.GetForegroundWindow(), 6)'], { windowsHide: false });
     
-    const child = spawn(launchCmd, [mainPyPath], { detached: true, stdio: 'ignore', cwd: PARENT_DIR, windowsHide: true });
+    const out = fs.openSync(path.join(PARENT_DIR, 'startup_out.log'), 'w');
+    const err = fs.openSync(path.join(PARENT_DIR, 'startup_err.log'), 'w');
+    const child = spawn(launchCmd, [mainPyPath], { detached: true, stdio: ['ignore', out, err], cwd: PARENT_DIR, windowsHide: false });
     child.unref();
     res.json({ success: true, pid: child.pid, action: 'started' });
   } catch (err) {
