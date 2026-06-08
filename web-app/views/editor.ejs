@@ -19,19 +19,82 @@
     </div>
 
     <div class="dashboard-card" style="flex: 2;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <h3 id="editor-title">尚未選擇</h3>
-            <button id="save-btn" class="ctrl-btn primary" style="padding: 0 15px; width: auto;" disabled>儲存修改</button>
+        <div class="card-header" style="display: flex; flex-direction: row !important; justify-content: space-between; align-items: center; gap: 15px; border-bottom: none; padding-bottom: 0;">
+            <div id="editor-title" style="font-size: 20px; font-weight: bold; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">請選擇歌曲...</div>
+            <div style="display: flex; gap: 12px; flex-shrink: 0;">
+                <button id="refetch-btn" class="ctrl-btn" style="height: 38px; padding: 0 16px; font-size: 14px; width: auto; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--panel-border); border-radius: 6px;" disabled><i class="fa-solid fa-cloud-arrow-down"></i> 重新從網路抓取</button>
+                <button id="save-btn" class="ctrl-btn primary" style="height: 38px; padding: 0 20px; font-size: 14px; font-weight: 600; width: auto; border-radius: 6px;" disabled>儲存修改</button>
+            </div>
         </div>
-        <textarea id="lrc-editor" placeholder="[00:00.00] 在左側選擇一首歌以開始編輯..." disabled style="width: 100%; height: 400px; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 15px; border-radius: 4px; font-family: monospace; resize: vertical; line-height: 1.5;"></textarea>
+        <div id="lrc-editor-container" style="width: 100%; height: 500px; background: var(--bg-main); border: 1px solid var(--panel-border); padding: 15px; border-radius: 4px; overflow-y: auto;">
+            <div style="color: var(--text-secondary); text-align: center; margin-top: 200px;">在左側選擇一首歌以開始編輯...</div>
+        </div>
     </div>
 </div>
+
+<style>
+    .lrc-row {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 8px;
+        align-items: center;
+        background: var(--panel-bg);
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--panel-border);
+        transition: border-color 0.2s;
+    }
+    .lrc-row:focus-within {
+        border-color: var(--accent-main);
+    }
+    .lrc-time {
+        width: 90px;
+        background: transparent;
+        border: 1px solid var(--panel-border);
+        color: var(--text-primary);
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 14px;
+        text-align: center;
+    }
+    .lrc-text {
+        flex: 1;
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--text-primary);
+        padding: 4px 8px;
+        font-size: 15px;
+        border-radius: 4px;
+        transition: background 0.2s;
+    }
+    .lrc-text:focus {
+        background: var(--bg-main);
+        border-color: var(--panel-border);
+        outline: none;
+    }
+    .lrc-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: color 0.2s, background 0.2s;
+    }
+    .lrc-btn:hover {
+        background: var(--bg-main);
+    }
+    .lrc-btn.add:hover { color: #1DB954; }
+    .lrc-btn.del:hover { color: #ef4444; }
+</style>
 
 <script>
     const songSelect = document.getElementById('song-select');
     const editorTitle = document.getElementById('editor-title');
-    const lrcEditor = document.getElementById('lrc-editor');
+    const editorContainer = document.getElementById('lrc-editor-container');
     const saveBtn = document.getElementById('save-btn');
+    const refetchBtn = document.getElementById('refetch-btn');
 
     let currentArtist = "";
     let currentTitle = "";
@@ -65,7 +128,6 @@
         });
     }
 
-    // Load songs list
     fetch('/api/songs')
         .then(res => res.json())
         .then(data => {
@@ -77,33 +139,162 @@
         renderSongList(e.target.value);
     });
 
-    songSelect.addEventListener('change', (e) => {
-        const selected = JSON.parse(e.target.value);
-        currentArtist = selected.artist;
-        currentTitle = selected.title;
-        editorTitle.innerText = `正在編輯: ${currentTitle}`;
-        lrcEditor.disabled = true;
-        lrcEditor.value = "載入中...";
+    function createRow(timeStr, textStr) {
+        const row = document.createElement('div');
+        row.className = 'lrc-row';
+        
+        const timeInput = document.createElement('input');
+        timeInput.type = 'text';
+        timeInput.className = 'lrc-time';
+        timeInput.value = timeStr || '00:00.00';
+        timeInput.placeholder = 'mm:ss.xx';
+        
+        const textInput = document.createElement('input');
+        textInput.type = 'text';
+        textInput.className = 'lrc-text';
+        textInput.value = textStr || '';
+        textInput.placeholder = '輸入歌詞...';
+        
+        // Arrow key navigation
+        textInput.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                const prevRow = row.previousElementSibling;
+                if (prevRow) prevRow.querySelector('.lrc-text').focus();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                const nextRow = row.nextElementSibling;
+                if (nextRow) nextRow.querySelector('.lrc-text').focus();
+            }
+        });
+        timeInput.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                const prevRow = row.previousElementSibling;
+                if (prevRow) prevRow.querySelector('.lrc-time').focus();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                const nextRow = row.nextElementSibling;
+                if (nextRow) nextRow.querySelector('.lrc-time').focus();
+            }
+        });
+
+        const addBtn = document.createElement('button');
+        addBtn.className = 'lrc-btn add';
+        addBtn.innerHTML = '<i class="fa-solid fa-plus"></i>';
+        addBtn.title = "在此行下方插入新行";
+        addBtn.onclick = () => {
+            const newRow = createRow('', '');
+            row.after(newRow);
+            newRow.querySelector('.lrc-text').focus();
+        };
+        
+        const delBtn = document.createElement('button');
+        delBtn.className = 'lrc-btn del';
+        delBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+        delBtn.title = "刪除此行";
+        delBtn.onclick = () => row.remove();
+        
+        row.appendChild(timeInput);
+        row.appendChild(textInput);
+        row.appendChild(addBtn);
+        row.appendChild(delBtn);
+        return row;
+    }
+
+    function parseAndRenderLRC(rawText) {
+        editorContainer.innerHTML = '';
+        const lines = rawText.split('\n');
+        const regex = /^\[(\d{2}:\d{2}\.\d{2,3})\](.*)/;
+        
+        let hasContent = false;
+        lines.forEach(line => {
+            if (!line.trim()) return;
+            const match = line.match(regex);
+            if (match) {
+                editorContainer.appendChild(createRow(match[1], match[2]));
+                hasContent = true;
+            } else {
+                // Keep metadata or malformed lines as generic rows without time
+                if (line.startsWith('[')) {
+                    editorContainer.appendChild(createRow(line, ''));
+                    hasContent = true;
+                }
+            }
+        });
+        
+        if (!hasContent) {
+            editorContainer.appendChild(createRow('00:00.00', '在此輸入歌詞...'));
+        }
+    }
+
+    function loadRawLyrics() {
+        editorTitle.innerText = `${currentTitle} - ${currentArtist}`;
+        editorContainer.innerHTML = '<div style="color: var(--text-secondary); text-align: center; margin-top: 200px;">載入中...</div>';
         saveBtn.disabled = true;
+        refetchBtn.disabled = true;
 
         fetch(`/api/lyrics/raw?title=${encodeURIComponent(currentTitle)}&artist=${encodeURIComponent(currentArtist)}`)
             .then(res => res.json())
             .then(data => {
-                lrcEditor.value = data.lyrics;
-                lrcEditor.disabled = false;
+                parseAndRenderLRC(data.lyrics);
                 saveBtn.disabled = false;
+                refetchBtn.disabled = false;
+            });
+    }
+
+    songSelect.addEventListener('change', (e) => {
+        const selected = JSON.parse(e.target.value);
+        currentArtist = selected.artist;
+        currentTitle = selected.title;
+        loadRawLyrics();
+    });
+
+    refetchBtn.addEventListener('click', () => {
+        if (!confirm('確定要放棄所有手動修改，並重新從網路抓取這首歌的原始歌詞嗎？')) return;
+        
+        refetchBtn.innerText = "抓取中...";
+        refetchBtn.disabled = true;
+        saveBtn.disabled = true;
+        editorContainer.innerHTML = '<div style="color: var(--text-secondary); text-align: center; margin-top: 200px;">正在從網路下載並覆蓋歌詞...</div>';
+        
+        fetch(`/api/lyrics/fetch?force=true&title=${encodeURIComponent(currentTitle)}&artist=${encodeURIComponent(currentArtist)}`)
+            .then(res => res.json())
+            .then(() => {
+                refetchBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 重新從網路抓取';
+                loadRawLyrics();
+            })
+            .catch(err => {
+                alert('抓取失敗');
+                refetchBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> 重新從網路抓取';
+                loadRawLyrics();
             });
     });
 
     saveBtn.addEventListener('click', () => {
-        const text = lrcEditor.value;
         saveBtn.innerText = "儲存中...";
         saveBtn.disabled = true;
+        
+        const rows = editorContainer.querySelectorAll('.lrc-row');
+        let newLrcLines = [];
+        
+        rows.forEach(row => {
+            const t = row.querySelector('.lrc-time').value.trim();
+            const txt = row.querySelector('.lrc-text').value;
+            // If it's a metadata tag like [ti:song], time field will have it
+            if (t.startsWith('[') && t.endsWith(']')) {
+                newLrcLines.push(t + txt);
+            } else {
+                newLrcLines.push(`[${t}]${txt}`);
+            }
+        });
+        
+        const finalLrc = newLrcLines.join('\n');
         
         fetch('/api/lyrics/update', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: currentTitle, artist: currentArtist, lyrics: text })
+            body: JSON.stringify({ title: currentTitle, artist: currentArtist, lyrics: finalLrc })
         })
         .then(res => res.json())
         .then(data => {

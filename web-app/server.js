@@ -266,7 +266,12 @@ app.post('/api/furigana/correct', (req, res) => {
       [artist, title, orig, finalHira],
       (err) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true, hira: finalHira });
+        
+        // Delete the cached lyrics so the next fetch will rebuild it with the new furigana
+        db.run('DELETE FROM cache WHERE artist = ? AND title = ?', [artist, title], (err2) => {
+          if (err2) console.error("Failed to delete cache after correction:", err2);
+          res.json({ success: true, hira: finalHira });
+        });
       }
     );
   }
@@ -641,9 +646,46 @@ app.get('/api/leaderboard', (req, res) => {
   });
 });
 
-// 6. Launch PyQt6
+// 6. Launch/Toggle PyQt6
+app.get('/api/desktop-status', (req, res) => {
+  const pidFile = path.join(PARENT_DIR, 'app.pid');
+  let isRunning = false;
+  if (fs.existsSync(pidFile)) {
+    try {
+      const existingPid = parseInt(fs.readFileSync(pidFile, 'utf8').trim());
+      process.kill(existingPid, 0);
+      isRunning = true;
+    } catch (e) {
+      isRunning = false;
+    }
+  }
+  res.json({ isRunning });
+});
+
 app.post('/api/launch-pyqt6', (req, res) => {
   try {
+    const pidFile = path.join(PARENT_DIR, 'app.pid');
+    let isRunning = false;
+    let existingPid = null;
+    
+    if (fs.existsSync(pidFile)) {
+      try {
+        existingPid = parseInt(fs.readFileSync(pidFile, 'utf8').trim());
+        process.kill(existingPid, 0); // Check if process exists
+        isRunning = true;
+      } catch (e) {
+        isRunning = false;
+      }
+    }
+    
+    if (isRunning) {
+      try {
+        process.kill(existingPid); // Terminate the process
+      } catch (e) {}
+      if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
+      return res.json({ success: true, action: 'stopped' });
+    }
+
     const mainPyPath = path.join(PARENT_DIR, 'main.py');
     if (!fs.existsSync(mainPyPath)) return res.status(404).json({ error: 'main.py not found' });
     
@@ -655,7 +697,7 @@ app.post('/api/launch-pyqt6', (req, res) => {
     
     const child = spawn(launchCmd, [mainPyPath], { detached: true, stdio: 'ignore', cwd: PARENT_DIR, windowsHide: true });
     child.unref();
-    res.json({ success: true, pid: child.pid });
+    res.json({ success: true, pid: child.pid, action: 'started' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

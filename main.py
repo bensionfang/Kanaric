@@ -17,7 +17,7 @@ from winrt.windows.storage.streams import DataReader
 # =========================================================================
 
 from PyQt6.QtCore import (Qt, QThread, pyqtSignal, QParallelAnimationGroup, 
-                          QPropertyAnimation, QEasingCurve, QAbstractAnimation, QTimer, QPoint, QEvent, QFileSystemWatcher)
+                          QPropertyAnimation, QEasingCurve, QAbstractAnimation, QTimer, QPoint, QEvent, QFileSystemWatcher, QRect)
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
                              QMenu, QFileDialog, QInputDialog, QFrame, 
                              QPushButton, QScrollArea, QGraphicsOpacityEffect, 
@@ -180,7 +180,7 @@ class FloatingLyricsApp(QWidget):
     def init_ui(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.resize(800, 250) 
+        self.resize(800, 80) 
         
         self.container = QFrame(self)
         main_layout = QVBoxLayout(self)
@@ -188,57 +188,17 @@ class FloatingLyricsApp(QWidget):
         main_layout.addWidget(self.container)
         
         vbox = QVBoxLayout(self.container)
+        vbox.setContentsMargins(10, 10, 10, 10)
         
-        top_hbox = QHBoxLayout()
-        top_hbox.setContentsMargins(25, 15, 15, 0) 
+        island_hbox = QHBoxLayout()
+        island_hbox.setContentsMargins(10, 0, 10, 0)
         
-        self.header_label = QLabel("正在等待播放...")
-        ff = self.settings.get("font_family", "Noto Sans JP")
-        self.header_label.setStyleSheet(f"color: #b3b3b3; font-size: 14px; font-weight: bold; font-family: \"{ff}\";")
-        top_hbox.addWidget(self.header_label)
-        top_hbox.addStretch()
-        
-        self.offset_minus = QPushButton("-")
-        self.offset_minus.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.offset_minus.setToolTip("歌詞提早 0.1s")
-        self.offset_minus.setStyleSheet("QPushButton { background: transparent; color: rgba(255,255,255,100); font-size: 16px; font-weight: bold; border: none; padding: 2px 5px; } QPushButton:hover { color: white; }")
-        self.offset_minus.clicked.connect(lambda: self.adjust_sync(-0.1))
-        top_hbox.addWidget(self.offset_minus)
-
-        self.offset_label = QLabel("0 ms")
-        self.offset_label.setStyleSheet("color: rgba(255,255,255,100); font-size: 12px; font-weight: bold; font-family: monospace;")
-        self.offset_label.setToolTip("點擊重置時間同步")
-        self.offset_label.mousePressEvent = lambda e: self.adjust_sync('reset')
-        self.offset_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        top_hbox.addWidget(self.offset_label)
-
-        self.offset_plus = QPushButton("+")
-        self.offset_plus.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.offset_plus.setToolTip("歌詞延遲 0.1s")
-        self.offset_plus.setStyleSheet("QPushButton { background: transparent; color: rgba(255,255,255,100); font-size: 16px; font-weight: bold; border: none; padding: 2px 5px; } QPushButton:hover { color: white; }")
-        self.offset_plus.clicked.connect(lambda: self.adjust_sync(0.1))
-        top_hbox.addWidget(self.offset_plus)
-        
-        # Add a small spacing
-        top_hbox.addSpacing(10)
-        
-        self.hint_label = QLabel("")
-        self.hint_label.setStyleSheet("color: #ffff00; font-size: 14px;")
-        top_hbox.addWidget(self.hint_label)
-        
-        self.settings_btn = QPushButton("☰")
-        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.settings_btn.setStyleSheet("QPushButton { background: transparent; color: rgba(255,255,255,150); font-size: 18px; font-weight: bold; border: none; padding: 5px; } QPushButton:hover { color: white; }")
-        self.settings_btn.clicked.connect(self.show_settings_menu)
-        top_hbox.addWidget(self.settings_btn)
-
-        self.close_btn = QPushButton("✕")
-        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.close_btn.setStyleSheet("QPushButton { background: transparent; color: rgba(255,255,255,150); font-size: 18px; font-weight: bold; border: none; padding: 5px; } QPushButton:hover { color: #ff5c5c; }")
-        self.close_btn.clicked.connect(self.force_quit)
-        top_hbox.addWidget(self.close_btn)
-        
-        vbox.addLayout(top_hbox)
+        self.album_art_label = QLabel()
+        self.album_art_label.setFixedSize(60, 60)
+        self.album_art_label.setStyleSheet("background-color: rgba(255,255,255,20); border-radius: 30px;")
+        self.album_art_label.setScaledContents(True)
+            
+        island_hbox.addWidget(self.album_art_label)
         
         self.scroll_area = TransparentScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -248,31 +208,13 @@ class FloatingLyricsApp(QWidget):
         
         self.content_widget = QWidget()
         self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(25, 5, 10, 20)
+        self.content_layout.setContentsMargins(10, 0, 10, 0)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+            
         self.scroll_area.setWidget(self.content_widget)
-        vbox.addWidget(self.scroll_area, 1)
+        island_hbox.addWidget(self.scroll_area, 1)
         
-        bottom_hbox = QHBoxLayout()
-        bottom_hbox.setContentsMargins(0, 0, 0, 0)
-        bottom_hbox.addStretch()
-        
-        grip_layout = QGridLayout()
-        grip_layout.setContentsMargins(0, 0, 5, 5)
-        
-        self.grip_icon = QLabel("↘")
-        self.grip_icon.setStyleSheet("color: rgba(255,255,255,150); font-size: 16px; font-weight: bold;")
-        self.grip_icon.setAlignment(Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
-        
-        self.sizegrip = QSizeGrip(self.container)
-        self.sizegrip.setFixedSize(25, 25)
-        self.sizegrip.setStyleSheet("background: transparent;")
-        self.sizegrip.setToolTip("按住拖曳來縮放視窗")
-        
-        grip_layout.addWidget(self.grip_icon, 0, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
-        grip_layout.addWidget(self.sizegrip, 0, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
-        
-        bottom_hbox.addLayout(grip_layout)
-        vbox.addLayout(bottom_hbox)
+        vbox.addLayout(island_hbox, 1)
         
         self.show_status("等待音樂播放中...")
 
@@ -285,18 +227,18 @@ class FloatingLyricsApp(QWidget):
     def wheelEvent(self, event):
         delta = event.angleDelta().y()
         if delta > 0:
-            self.settings["font_size"] = min(100, self.settings.get("font_size", 28) + 2)
+            self.settings["font_size"] = min(100, self.settings.get("font_size", 22) + 2)
         elif delta < 0:
-            self.settings["font_size"] = max(10, self.settings.get("font_size", 28) - 2)
+            self.settings["font_size"] = max(10, self.settings.get("font_size", 22) - 2)
         
-        self.hint_label.setText(f"字體大小: {self.settings['font_size']}px")
-        QTimer.singleShot(1500, lambda: self.hint_label.setText("")) 
+        pass
+        pass
         
         save_settings(self.settings)
         self.font_update_timer.start()
 
     def apply_font_size_change(self):
-        fs = self.settings.get("font_size", 28)
+        fs = self.settings.get("font_size", 22)
         ff = self.settings.get("font_family", "Noto Sans JP")
         show_furigana = str(self.settings.get("show_furigana", "true")).lower() != "false"
         
@@ -323,8 +265,18 @@ class FloatingLyricsApp(QWidget):
 
     def reload_settings_from_file(self, path):
         try:
+            old_furigana = str(self.settings.get("show_furigana", "true")).lower() != "false"
             self.settings = load_settings()
-            self.apply_font_size_change()
+            new_furigana = str(self.settings.get("show_furigana", "true")).lower() != "false"
+            
+            if old_furigana != new_furigana:
+                if self.current_lrc_text:
+                    cached_lyric = db.get_cached_lyrics(self.search_artist, self.search_title)
+                    if cached_lyric:
+                        self.current_lrc_text = cached_lyric
+                    self.parse_and_load_lyrics(self.current_lrc_text)
+            else:
+                self.apply_font_size_change()
             
             if SETTINGS_FILE not in self.settings_watcher.files():
                 self.settings_watcher.addPath(os.path.abspath(SETTINGS_FILE))
@@ -364,11 +316,16 @@ class FloatingLyricsApp(QWidget):
         QApplication.instance().quit()
 
     def update_media_info(self, title, artist, album, position, thumb_bytes, is_playing):
+        if thumb_bytes:
+            pixmap = QPixmap()
+            pixmap.loadFromData(thumb_bytes)
+            self.album_art_label.setPixmap(pixmap)
+            
         if is_playing:
             if self.isHidden() and title != "": self.show_window() 
             self.hide_timer.stop()
         else:
-            if not self.hide_timer.isActive() and not self.isHidden() and not self.settings.get("pin_window"):
+            if not self.isHidden() and not self.settings.get("pin_window"):
                 self.hide_timer.start() 
         
         # Detect if song restarted (e.g. looped)
@@ -390,14 +347,6 @@ class FloatingLyricsApp(QWidget):
                 
                 self.current_sync_offset = db.get_sync_offset(self.search_artist, self.search_title)
                 ms_val = int(self.current_sync_offset * 1000)
-                self.offset_label.setText(f"{'+' if ms_val > 0 else ''}{ms_val} ms")
-                
-                if title and artist:
-                    self.header_label.setText(f"{title} - {artist}")
-                elif title:
-                    self.header_label.setText(f"{title}")
-                else:
-                    self.header_label.setText("正在等待音樂播放...")
                     
                 self.lyrics_data = []
                 self.current_lyrics_options = []
@@ -581,18 +530,9 @@ class FloatingLyricsApp(QWidget):
         if manual_label:
             orig_text = f"{self.media_title} - {self.media_artist}" if self.media_artist else self.media_title
             search_text = f"{self.search_title} - {self.search_artist}" if self.search_artist else self.search_title
-            self.header_label.setText(f"{orig_text} [手動搜尋: {search_text}]")
-        else:
-            if self.search_title and self.search_artist:
-                self.header_label.setText(f"{self.search_title} - {self.search_artist}")
-            elif self.search_title:
-                self.header_label.setText(f"{self.search_title}")
-            else:
-                self.header_label.setText("正在等待音樂播放...")
             
         self.current_sync_offset = db.get_sync_offset(self.search_artist, self.search_title)
         ms_val = int(self.current_sync_offset * 1000)
-        self.offset_label.setText(f"{'+' if ms_val > 0 else ''}{ms_val} ms")
         
         self.lyrics_data = []
         self.current_lyrics_options = []
@@ -603,13 +543,13 @@ class FloatingLyricsApp(QWidget):
 
     def apply_mode_styles(self):
         r, g, b, a = self.theme_color
-        base_style = f"QFrame {{ background-color: rgba({r}, {g}, {b}, {a}); border-radius: 20px; }}"
+        radius = 40
+        base_style = f"QFrame {{ background-color: rgba({r}, {g}, {b}, {a}); border-radius: {radius}px; }}"
         self.scroll_area.setStyleSheet("background: transparent; border: none;")
         self.content_widget.setStyleSheet("background: transparent;")
-        self.settings_btn.show()
-        self.close_btn.show()
-        self.grip_icon.show()
+            
         self.container.setStyleSheet(base_style)
+        self.resize(800, 80)
 
     def extract_dominant_color(self, image_bytes):
         if not image_bytes or not self.settings.get("dynamic_color"):
@@ -627,7 +567,7 @@ class FloatingLyricsApp(QWidget):
 
     def show_status(self, text):
         self.clear_lyrics()
-        fs = self.settings.get("font_size", 28)
+        fs = self.settings.get("font_size", 22)
         ff = self.settings.get("font_family", "Noto Sans JP")
         label = QLabel(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>{text}</div>")
         label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter) 
@@ -641,6 +581,11 @@ class FloatingLyricsApp(QWidget):
         self.lyric_labels = []
         self.lyrics_data = []
         self.last_index = -2 
+        
+        if hasattr(self, 'intro_wrapper'):
+            del self.intro_wrapper
+        if hasattr(self, 'intro_label'):
+            del self.intro_label
 
     def handle_fetched_lyrics(self, text, options_list):
         if text == "OPTIONS_ONLY":
@@ -658,8 +603,26 @@ class FloatingLyricsApp(QWidget):
         self.clear_lyrics()
         self.current_lrc_text = lrc_text 
         pattern = re.compile(r'\[(\d{2}):(\d{2}(?:\.\d{1,3})?)\](.*)')
-        fs = self.settings.get("font_size", 28)
+        fs = self.settings.get("font_size", 22)
         ff = self.settings.get("font_family", "Noto Sans JP")
+        
+        self.intro_wrapper = QWidget()
+        intro_ly = QVBoxLayout(self.intro_wrapper)
+        intro_ly.setContentsMargins(0, 0, 0, 0)
+        
+        title_disp = getattr(self, 'media_title', self.search_title)
+        artist_disp = getattr(self, 'media_artist', self.search_artist)
+        if not title_disp: title_disp = "Floating Lyrics"
+        
+        self.intro_label = QLabel(f"<div align='left' style='font-family: \"{ff}\"; color: #ffffff; font-size: {fs}px; font-weight: bold;'>🎵 {title_disp} - {artist_disp}</div>")
+        self.intro_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        intro_ly.addWidget(self.intro_label)
+        
+        intro_eff = QGraphicsOpacityEffect(self.intro_wrapper)
+        intro_eff.setOpacity(0.0)
+        self.intro_wrapper.setGraphicsEffect(intro_eff)
+        self.content_layout.addWidget(self.intro_wrapper)
+        
         line_idx = 0
         
         source_provider = ""
@@ -727,8 +690,7 @@ class FloatingLyricsApp(QWidget):
                     label.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
                     label.setOpenExternalLinks(False)
                     label.linkActivated.connect(self.on_word_clicked)
-                    label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-                    label.customContextMenuRequested.connect(lambda pos, w=wrapper: self.show_settings_menu(pos=w.mapToGlobal(pos)))
+                    label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
                     
                     show_furigana = str(self.settings.get("show_furigana", "true")).lower() != "false"
                     
@@ -799,7 +761,7 @@ class FloatingLyricsApp(QWidget):
 
     def animate_to_index(self, index):
         self.last_index = index
-        lines_to_show = self.settings.get("display_lines", 2)
+        lines_to_show = self.settings.get("island_lines", 1)
         
         is_plain_text = len(self.lyrics_data) > 0 and self.lyrics_data[0][0] < 0
 
@@ -807,36 +769,74 @@ class FloatingLyricsApp(QWidget):
             self.anim_group.stop()
         self.anim_group = QParallelAnimationGroup()
 
-        if self.lyric_labels:
-            scroll_target = max(0, index)
-            if scroll_target >= len(self.lyric_labels):
-                scroll_target = len(self.lyric_labels) - 1
-                
-            target_y = self.lyric_labels[scroll_target]['wrapper'].y()
-            scroll_anim = QPropertyAnimation(self.scroll_area.verticalScrollBar(), b"value")
-            scroll_anim.setDuration(400)
-            scroll_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-            scroll_anim.setStartValue(self.scroll_area.verticalScrollBar().value())
-            scroll_anim.setEndValue(target_y)
-            self.anim_group.addAnimation(scroll_anim)
+        target_y = 0
+        target_width_hint = 0
+        target_height_hint = 0
+        
+        if is_plain_text or index >= 0:
+            if self.lyric_labels:
+                scroll_target = max(0, min(index, len(self.lyric_labels) - 1))
+                target_y = self.lyric_labels[scroll_target]['wrapper'].y()
+                active_labels = self.lyric_labels[scroll_target:scroll_target + lines_to_show]
+                if active_labels:
+                    target_width_hint = max(lbl['label'].sizeHint().width() for lbl in active_labels)
+                    target_height_hint = sum(lbl['label'].sizeHint().height() for lbl in active_labels)
+        else:
+            if hasattr(self, 'intro_wrapper'):
+                target_y = self.intro_wrapper.y()
+                target_width_hint = self.intro_label.sizeHint().width()
+                target_height_hint = self.intro_label.sizeHint().height()
 
-            for i, item in enumerate(self.lyric_labels):
-                effect = item['wrapper'].graphicsEffect()
-                op_anim = QPropertyAnimation(effect, b"opacity")
+        scroll_anim = QPropertyAnimation(self.scroll_area.verticalScrollBar(), b"value")
+        scroll_anim.setDuration(400)
+        scroll_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        scroll_anim.setStartValue(self.scroll_area.verticalScrollBar().value())
+        scroll_anim.setEndValue(target_y)
+        self.anim_group.addAnimation(scroll_anim)
+
+        # Dynamic geometry animation
+        current_geom = self.geometry()
+        center_x = current_geom.center().x()
+        base_width_padding = 130 # Album art + margins
+        base_height_padding = 40 # Top/bottom margins
+        
+        target_width = min(1200, max(300, base_width_padding + target_width_hint))
+        target_height = max(80, base_height_padding + target_height_hint)
+        
+        target_x = center_x - target_width // 2
+        
+        target_geom = QRect(target_x, current_geom.y(), target_width, target_height)
+        
+        self.geom_anim = QPropertyAnimation(self, b"geometry")
+        self.geom_anim.setDuration(400)
+        self.geom_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.geom_anim.setStartValue(current_geom)
+        self.geom_anim.setEndValue(target_geom)
+        self.anim_group.addAnimation(self.geom_anim)
+
+        if hasattr(self, 'intro_wrapper'):
+            intro_eff = self.intro_wrapper.graphicsEffect()
+            if intro_eff:
+                op_anim = QPropertyAnimation(intro_eff, b"opacity")
                 op_anim.setDuration(400)
-                
-                if is_plain_text:
-                    op_anim.setEndValue(1.0)
-                elif i == index:
-                    op_anim.setEndValue(1.0) 
-                elif index == -1 and i < lines_to_show:
-                    op_anim.setEndValue(0.8)
-                elif index < i < index + lines_to_show:
-                    op_anim.setEndValue(0.8)
-                else:
-                    op_anim.setEndValue(0.0) 
-                    
+                op_anim.setEndValue(1.0 if index < 0 and not is_plain_text else 0.0)
                 self.anim_group.addAnimation(op_anim)
+
+        for i, item in enumerate(self.lyric_labels):
+            effect = item['wrapper'].graphicsEffect()
+            op_anim = QPropertyAnimation(effect, b"opacity")
+            op_anim.setDuration(400)
+            
+            if is_plain_text:
+                op_anim.setEndValue(1.0)
+            elif i == index:
+                op_anim.setEndValue(1.0) 
+            elif index < i < index + lines_to_show:
+                op_anim.setEndValue(0.8)
+            else:
+                op_anim.setEndValue(0.0) 
+                
+            self.anim_group.addAnimation(op_anim)
 
         self.anim_group.start()
 
@@ -850,61 +850,9 @@ class FloatingLyricsApp(QWidget):
             self.move(event.globalPosition().toPoint() - self.drag_pos)
             event.accept()
 
-    def contextMenuEvent(self, event):
-        self.show_settings_menu(pos=event.globalPos())
-
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_BracketLeft: self.adjust_sync(-0.5)
         elif event.key() == Qt.Key.Key_BracketRight: self.adjust_sync(0.5)
-
-    def show_settings_menu(self, pos=None):
-        menu = QMenu(self)
-        menu.setStyleSheet("QMenu { font-size: 14px; padding: 5px; }")
-        
-        menu.addAction("操作說明", self.show_help_dialog)
-        
-        pin_action = QAction("取消釘選視窗" if self.settings.get("pin_window", True) else "釘選視窗", self)
-        pin_action.triggered.connect(self.toggle_pin_window)
-        menu.addAction(pin_action)
-        menu.addSeparator()
-        
-        search_menu = menu.addMenu("歌詞抓取與補救")
-        search_menu.addAction("設定優先搜尋來源", self.set_preferred_source)
-        search_menu.addAction("選擇備選歌詞", self.choose_alternative_lyrics)
-        search_menu.addAction("手動搜尋", self.manual_search_lyrics)
-        search_menu.addAction("還原自動偵測", self.reset_manual_search)
-        search_menu.addAction("重新抓取", self.clear_cache_and_refetch)
-        search_menu.addAction("貼上自訂歌詞", self.import_custom_lyrics)
-        
-        sync_menu = menu.addMenu("時間同步微調")
-        sync_menu.addAction("歌詞提早 0.5s", lambda: self.adjust_sync(0.5))
-        sync_menu.addAction("歌詞延遲 0.5s", lambda: self.adjust_sync(-0.5))
-        sync_menu.addAction("重置時間同步", lambda: self.adjust_sync('reset'))
-        
-        ui_menu = menu.addMenu("視窗外觀與排版")
-        
-        align_str = "切換置中對齊" if self.settings.get("text_alignment", "left") == "left" else "切換置左對齊"
-        align_action = QAction(align_str, self)
-        align_action.triggered.connect(self.toggle_text_alignment)
-        ui_menu.addAction(align_action)
-        
-        color_action = QAction("關閉主題色" if self.settings.get("dynamic_color") else "開啟主題色", self)
-        color_action.triggered.connect(self.toggle_dynamic_color)
-        ui_menu.addAction(color_action)
-        ui_menu.addSeparator()
-        
-        ui_menu.addAction("設定顯示行數", self.set_display_lines)
-        ui_menu.addAction("設定字體大小", self.set_font_size_menu)
-        ui_menu.addAction("選擇字型", self.set_custom_font)
-
-        
-        menu.addSeparator()
-        menu.addAction("隱藏視窗", self.hide_window)
-        
-        if isinstance(pos, QPoint): menu.exec(pos)
-        else: 
-            if self.settings_btn.isVisible(): menu.exec(self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft()))
-            else: menu.exec(self.mapToGlobal(self.rect().center()))
 
     def toggle_text_alignment(self):
         current = self.settings.get("text_alignment", "left")
@@ -933,7 +881,7 @@ class FloatingLyricsApp(QWidget):
                 self.refresh_lyrics_display(self.media_worker.media_updated.pos if hasattr(self.media_worker, 'pos') else 0)
 
     def set_font_size_menu(self):
-        current = self.settings.get("font_size", 28)
+        current = self.settings.get("font_size", 22)
         val, ok = QInputDialog.getInt(self, "設定字體大小", "請輸入字體大小：", current, 10, 100, 2)
         if ok:
             self.settings["font_size"] = val
@@ -962,8 +910,6 @@ class FloatingLyricsApp(QWidget):
             self.current_sync_offset += amount
         db.save_sync_offset(self.search_artist, self.search_title, self.current_sync_offset)
         ms_val = int(self.current_sync_offset * 1000)
-        self.offset_label.setText(f"{'+' if ms_val > 0 else ''}{ms_val} ms")
-        self.hint_label.setText(f"同步微調: {self.current_sync_offset:+.1f}s")
         if hasattr(self, 'last_position'):
             self.refresh_lyrics_display(self.last_position)
         self.last_index = -2
@@ -980,18 +926,26 @@ class FloatingLyricsApp(QWidget):
         if ok and val:
             self.settings["preferred_source"] = val
             save_settings(self.settings)
-            self.hint_label.setText(f"已將優先來源設為: {val}")
 
     def set_custom_font(self):
         current_font = QFont(self.settings.get("font_family", "Noto Sans JP"))
         font, ok = QFontDialog.getFont(current_font, self, "選擇字型")
         if ok:
             self.settings["font_family"] = font.family()
-            self.header_label.setStyleSheet(f"color: #b3b3b3; font-size: 14px; font-weight: bold; font-family: \"{font.family()}\";")
             save_settings(self.settings)
             if self.current_lrc_text: self.parse_and_load_lyrics(self.current_lrc_text)
 
 if __name__ == '__main__':
+    def global_exception_handler(exctype, value, tb):
+        import traceback
+        with open("crash_log.txt", "w", encoding="utf-8") as f:
+            traceback.print_exception(exctype, value, tb, file=f)
+        sys.__excepthook__(exctype, value, tb)
+    sys.excepthook = global_exception_handler
+
+    with open("app.pid", "w") as f:
+        f.write(str(os.getpid()))
+        
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setStyleSheet("QInputDialog { background-color: white; }")

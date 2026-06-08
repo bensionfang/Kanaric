@@ -74,6 +74,17 @@
                                 <button class="segment-btn active" data-align="center" onclick="changeTextAlign('center', this)">置中</button>
                             </div>
                         </div>
+                        
+                        <div class="setting-item">
+                            <div>
+                                <div class="setting-title">懸浮窗歌詞行數</div>
+                                <div class="setting-desc">在桌面懸浮窗顯示 1 或 2 行歌詞</div>
+                            </div>
+                            <select id="setting-island-lines" onchange="saveSettingsToServer('island_lines', parseInt(this.value))" style="background: var(--bg-main); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 8px; padding: 6px 12px; font-size: 14px; outline: none;">
+                                <option value="1">1 行</option>
+                                <option value="2">2 行</option>
+                            </select>
+                        </div>
                     </div>
 
                     <!-- Lyrics Tab -->
@@ -282,7 +293,7 @@
         });
         
         // Hotkey logic
-        const defaultHkMap = { 'hk-advance': '[', 'hk-delay': ']', 'hk-plain-prev': 'ArrowUp', 'hk-plain-next': 'ArrowDown' };
+        const defaultHkMap = { 'hk-advance': 'ArrowLeft', 'hk-delay': 'ArrowRight', 'hk-plain-prev': 'ArrowUp', 'hk-plain-next': 'ArrowDown' };
         let activeHotkeyInput = null;
 
         function resetHotkeys() {
@@ -367,6 +378,27 @@
             const fToggle = document.getElementById('setting-furigana');
             if (fToggle) fToggle.checked = showFurigana;
             if (!showFurigana) document.documentElement.classList.add('hide-furigana');
+            
+            fetch('/api/settings')
+            .then(res => res.json())
+            .then(data => {
+                if (data.furigana !== undefined) document.getElementById('setting-furigana').checked = data.furigana;
+                if (data.dynamic_color !== undefined) document.getElementById('setting-dynamic-color').checked = data.dynamic_color;
+                if (data.auto_scroll !== undefined) document.getElementById('setting-auto-scroll').checked = data.auto_scroll;
+                if (data.pin_window !== undefined) document.getElementById('setting-pin-window').checked = data.pin_window;
+                if (data.hide_empty !== undefined) document.getElementById('setting-hide-empty').checked = data.hide_empty;
+                if (data.island_lines !== undefined) document.getElementById('setting-island-lines').value = data.island_lines;
+                
+                if (data.font_size !== undefined) {
+                    const savedFs = data.font_size;
+                    document.documentElement.style.setProperty('--lyrics-fs', savedFs + 'px');
+                    localStorage.setItem('fontsize', savedFs);
+                    const fsSlider = document.getElementById('setting-fontsize');
+                    if (fsSlider) fsSlider.value = savedFs;
+                    const fsInput = document.getElementById('fontsize-input');
+                    if (fsInput) fsInput.value = savedFs;
+                }
+            });
             
             const prefSource = localStorage.getItem('preferred_source') || 'NetEase';
             const srcSelect = document.getElementById('setting-preferred-source');

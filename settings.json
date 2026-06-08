@@ -1,5 +1,5 @@
 {
-    "font_size": 30,
+    "font_size": 22,
     "font_family": "Noto Sans JP",
     "custom_css_path": "",
     "mini_mode": false,
@@ -9,8 +9,10 @@
     "show_furigana": true,
     "hotkeys_enable": false,
     "autoscroll": true,
-    "hk-advance": "[",
-    "hk-delay": "]",
+    "hk-advance": "ArrowLeft",
+    "hk-delay": "ArrowRight",
     "hk-plain-prev": "ArrowUp",
-    "hk-plain-next": "ArrowDown"
+    "hk-plain-next": "ArrowDown",
+    "dynamic_island": true,
+    "island_lines": 2
 }

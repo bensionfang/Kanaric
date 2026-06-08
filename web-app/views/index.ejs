@@ -10,10 +10,12 @@
     </div>
     
     <!-- Mode Switcher -->
-    <div class="mode-tabs">
-        <button class="mode-tab" id="launch-desktop-btn" onclick="launchPyQt6()">
-            <i class="fa-solid fa-desktop"></i> 桌面版
-        </button>
+    <div class="mode-tabs" style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-weight: bold; font-size: 14px; color: var(--text-secondary);">桌面靈動島</span>
+        <label class="toggle-switch" style="margin-bottom: 0;">
+            <input type="checkbox" id="desktop-toggle-btn" onchange="launchPyQt6()">
+            <span class="slider round"></span>
+        </label>
     </div>
 </div>
 

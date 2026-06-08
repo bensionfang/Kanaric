@@ -542,8 +542,8 @@ let activeHotkeys = {
 };
 
 window.updateActiveHotkeys = function() {
-    activeHotkeys.advance = localStorage.getItem('hk-advance') || '[';
-    activeHotkeys.delay = localStorage.getItem('hk-delay') || ']';
+    activeHotkeys.advance = localStorage.getItem('hk-advance') || 'ArrowLeft';
+    activeHotkeys.delay = localStorage.getItem('hk-delay') || 'ArrowRight';
     activeHotkeys.plainPrev = localStorage.getItem('hk-plain-prev') || 'ArrowUp';
     activeHotkeys.plainNext = localStorage.getItem('hk-plain-next') || 'ArrowDown';
 };
@@ -604,31 +604,41 @@ document.addEventListener('keydown', (e) => {
 // -------------------------------------------------------------
 // Desktop Launch Logic
 // -------------------------------------------------------------
+async function checkDesktopStatus() {
+    try {
+        const res = await fetch('/api/desktop-status');
+        const data = await res.json();
+        const toggle = document.getElementById('desktop-toggle-btn');
+        if (toggle) {
+            toggle.checked = data.isRunning;
+        }
+    } catch (e) {}
+}
+
+document.addEventListener('DOMContentLoaded', checkDesktopStatus);
+
 async function launchPyQt6() {
-    const btn = document.getElementById('launch-desktop-btn');
-    if (btn) {
-        btn.setAttribute('disabled', 'true');
-        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 正在啟動...`;
-    }
+    const toggle = document.getElementById('desktop-toggle-btn');
+    if (toggle) toggle.disabled = true;
     
     try {
         const resp = await fetch('/api/launch-pyqt6', { method: 'POST' });
         const result = await resp.json();
         
         if (resp.ok && result.success) {
-            showToast('桌面版已成功啟動！', 'fa-solid fa-rocket');
+            showToast(result.action === 'started' ? '靈動島已啟動！' : '靈動島已關閉！', 'fa-solid fa-rocket');
+            if (toggle) toggle.checked = (result.action === 'started');
         } else {
-            showToast('啟動桌面版失敗。', 'fa-solid fa-circle-xmark');
+            showToast('操作失敗。', 'fa-solid fa-circle-xmark');
+            if (toggle) toggle.checked = !toggle.checked; // revert
         }
     } catch (err) {
         showToast('連線失敗。', 'fa-solid fa-circle-xmark');
+        if (toggle) toggle.checked = !toggle.checked; // revert
     } finally {
         setTimeout(() => {
-            if (btn) {
-                btn.removeAttribute('disabled');
-                btn.innerHTML = `<i class="fa-solid fa-desktop"></i> 桌面版`;
-            }
-        }, 1500);
+            if (toggle) toggle.disabled = false;
+        }, 1000);
     }
 }
 
