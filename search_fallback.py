@@ -37,6 +37,12 @@ def fetch_qqmusic(title, artist):
         pass
     return None, None
 
+def fetch_single_provider(query, provider):
+    try:
+        return syncedlyrics.search(query, providers=[provider])
+    except:
+        return None
+
 def main():
     if len(sys.argv) < 3:
         print(json.dumps({"success": False, "error": "Missing title or artist"}))
@@ -44,7 +50,22 @@ def main():
         
     title = sys.argv[1]
     artist = sys.argv[2]
+    return_all = len(sys.argv) > 3 and sys.argv[3] == "--all"
     
+    query = f"{title} {artist}"
+    
+    if return_all:
+        results = []
+        qq_lyric, _ = fetch_qqmusic(title, artist)
+        if qq_lyric:
+            results.append({"lyrics": qq_lyric, "source": "QQMusic"})
+        for p in ["Musixmatch", "NetEase", "Megalobiz", "Lrclib"]:
+            lyric = fetch_single_provider(query, p)
+            if lyric:
+                results.append({"lyrics": lyric, "source": p})
+        print(json.dumps({"success": True, "results": results}))
+        return
+
     try:
         lyric, source = fetch_qqmusic(title, artist)
         

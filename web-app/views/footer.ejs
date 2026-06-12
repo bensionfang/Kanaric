@@ -53,8 +53,8 @@
 
                         <div class="setting-item">
                             <div>
-                                <div class="setting-title">基本字體大小</div>
-                                <div class="setting-desc">調整全局歌詞的文字大小</div>
+                                <div class="setting-title">網頁歌詞文字大小</div>
+                                <div class="setting-desc">調整網頁歌詞的文字大小</div>
                             </div>
                             <div style="display: flex; align-items: center; gap: 12px;">
                                 <input type="range" min="14" max="32" value="22" id="setting-fontsize" oninput="updateFontSize(this.value)">
@@ -72,6 +72,7 @@
                             <div class="segmented-control" id="align-segmented">
                                 <button class="segment-btn" data-align="left" onclick="changeTextAlign('left', this)">置左</button>
                                 <button class="segment-btn active" data-align="center" onclick="changeTextAlign('center', this)">置中</button>
+                                <button class="segment-btn" data-align="right" onclick="changeTextAlign('right', this)">置右</button>
                             </div>
                         </div>
                         
@@ -82,7 +83,7 @@
                             </div>
                             <select id="setting-island-lines" onchange="saveSettingsToServer('island_lines', parseInt(this.value))" style="background: var(--bg-main); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 8px; padding: 6px 12px; font-size: 14px; outline: none;">
                                 <option value="1">1 行</option>
-                                <option value="2">2 行</option>
+                                <option value="2" selected>2 行</option>
                             </select>
                         </div>
                     </div>
@@ -104,16 +105,6 @@
                             </select>
                         </div>
                         
-                        <div class="setting-item">
-                            <div>
-                                <div class="setting-title">自動捲動至當前行</div>
-                                <div class="setting-desc">播放時自動將正在唱的歌詞置中</div>
-                            </div>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="setting-autoscroll" onchange="saveSettings()" checked>
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
                         
                         <div class="setting-item" style="display: block; margin-top: 20px;">
                             <div style="margin-bottom: 10px;">
@@ -148,42 +139,47 @@
 
                     <!-- About Tab -->
                     <div id="tab-about" class="settings-pane" style="display: none;">
-                        <h3>關於</h3>
-                        <div class="about-content" style="text-align: center;">
-                            <div class="app-logo">
-                                <i class="fa-solid fa-compact-disc fa-spin-pulse" style="font-size: 48px; color: var(--accent-main); margin-bottom: 15px; display: inline-block;"></i>
+                        <h3>關於 Floating Lyrics</h3>
+                        
+                        <div class="about-hero" style="text-align: center; padding: 20px 0 30px; border-bottom: 1px solid var(--panel-border); margin-bottom: 25px;">
+                            <div class="app-logo" style="position: relative; display: inline-block;">
+                                <i class="fa-solid fa-compact-disc fa-spin" style="font-size: 64px; color: var(--accent-main); filter: drop-shadow(0 0 15px rgba(29, 185, 84, 0.4)); animation: spin 4s linear infinite;"></i>
+                                <div style="position: absolute; bottom: -5px; right: -5px; background: var(--panel-bg); border-radius: 50%; padding: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.2);">
+                                    <i class="fa-solid fa-music" style="font-size: 18px; color: var(--text-primary);"></i>
+                                </div>
                             </div>
-                            <h4 style="font-size: 20px; margin-bottom: 5px;">Floating Lyrics</h4>
-                            <p style="color: var(--text-dim); margin-bottom: 20px; font-weight: 500;">v2.0.0 (Web Edition)</p>
-                            <p style="text-align: left; padding: 0 10px;">
-                                Floating Lyrics 是一款次世代的動態歌詞顯示系統。透過 Windows 原生 API 完美捕捉音樂播放狀態，不僅提供無干擾的桌面浮動歌詞，更具備這個強大的網頁控制中心。
-                            </p>
-                            <ul style="text-align: left; padding-left: 30px; margin-top: 15px; color: var(--text-secondary); font-size: 14px; line-height: 1.8; list-style-type: none;">
-                                <li>✨ <b>即時雙向連動</b>：網頁就是你的遙控器，設定無縫同步到桌面。</li>
-                                <li>🇯🇵 <b>智慧假名標音</b>：內建系統自動為日文漢字加上精準注音。</li>
-                                <li>🎨 <b>現代化設計</b>：流暢的動畫、玻璃擬物化、與自動深淺色切換。</li>
-                                <li>📝 <b>內建歌詞編輯</b>：發現時間軸錯誤？直接在網頁版即刻修正。</li>
-                            </ul>
-                            <p style="color: var(--text-dim); margin-top: 25px;">Built with Node.js, Python, and Magic. 🚀</p>
+                            <h4 style="font-size: 32px; margin: 20px 0 8px; font-family: 'Outfit', sans-serif; font-weight: 800; background: linear-gradient(90deg, var(--text-primary), var(--accent-main)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Floating Lyrics</h4>
+                            <div style="display: inline-block; background: rgba(29, 185, 84, 0.1); border: 1px solid rgba(29, 185, 84, 0.2); color: var(--accent-main); padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: 1.5px;">VERSION 2.0.0 PRO</div>
                         </div>
+                        
+                        <div class="about-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 25px;">
+                            <div class="glass-panel" style="padding: 15px; border-radius: 12px; text-align: center; border: 1px solid var(--panel-border); transition: transform 0.2s; cursor: default;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+                                <i class="fa-brands fa-node-js" style="font-size: 28px; color: #68a063; margin-bottom: 10px;"></i>
+                                <h5 style="margin-bottom: 5px; color: var(--text-primary); font-size: 14px;">Web Engine</h5>
+                                <span style="font-size: 12px; color: var(--text-dim);">Node.js & Express</span>
+                            </div>
+                            <div class="glass-panel" style="padding: 15px; border-radius: 12px; text-align: center; border: 1px solid var(--panel-border); transition: transform 0.2s; cursor: default;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+                                <i class="fa-brands fa-python" style="font-size: 28px; color: #3776ab; margin-bottom: 10px;"></i>
+                                <h5 style="margin-bottom: 5px; color: var(--text-primary); font-size: 14px;">Desktop Core</h5>
+                                <span style="font-size: 12px; color: var(--text-dim);">Python & WinRT API</span>
+                            </div>
+                        </div>
+                        
+                        <div class="glass-panel" style="padding: 20px; border-radius: 12px; border-left: 4px solid var(--accent-main); background: linear-gradient(90deg, rgba(29, 185, 84, 0.05) 0%, transparent 100%);">
+                            <h5 style="color: var(--text-primary); margin-bottom: 8px; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                                <i class="fa-solid fa-wand-magic-sparkles" style="color: var(--accent-main);"></i> 核心理念
+                            </h5>
+                            <p style="color: var(--text-secondary); font-size: 13px; line-height: 1.7;">
+                                打破傳統歌詞軟體的限制。透過網頁作為控制中樞，結合桌面原生 API 的超強效能，為你打造最流暢、最智慧且零干擾的完美音樂體驗。
+                            </p>
+                        </div>
+                        
                     </div>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Live Clock Script -->
     <script>
-        function updateClock() {
-            const clockEl = document.getElementById('live-clock');
-            if (clockEl) {
-                const now = new Date();
-                clockEl.textContent = now.toLocaleTimeString('zh-TW', { hour12: false });
-            }
-        }
-        setInterval(updateClock, 1000);
-        updateClock();
-
         function toggleSidebar() {
             const sidebar = document.getElementById('app-sidebar');
             if (sidebar) {
@@ -275,8 +271,9 @@
             localStorage.setItem('lyricsAlignMode', alignValue);
             const pane = document.getElementById('lyrics-scroll');
             if (pane) {
+                pane.classList.remove('align-left', 'align-right');
                 if (alignValue === 'left') pane.classList.add('align-left');
-                else pane.classList.remove('align-left');
+                if (alignValue === 'right') pane.classList.add('align-right');
             }
             if (btn) {
                 const group = btn.parentElement;

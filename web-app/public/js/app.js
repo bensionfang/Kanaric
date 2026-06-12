@@ -25,7 +25,9 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (isCurrentlyPlaying && parsedLyrics.length > 0) {
             currentInterpolatedPosition += dt;
-            syncLyricsToTime(currentInterpolatedPosition + syncOffset);
+            // 隱藏的預設提前量，讓網頁版歌詞提早顯示 (補償視覺延遲，但不影響右下角調整值)
+            const WEB_APP_LYRICS_ADVANCE = 0.25; 
+            syncLyricsToTime(currentInterpolatedPosition - syncOffset + WEB_APP_LYRICS_ADVANCE);
             updatePlaybackProgress(currentInterpolatedPosition);
         }
         requestAnimationFrame(syncLoop);
@@ -88,8 +90,10 @@ function openLyricsModal() {
         if (artistInput && !artistInput.value) artistInput.value = lastMediaArtist;
     }
     
-    // Automatically fetch options
-    performGetOptions();
+    // Only fetch if options are empty
+    if (!window._lyricsOptions || window._lyricsOptions.length === 0) {
+        performGetOptions();
+    }
 }
 
 function closeLyricsModal() {
@@ -98,15 +102,40 @@ function closeLyricsModal() {
     setTimeout(() => modal.classList.add('hidden'), 300);
 }
 
-async function performGetOptions() {
+function manualSearchLyrics() {
+    performGetOptions(true);
+}
+
+async function performGetOptions(forceManual = false) {
     if (!lastMediaTitle) {
         showToast('目前沒有播放任何歌曲', 'fa-solid fa-circle-exclamation', 2000);
         return;
     }
+    
+    let searchTitle = lastMediaTitle;
+    let searchArtist = lastMediaArtist;
+    
+    const titleInput = document.getElementById('manual-title');
+    const artistInput = document.getElementById('manual-artist');
+    if (titleInput && artistInput) {
+        if (forceManual || titleInput.value.trim() !== lastMediaTitle) searchTitle = titleInput.value.trim() || lastMediaTitle;
+        if (forceManual || artistInput.value.trim() !== lastMediaArtist) searchArtist = artistInput.value.trim() || lastMediaArtist;
+        
+        // Ensure inputs reflect what's being searched
+        titleInput.value = searchTitle;
+        artistInput.value = searchArtist;
+    }
+
     const listEl = document.getElementById('lyrics-options-list');
     listEl.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-spinner fa-spin"></i> 搜尋中...</div>`;
     try {
-        const resp = await fetch(`/api/lyrics/options?title=${encodeURIComponent(lastMediaTitle)}&artist=${encodeURIComponent(lastMediaArtist)}`);
+        const queryParams = new URLSearchParams({
+            title: lastMediaTitle,
+            artist: lastMediaArtist,
+            searchTitle: searchTitle,
+            searchArtist: searchArtist
+        });
+        const resp = await fetch(`/api/lyrics/options?${queryParams.toString()}`);
         const data = await resp.json();
         if (!data.options || data.options.length === 0) {
             listEl.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-face-frown"></i> 找不到備選歌詞</div>`;
@@ -354,6 +383,16 @@ function parseLrcLyrics(lrcText) {
     } else {
         parsedLyrics.sort((a, b) => a.time - b.time);
         
+        // Remove consecutive empty lines (♫)
+        parsedLyrics = parsedLyrics.filter((item, index, arr) => {
+            if (item.text === '♫') {
+                if (index > 0 && arr[index - 1].text === '♫') {
+                    return false;
+                }
+            }
+            return true;
+        });
+        
         // Merge lines with similar time tags (translations/romaji)
         const mergedLyrics = [];
         for (let i = 0; i < parsedLyrics.length; i++) {
@@ -470,7 +509,7 @@ function adjustSyncOffset(delta) {
     updateOffsetDisplay();
     saveSyncOffset();
     if (parsedLyrics.length > 0 && currentInterpolatedPosition >= 0) {
-        syncLyricsToTime(currentInterpolatedPosition + syncOffset);
+        syncLyricsToTime(currentInterpolatedPosition - syncOffset);
     }
 }
 
@@ -479,7 +518,7 @@ function resetSyncOffset() {
     updateOffsetDisplay();
     saveSyncOffset();
     if (parsedLyrics.length > 0 && currentInterpolatedPosition >= 0) {
-        syncLyricsToTime(currentInterpolatedPosition + syncOffset);
+        syncLyricsToTime(currentInterpolatedPosition - syncOffset);
     }
 }
 
@@ -720,6 +759,35 @@ document.getElementById('lyrics-scroll').addEventListener('click', (e) => {
         document.getElementById('ruby-edit-rt').value = currentRt;
         document.getElementById('ruby-edit-modal').classList.remove('hidden');
         document.getElementById('ruby-edit-modal').classList.add('show');
+        
+        const cdiv = document.getElementById('ruby-edit-candidates');
+        cdiv.innerHTML = '<span style="color:var(--text-secondary); font-size:12px;">載入候選字...</span>';
+        fetch(`/api/furigana/candidates?word=${encodeURIComponent(kanji)}`)
+            .then(r => r.json())
+            .then(data => {
+                cdiv.innerHTML = '';
+                if (data.candidates && data.candidates.length > 0) {
+                    data.candidates.forEach(cand => {
+                        const btn = document.createElement('button');
+                        btn.textContent = cand;
+                        btn.style.background = 'var(--panel-bg)';
+                        btn.style.border = '1px solid var(--panel-border)';
+                        btn.style.color = 'var(--text-primary)';
+                        btn.style.padding = '4px 10px';
+                        btn.style.borderRadius = '12px';
+                        btn.style.cursor = 'pointer';
+                        btn.style.fontSize = '14px';
+                        btn.onclick = () => {
+                            document.getElementById('ruby-edit-rt').value = cand;
+                            document.getElementById('ruby-edit-rt').focus();
+                        };
+                        cdiv.appendChild(btn);
+                    });
+                } else {
+                    cdiv.innerHTML = '<span style="color:var(--text-secondary); font-size:12px;">無備選假名</span>';
+                }
+            })
+            .catch(() => { cdiv.innerHTML = ''; });
         
         setTimeout(() => document.getElementById('ruby-edit-rt').focus(), 100);
     }

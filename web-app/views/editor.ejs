@@ -12,7 +12,10 @@
         <div class="card-header">
             <h3>選擇歌曲</h3>
         </div>
-        <input type="text" id="song-search" placeholder="搜尋歌名或歌手..." style="width: 100%; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 8px 12px; border-radius: 4px; margin-bottom: 10px; font-family: inherit; font-size: 14px;">
+        <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <input type="text" id="title-search" placeholder="搜尋歌名..." style="flex: 1; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 8px 12px; border-radius: 4px; font-family: inherit; font-size: 14px;">
+            <input type="text" id="artist-search" placeholder="搜尋歌手..." style="flex: 1; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 8px 12px; border-radius: 4px; font-family: inherit; font-size: 14px;">
+        </div>
         <select id="song-select" size="10" style="width: 100%; flex: 1; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 10px; border-radius: 4px; font-family: monospace;">
             <option disabled>載入中...</option>
         </select>
@@ -39,7 +42,19 @@
         <h3><i class="fa-solid fa-magnifying-glass-plus"></i> 尋找更多歌詞</h3>
         <div class="modal-actions" style="display:flex; flex-direction:column; gap: 15px; margin-top: 15px;">
             <div style="padding-top: 5px;">
-                <h4 style="margin-bottom: 10px; font-size: 14px;"><i class="fa-solid fa-list"></i> 取得備選歌詞</h4>
+                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
+                    <h4 style="margin: 0; font-size: 14px;"><i class="fa-solid fa-list"></i> 取得備選歌詞</h4>
+                    <button onclick="editorGetOptions()" class="nav-btn" style="padding: 4px 8px; font-size: 12px;"><i class="fa-solid fa-rotate-right"></i> 重新抓取備選歌詞</button>
+                </div>
+                
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;">
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="manual-search-title" placeholder="自訂搜尋歌名..." style="flex: 1; min-width: 0; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 6px; border-radius: 4px; font-family: inherit; font-size: 13px;">
+                        <input type="text" id="manual-search-artist" placeholder="自訂搜尋歌手..." style="flex: 1; min-width: 0; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 6px; border-radius: 4px; font-family: inherit; font-size: 13px;">
+                    </div>
+                    <button onclick="editorManualSearch()" class="nav-btn" style="width: 100%; justify-content: center; padding: 8px; font-size: 13px;"><i class="fa-solid fa-search"></i> 以自訂關鍵字搜尋</button>
+                </div>
+
                 <div id="editor-options-list" style="margin-top: 10px; max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;"></div>
             </div>
 
@@ -119,14 +134,17 @@
 
     let currentArtist = "";
     let currentTitle = "";
+    let lastFetchedSong = "";
     
     function openEditorOptionsModal() {
         const modal = document.getElementById('editor-options-modal');
         modal.classList.remove('hidden');
         modal.classList.add('show');
         
-        // Auto fetch options
-        editorGetOptions();
+        const currentSongKey = currentTitle + "|" + currentArtist;
+        if (lastFetchedSong !== currentSongKey) {
+            editorGetOptions();
+        }
     }
 
     function closeEditorOptionsModal() {
@@ -153,15 +171,34 @@
         if (text) applyLyricsToEditor(text);
     }
 
+    function editorManualSearch() {
+        const customTitle = document.getElementById('manual-search-title').value.trim();
+        const customArtist = document.getElementById('manual-search-artist').value.trim();
+        editorGetOptions(customTitle || undefined, customArtist || undefined);
+    }
 
-
-    async function editorGetOptions() {
+    async function editorGetOptions(customTitle, customArtist) {
         if (!currentTitle) return;
+        
+        const sTitle = customTitle !== undefined ? customTitle : currentTitle;
+        const sArtist = customArtist !== undefined ? customArtist : currentArtist;
+        
+        lastFetchedSong = currentTitle + "|" + currentArtist;
+        
+        document.getElementById('manual-search-title').value = sTitle;
+        document.getElementById('manual-search-artist').value = sArtist;
+
         const listEl = document.getElementById('editor-options-list');
         listEl.innerHTML = '<div style="color:var(--text-secondary); text-align:center;">搜尋中...</div>';
         
         try {
-            const resp = await fetch(`/api/lyrics/options?title=${encodeURIComponent(currentTitle)}&artist=${encodeURIComponent(currentArtist)}`);
+            const queryParams = new URLSearchParams({
+                title: currentTitle,
+                artist: currentArtist,
+                searchTitle: sTitle,
+                searchArtist: sArtist
+            });
+            const resp = await fetch(`/api/lyrics/options?${queryParams.toString()}`);
             const data = await resp.json();
             
             listEl.innerHTML = '';
@@ -197,20 +234,22 @@
         }
     }
 
-    const songSearch = document.getElementById('song-search');
+    const titleSearch = document.getElementById('title-search');
+    const artistSearch = document.getElementById('artist-search');
     let allSongs = [];
 
-    function renderSongList(filterText = "") {
+    function renderSongList(titleFilter = "", artistFilter = "") {
         songSelect.innerHTML = '';
         if (allSongs.length === 0) {
             songSelect.innerHTML = '<option disabled>資料庫中沒有快取的歌曲</option>';
             return;
         }
         
-        const lowerFilter = filterText.toLowerCase();
+        const lowerTitle = titleFilter.toLowerCase();
+        const lowerArtist = artistFilter.toLowerCase();
         const filteredSongs = allSongs.filter(song => 
-            song.title.toLowerCase().includes(lowerFilter) || 
-            song.artist.toLowerCase().includes(lowerFilter)
+            song.title.toLowerCase().includes(lowerTitle) && 
+            song.artist.toLowerCase().includes(lowerArtist)
         );
 
         if (filteredSongs.length === 0) {
@@ -233,9 +272,12 @@
             renderSongList();
         });
 
-    songSearch.addEventListener('input', (e) => {
-        renderSongList(e.target.value);
-    });
+    function onSearchInput() {
+        renderSongList(titleSearch.value, artistSearch.value);
+    }
+
+    titleSearch.addEventListener('input', onSearchInput);
+    artistSearch.addEventListener('input', onSearchInput);
 
     function createRow(timeStr, textStr) {
         const row = document.createElement('div');
@@ -355,7 +397,7 @@
         editorContainer.innerHTML = '<div style="color: var(--text-secondary); text-align: center; margin-top: 200px;">載入中...</div>';
         saveBtn.disabled = true;
         advancedBtn.disabled = true;
-        fetch(`/api/lyrics/raw?title=${encodeURIComponent(currentTitle)}&artist=${encodeURIComponent(currentArtist)}`)
+        fetch(`/api/lyrics/raw?title=${encodeURIComponent(currentTitle)}&artist=${encodeURIComponent(currentArtist)}&plain=true`)
             .then(res => res.json())
             .then(data => {
                 editorContainer.innerHTML = '';

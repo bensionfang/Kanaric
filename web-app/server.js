@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const http = require('http');
+const { WebSocketServer } = require('ws');
 const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
@@ -89,6 +91,10 @@ function startMediaMonitor() {
           const state = JSON.parse(line.trim());
           currentMediaState = { ...currentMediaState, ...state };
           
+          if (global.broadcast) {
+            global.broadcast({ type: 'media_state', state: currentMediaState });
+          }
+          
           if (state.is_playing && state.title && state.artist) {
             const songId = `${state.title}-${state.artist}`;
             if (songId !== lastPlayedSongId) {
@@ -157,10 +163,11 @@ const SETTINGS_FILE = path.join(PARENT_DIR, 'settings.json');
 app.get('/api/settings', (req, res) => {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
-      const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
-      res.json(JSON.parse(data));
+      const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      if (data.island_lines === undefined) data.island_lines = 2;
+      res.json(data);
     } else {
-      res.json({});
+      res.json({ island_lines: 2 });
     }
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -175,6 +182,9 @@ app.post('/api/settings', (req, res) => {
     }
     const newSettings = { ...currentSettings, ...req.body };
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 4), 'utf8');
+    if (global.broadcast) {
+      global.broadcast({ type: 'settings_updated', settings: newSettings });
+    }
     res.json({ success: true, settings: newSettings });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -223,9 +233,11 @@ function autoMarkTitleLines(lrcText) {
 
 function injectFurigana(artist, title, lyrics) {
   return new Promise((resolve) => {
+    console.log("injectFurigana called for:", title, artist);
     const scriptPath = path.join(PARENT_DIR, 'furigana_inject.py');
     
     if (!fs.existsSync(scriptPath)) {
+      console.log("scriptPath does not exist:", scriptPath);
       return resolve(lyrics);
     }
     
@@ -234,31 +246,36 @@ function injectFurigana(artist, title, lyrics) {
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
     });
     
+    pyProcess.stdin.write(JSON.stringify({ artist, title, lyrics }));
+    pyProcess.stdin.end();
+    
     let output = '';
     pyProcess.stdout.on('data', (data) => { output += data.toString('utf-8'); });
     
     pyProcess.on('close', (code) => {
+      console.log('Python script exited with code:', code, 'Output:', output.substring(0, 200));
       try {
         const parsed = JSON.parse(output);
         if (parsed.success && parsed.lyrics) {
           resolve(parsed.lyrics);
         } else {
+          console.error("Python script failed:", parsed.error);
           resolve(lyrics);
         }
       } catch (e) {
         console.error('Error parsing furigana output:', e);
+        console.error('Raw output was:', output);
         resolve(lyrics);
       }
     });
-    
-    pyProcess.stdin.write(JSON.stringify({ artist, title, lyrics }));
-    pyProcess.stdin.end();
   });
 }
 
-function fetchFallback(title, artist) {
+function fetchFallback(title, artist, fetchAll = false) {
   return new Promise((resolve) => {
-    const pyProcess = spawn(pythonCmd, ['search_fallback.py', title, artist], {
+    const args = ['search_fallback.py', title, artist];
+    if (fetchAll) args.push('--all');
+    const pyProcess = spawn(pythonCmd, args, {
       cwd: PARENT_DIR,
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
     });
@@ -269,7 +286,9 @@ function fetchFallback(title, artist) {
     pyProcess.on('close', () => {
       try {
         const parsed = JSON.parse(output);
-        if (parsed.success && parsed.lyrics) {
+        if (fetchAll && parsed.success && parsed.results) {
+            resolve(parsed.results);
+        } else if (!fetchAll && parsed.success && parsed.lyrics) {
           resolve({ lyrics: parsed.lyrics, source: parsed.source || 'Fallback' });
         } else {
           resolve(null);
@@ -280,6 +299,43 @@ function fetchFallback(title, artist) {
     });
   });
 }
+
+// 1.4 Get Furigana Candidates
+app.get('/api/furigana/candidates', async (req, res) => {
+  const { word } = req.query;
+  if (!word) return res.json({ candidates: [] });
+  try {
+    const resp = await fetch('https://jisho.org/api/v1/search/words?keyword=' + encodeURIComponent(word));
+    if (!resp.ok) return res.json({ candidates: [] });
+    const data = await resp.json();
+    let c = new Set();
+    if (data && data.data) {
+      data.data.forEach(item => {
+        if (item.japanese) {
+          item.japanese.forEach(j => {
+            if (j.word === word && j.reading) c.add(j.reading);
+          });
+        }
+      });
+    }
+    
+    // Add pykakasi default reading
+    const pyProcess = spawn(pythonCmd, ['-c', 'import sys, pykakasi; kks=pykakasi.kakasi(); res=kks.convert(sys.argv[1]); print("".join([item["hira"] for item in res]))', word]);
+    let out = '';
+    pyProcess.stdout.on('data', d => out += d.toString('utf-8'));
+    pyProcess.on('close', () => {
+      const kksRes = out.trim();
+      let arr = [...c];
+      if (kksRes && kksRes !== word) {
+        if (arr.includes(kksRes)) arr = arr.filter(x => x !== kksRes);
+        arr.unshift(kksRes);
+      }
+      res.json({ candidates: arr });
+    });
+  } catch(e) {
+    res.json({ candidates: [] });
+  }
+});
 
 // 1.5 Update Furigana Correction
 app.post('/api/furigana/correct', (req, res) => {
@@ -306,12 +362,7 @@ app.post('/api/furigana/correct', (req, res) => {
       [artist, title, orig, finalHira],
       (err) => {
         if (err) return res.status(500).json({ error: err.message });
-        
-        // Delete the cached lyrics so the next fetch will rebuild it with the new furigana
-        db.run('DELETE FROM cache WHERE artist = ? AND title = ?', [artist, title], (err2) => {
-          if (err2) console.error("Failed to delete cache after correction:", err2);
-          res.json({ success: true, hira: finalHira });
-        });
+        res.json({ success: true, hira: finalHira });
       }
     );
   }
@@ -333,6 +384,11 @@ app.post('/api/lyrics/offset', (req, res) => {
   if (!title || !artist || typeof offset !== 'number') return res.status(400).json({ error: 'Missing parameters' });
   db.run('INSERT OR REPLACE INTO sync_offsets (artist, title, offset) VALUES (?, ?, ?)', [artist, title, offset], (err) => {
     if (err) return res.status(500).json({ error: err.message });
+    
+    if (global.broadcast) {
+      global.broadcast({ type: 'sync_offset_updated', title, artist, offset });
+    }
+    
     res.json({ success: true, offset });
   });
 });
@@ -382,12 +438,21 @@ app.get('/api/lyrics/fetch', async (req, res) => {
           });
         });
         const injected = await injectFurigana(artist, title, bestLyric);
+        if (global.broadcast) {
+            global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
+        }
         return res.json({ lyrics: injected, source: sourceName });
       }
       
+      if (global.broadcast) {
+        global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: "" });
+      }
       return res.json({ lyrics: "", source: 'not_found' });
     } catch (e) {
       console.error('Error fetching lyrics:', e);
+      if (global.broadcast) {
+        global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: "" });
+      }
       return res.json({ lyrics: "", source: 'error' });
     }
   };
@@ -397,9 +462,11 @@ app.get('/api/lyrics/fetch', async (req, res) => {
   }
   
   // 1. Check DB first
+  console.log("Querying DB for:", title, artist);
   db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
     
+    console.log("DB returned:", row ? "found" : "not found");
     if (row && row.lyrics) {
       const injected = await injectFurigana(artist, title, row.lyrics);
       return res.json({ lyrics: injected, source: 'cache' });
@@ -411,29 +478,33 @@ app.get('/api/lyrics/fetch', async (req, res) => {
 });
 
 app.get('/api/lyrics/options', async (req, res) => {
-  const { title, artist } = req.query;
+  const { title, artist, searchTitle, searchArtist } = req.query;
   if (!title || !artist) return res.status(400).json({ error: 'Title and artist are required' });
   
   try {
-    const cleanTitle = title.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
-    const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' ' + artist)}`;
+    const qTitle = searchTitle || title;
+    const qArtist = searchArtist || artist;
+    const cleanTitle = qTitle.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
+    const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' ' + qArtist)}`;
     
     let valid_lyrics = [];
     
-    // Fetch QQ Music Options via fallback python script
+    // Fetch from all fallback options
     try {
-      const fbData = await fetchFallback(title, artist);
-      if (fbData && fbData.lyrics) {
-        valid_lyrics.push({
-          title: title,
-          artist: artist,
-          album: '',
-          duration: 0,
-          lyrics: `[source:${fbData.source}]\n${fbData.lyrics}`,
-          isSynced: /\[\d{2}:\d{2}/.test(fbData.lyrics),
-          provider: fbData.source,
-          score: 1500 // give high score to QQMusic fallback
-        });
+      const fbResults = await fetchFallback(qTitle, qArtist, true);
+      if (fbResults && Array.isArray(fbResults)) {
+        for (const fb of fbResults) {
+            valid_lyrics.push({
+              title: qTitle,
+              artist: qArtist,
+              album: '',
+              duration: 0,
+              lyrics: autoMarkTitleLines(`[source:${fb.source}]\n${fb.lyrics}`),
+              isSynced: /\[\d{2}:\d{2}/.test(fb.lyrics),
+              provider: fb.source,
+              score: fb.source === 'Musixmatch' ? 2000 : 1500
+            });
+        }
       }
     } catch(e) {}
     
@@ -450,7 +521,7 @@ app.get('/api/lyrics/options', async (req, res) => {
           artist: t.artistName || '',
           album: t.albumName || '',
           duration: t.duration || 0,
-          lyrics: `[source:Lrclib]\n${best}`,
+          lyrics: autoMarkTitleLines(`[source:Lrclib]\n${best}`),
           isSynced: !!t.syncedLyrics,
           provider: 'Lrclib'
         });
@@ -516,6 +587,9 @@ app.post('/api/lyrics/custom', async (req, res) => {
       });
     });
     const injected = await injectFurigana(artist, title, lyrics);
+    if (global.broadcast) {
+      global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
+    }
     res.json({ success: true, lyrics: injected });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -580,7 +654,9 @@ app.get('/api/stats/summary', (req, res) => {
       totalArtists: row.totalArtists || 0,
       totalAlbums: row.totalAlbums || 0,
       dailyAvgPlays: parseFloat(dailyAvgPlays),
-      dailyAvgMinutes: parseFloat(dailyAvgMinutes)
+      dailyAvgMinutes: parseFloat(dailyAvgMinutes),
+      appUptime: process.uptime(),
+      activeDays: row.activeDays || 0
     });
   });
 });
@@ -615,7 +691,7 @@ app.get('/api/stats/top-artists', (req, res) => {
 
 app.get('/api/stats/timeline', (req, res) => {
   const query = `
-    SELECT strftime('%Y-%m-%d', played_at) AS play_date, COUNT(*) AS play_count
+    SELECT strftime('%Y-%m-%d', played_at) AS play_date, COUNT(*) AS play_count, SUM(duration) AS duration_sum
     FROM listening_history
     WHERE played_at >= date('now', '-7 days')
     GROUP BY play_date
@@ -629,22 +705,47 @@ app.get('/api/stats/timeline', (req, res) => {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dateString = d.toISOString().split('T')[0];
-      timelineData[dateString] = 0;
+      timelineData[dateString] = { count: 0, duration: 0 };
     }
-    rows.forEach(row => { if (timelineData[row.play_date] !== undefined) timelineData[row.play_date] = row.play_count; });
+    rows.forEach(row => {
+      if (timelineData[row.play_date] !== undefined) {
+        timelineData[row.play_date] = { count: row.play_count, duration: Math.round(row.duration_sum / 60) || 0 };
+      }
+    });
     
     const formattedData = Object.keys(timelineData).map(date => ({
       play_date: date,
-      play_count: timelineData[date]
+      play_count: timelineData[date].count,
+      duration_mins: timelineData[date].duration
     }));
     res.json(formattedData);
+  });
+});
+
+app.get('/api/stats/advanced', (req, res) => {
+  const p1 = new Promise((resolve) => {
+    db.get('SELECT MAX(cnt) AS maxLoop FROM (SELECT COUNT(*) AS cnt FROM listening_history GROUP BY artist, title)', [], (err, row) => resolve(row ? row.maxLoop : 0));
+  });
+  const p2 = new Promise((resolve) => {
+    db.all("SELECT strftime('%H', played_at) AS hour, COUNT(*) AS count FROM listening_history GROUP BY hour ORDER BY hour", [], (err, rows) => resolve(rows || []));
+  });
+  const p3 = new Promise((resolve) => {
+    db.all("SELECT strftime('%w', played_at) AS dow, COUNT(*) AS count FROM listening_history GROUP BY dow ORDER BY dow", [], (err, rows) => resolve(rows || []));
+  });
+  
+  Promise.all([p1, p2, p3]).then(results => {
+    res.json({
+      maxLoopCount: results[0] || 0,
+      hourlyData: results[1],
+      dowData: results[2]
+    });
   });
 });
 
 app.get('/api/leaderboard', (req, res) => {
   const { type, range } = req.query;
   const validTypes = ['tracks', 'artists', 'albums'];
-  const validRanges = ['all', '6m', '1m'];
+  const validRanges = ['all', 'year', '6m', '3m', '1m', '7d'];
   
   if (!validTypes.includes(type)) return res.status(400).json({ error: 'Invalid type parameter' });
   if (!validRanges.includes(range)) return res.status(400).json({ error: 'Invalid range parameter' });
@@ -652,8 +753,14 @@ app.get('/api/leaderboard', (req, res) => {
   let dateFilter = '';
   if (range === '6m') {
     dateFilter = "WHERE played_at >= datetime('now', '-180 days')";
+  } else if (range === '3m') {
+    dateFilter = "WHERE played_at >= datetime('now', '-90 days')";
   } else if (range === '1m') {
     dateFilter = "WHERE played_at >= datetime('now', '-30 days')";
+  } else if (range === '7d') {
+    dateFilter = "WHERE played_at >= datetime('now', '-7 days')";
+  } else if (range === 'year') {
+    dateFilter = "WHERE strftime('%Y', played_at) = strftime('%Y', 'now')";
   }
   
   let query = '';
@@ -732,19 +839,15 @@ app.post('/api/launch-pyqt6', (req, res) => {
       return res.json({ success: true, action: 'stopped' });
     }
 
-    const mainPyPath = path.join(PARENT_DIR, 'main.py');
-    if (!fs.existsSync(mainPyPath)) return res.status(404).json({ error: 'main.py not found' });
-    
-    const venvPythonW = path.join(PARENT_DIR, 'venv', 'Scripts', 'pythonw.exe');
-    const launchCmd = fs.existsSync(venvPythonW) ? venvPythonW : pythonCmd;
+    const exePath = path.join(PARENT_DIR, 'DynamicIslandUI', 'bin', 'Release', 'net8.0-windows', 'DynamicIslandUI.exe');
+    if (!fs.existsSync(exePath)) return res.status(404).json({ error: 'C# UI not found. Please build it first.' });
     
     // Minimize the active window (browser) using ctypes
     spawn(pythonCmd, ['-c', 'import ctypes; ctypes.windll.user32.ShowWindow(ctypes.windll.user32.GetForegroundWindow(), 6)'], { windowsHide: false });
     
-    const out = fs.openSync(path.join(PARENT_DIR, 'startup_out.log'), 'w');
-    const err = fs.openSync(path.join(PARENT_DIR, 'startup_err.log'), 'w');
-    const child = spawn(launchCmd, [mainPyPath], { detached: true, stdio: ['ignore', out, err], cwd: PARENT_DIR, windowsHide: false });
+    const child = spawn(exePath, [], { detached: true, stdio: 'ignore', cwd: path.join(PARENT_DIR, 'DynamicIslandUI', 'bin', 'Release', 'net8.0-windows') });
     child.unref();
+    fs.writeFileSync(pidFile, child.pid.toString());
     res.json({ success: true, pid: child.pid, action: 'started' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -753,18 +856,40 @@ app.post('/api/launch-pyqt6', (req, res) => {
 
 // 7. Editor APIs
 app.get('/api/lyrics/raw', (req, res) => {
-  const { title, artist } = req.query;
-  db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], (err, row) => {
+  const { title, artist, plain } = req.query;
+  db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ lyrics: row ? row.lyrics : "" });
+    if (row && row.lyrics) {
+      let showFurigana = true;
+      if (fs.existsSync(SETTINGS_FILE)) {
+        try {
+          const setts = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+          if (setts.show_furigana === false || setts.show_furigana === "false") {
+            showFurigana = false;
+          }
+        } catch(e) {}
+      }
+      if (plain === 'true' || !showFurigana) {
+        res.json({ lyrics: row.lyrics });
+      } else {
+        const injected = await injectFurigana(artist, title, row.lyrics);
+        res.json({ lyrics: injected });
+      }
+    } else {
+      res.json({ lyrics: "" });
+    }
   });
 });
 
 app.post('/api/lyrics/update', (req, res) => {
   const { title, artist, lyrics } = req.body;
   if (!title || !artist || !lyrics) return res.status(400).json({ error: 'Missing fields' });
-  db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, lyrics], (err) => {
+  db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, lyrics], async (err) => {
     if (err) return res.status(500).json({ error: err.message });
+    if (global.broadcast) {
+      const injected = await injectFurigana(artist, title, lyrics);
+      global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
+    }
     res.json({ success: true });
   });
 });
@@ -790,6 +915,34 @@ app.get('/api/export-playlist', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Web Server running on http://localhost:${PORT}`);
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws) => {
+  console.log('🔗 WebSocket client connected (Dynamic Island)');
+  
+  let currentSettings = {};
+  if (fs.existsSync(SETTINGS_FILE)) {
+    try { currentSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch (e) {}
+  }
+  if (currentSettings.island_lines === undefined) currentSettings.island_lines = 2;
+  
+  ws.send(JSON.stringify({ type: 'init', state: currentMediaState, settings: currentSettings }));
+
+  ws.on('close', () => {
+    console.log('🔗 WebSocket client disconnected');
+  });
+});
+
+global.broadcast = function(message) {
+  const msgStr = JSON.stringify(message);
+  wss.clients.forEach(client => {
+    if (client.readyState === 1 /* WebSocket.OPEN */) {
+      client.send(msgStr);
+    }
+  });
+};
+
+server.listen(PORT, () => {
+  console.log(`🚀 Web Server & WebSocket running on http://localhost:${PORT}`);
 });
