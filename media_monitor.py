@@ -1,3 +1,8 @@
+"""
+CLI 媒體監聽腳本 (給 Node.js 網頁後台使用)
+使用標準輸出 (stdout) 以 JSON 格式持續印出目前的媒體狀態。
+Node.js 伺服器會將這個腳本當作子進程啟動並監聽。
+"""
 import sys
 import json
 import time
@@ -7,6 +12,7 @@ from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessio
 from winrt.windows.storage.streams import DataReader
 
 async def poll_media():
+    """與 media.py 邏輯類似，但輸出對象為終端機標準輸出"""
     sessions = await GlobalSystemMediaTransportControlsSessionManager.request_async()
     last_real_pos = -1.0
     last_real_pos_time = time.time()
@@ -28,6 +34,7 @@ async def poll_media():
                 real_pos = timeline.position.total_seconds() if timeline else 0.0
                 is_playing = (playback_info and playback_info.playback_status == 4)
                 
+                # 若歌曲變更，則將專輯封面轉換為 Base64 字串傳遞給 Node.js
                 song_id = f"{title}-{artist}"
                 if song_id != last_song_id:
                     last_song_id = song_id
@@ -52,6 +59,7 @@ async def poll_media():
                 if time_elapsed < 0:
                     time_elapsed = 0.0
                 
+                # 插值計算時間軸
                 interpolated_pos = real_pos + time_elapsed if is_playing else real_pos
                 
                 state = {
@@ -61,10 +69,13 @@ async def poll_media():
                     "position": interpolated_pos,
                     "is_playing": is_playing
                 }
+                
+                # 節省傳輸大小，只有換歌時傳送一次 Thumbnail
                 if song_id != last_sent_thumb_id:
                     state["thumbnail"] = current_thumb_b64
                     last_sent_thumb_id = song_id
             else:
+                # 系統無音樂播放時傳送空狀態
                 state = {
                     "title": "",
                     "artist": "",
@@ -73,11 +84,11 @@ async def poll_media():
                     "thumbnail": ""
                 }
             
-            # Print state as JSON line, flush to ensure Node.js receives it immediately
+            # 以 JSON 單行格式輸出，並強制 flush 確保 Node.js 能夠即時讀取到
             print(json.dumps(state), flush=True)
             
         except Exception as e:
-            # On error, output empty state to prevent crash
+            # 發生錯誤時，輸出空狀態與錯誤訊息防止崩潰
             print(json.dumps({
                 "title": "",
                 "artist": "",
@@ -86,10 +97,10 @@ async def poll_media():
                 "error": str(e)
             }), flush=True)
             
-        # Poll 10 times a second for smooth progress updates (100ms)
+        # 以 10Hz (每 0.1 秒) 的頻率輪詢以維持流暢的進度條更新
         await asyncio.sleep(0.1)
 
 if __name__ == '__main__':
-    # Set console encoding to UTF-8 to prevent string encoding issues in Windows
+    # 將控制台編碼設定為 UTF-8，防止在 Windows 環境下出現字串編碼問題
     sys.stdout.reconfigure(encoding='utf-8')
     asyncio.run(poll_media())

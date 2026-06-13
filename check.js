@@ -1,4 +1,10 @@
-
+/**
+ * 網頁版歌詞編輯器前端邏輯腳本
+ * 負責：
+ * 1. 查詢快取中的歌曲清單。
+ * 2. 顯示並允許手動編輯 LRC 格式的時間軸與歌詞內容。
+ * 3. 呼叫後端 API 替換/更新特定歌曲的歌詞。
+ */
     const songSelect = document.getElementById('song-select');
     const editorTitle = document.getElementById('editor-title');
     const editorContainer = document.getElementById('lrc-editor-container');

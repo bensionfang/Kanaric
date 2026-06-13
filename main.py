@@ -1,3 +1,8 @@
+"""
+主程式進入點與 PyQt6 桌面懸浮視窗介面 (UI)
+負責統整所有模組，包含媒體監聽、歌詞抓取、假名注音轉換與資料庫快取，
+並將結果顯示在一個可穿透、無邊框的桌面懸浮視窗上。
+"""
 import sys
 import os
 import json
@@ -113,12 +118,20 @@ def build_clickable_furigana_html(text, artist, title, line_index, is_japanese=T
 
 # ================= 5. 事件穿透捲動區塊 =================
 class TransparentScrollArea(QScrollArea):
+    """
+    客製化的捲動區域，攔截滑鼠滾輪事件以避免使用者誤觸滾動，
+    確保歌詞的滾動是由程式內部時間軸所控制。
+    """
     def wheelEvent(self, event):
         self.parent().wheelEvent(event)
         super().wheelEvent(event)
 
 # ================= 6. 主程式介面 =================
 class FloatingLyricsApp(QWidget):
+    """
+    主視窗類別 (Floating Lyrics App)
+    負責管理所有 UI 呈現、動畫滾動邏輯、事件綁定，以及與背景執行緒 (MediaWorker, LyricsFetcher) 的通訊。
+    """
     def __init__(self):
         super().__init__()
         self.settings = load_settings()
@@ -172,6 +185,7 @@ class FloatingLyricsApp(QWidget):
         self.hide_timer.start()
 
     def start_lyric_fetcher(self):
+        """啟動或重啟歌詞抓取執行緒，確保不會有多個抓取任務同時進行"""
         if not hasattr(self, '_orphan_fetchers'):
             self._orphan_fetchers = []
         self._orphan_fetchers = [f for f in self._orphan_fetchers if f.isRunning()]
@@ -343,6 +357,11 @@ class FloatingLyricsApp(QWidget):
         QApplication.instance().quit()
 
     def update_media_info(self, title, artist, album, position, thumb_bytes, is_playing):
+        """
+        處理 MediaWorker 傳來的媒體更新訊號。
+        若偵測到歌曲變更，會觸發新的歌詞搜尋；
+        若進度更新，則觸發歌詞介面的滾動與高亮邏輯。
+        """
         if thumb_bytes:
             pixmap = QPixmap()
             pixmap.loadFromData(thumb_bytes)
@@ -633,6 +652,11 @@ class FloatingLyricsApp(QWidget):
         self.parse_and_load_lyrics(text)
 
     def parse_and_load_lyrics(self, lrc_text):
+        """
+        解析 LRC 格式字串，將時間標籤與歌詞文字分離，
+        並渲染到 UI 上的 QLabel 元件。
+        支援處理日文假名注音 (Furigana) 的 HTML 格式。
+        """
         if not lrc_text:
             self.show_status(f"找不到歌詞")
             return
@@ -786,6 +810,10 @@ class FloatingLyricsApp(QWidget):
                 self.parse_and_load_lyrics(self.current_lrc_text)
 
     def refresh_lyrics_display(self, position):
+        """
+        根據目前的播放進度 (position)，計算應該顯示哪一行歌詞，
+        並利用 PyQt6 的動畫引擎平滑地將歌詞捲動到該行。
+        """
         current_index = -1
         adjusted_position = position + self.current_sync_offset
         

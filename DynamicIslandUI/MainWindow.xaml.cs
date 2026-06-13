@@ -19,6 +19,11 @@ using System.Windows.Threading;
 
 namespace DynamicIslandUI
 {
+    /**
+     * 動態島 UI (Dynamic Island) 應用程式主視窗
+     * 以 WPF 實作，透過 WebSocket 連接 Node.js 伺服器接收播放狀態與歌詞。
+     * 支援：平滑展開/收合動畫、隨時拖曳、歌詞高亮、進度插值運算。
+     */
     public partial class MainWindow : Window
     {
         private ClientWebSocket _webSocket;
@@ -68,8 +73,10 @@ namespace DynamicIslandUI
                 this.Top = workArea.Top - invisibleMargin;
             };
 
+            // 註冊影格渲染事件，用於高頻率的進度條與時間軸插值更新
             System.Windows.Media.CompositionTarget.Rendering += CompositionTarget_Rendering;
 
+            // 啟動 WebSocket 連線
             _ = ConnectWebSocket();
             
             // 監聽 IslandBorder 的大小改變，確保吸附時能維持正確的 Top 座標

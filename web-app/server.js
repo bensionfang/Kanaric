@@ -1,3 +1,11 @@
+/**
+ * Floating-Lyrics 網頁管理後台 (Node.js + Express)
+ * 負責提供網頁版的介面，包含：
+ * 1. 橋接與攔截 Python 媒體監聽腳本的輸出。
+ * 2. 將即時媒體狀態透過 WebSocket 廣播給網頁前端與動態島。
+ * 3. 處理 SQLite 資料庫的存取 (聽歌歷史、歌詞快取)。
+ * 4. 提供 RESTful API 供前端介面使用。
+ */
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
@@ -63,6 +71,11 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 });
 
 // Start Media Monitor Bridge
+/**
+ * 啟動 Python 媒體監聽橋接器
+ * 將 media_monitor.py 作為子進程啟動，並攔截其 stdout 輸出。
+ * 解析出的 JSON 資料會更新到 currentMediaState，並存入歷史紀錄。
+ */
 function startMediaMonitor() {
   const monitorScript = path.join(PARENT_DIR, 'media_monitor.py');
   
@@ -150,7 +163,7 @@ app.get('/editor', (req, res) => {
 });
 
 // REST APIs
-// 1. Get current media state
+// 1. 取得目前音樂的狀態 (供前端初次載入時同步)
 app.get('/api/current-media', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
