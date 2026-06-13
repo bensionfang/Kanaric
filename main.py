@@ -951,54 +951,6 @@ class FloatingLyricsApp(QWidget):
         if event.key() == Qt.Key.Key_BracketLeft: self.adjust_sync(-0.5)
         elif event.key() == Qt.Key.Key_BracketRight: self.adjust_sync(0.5)
 
-    def toggle_text_alignment(self):
-        current = self.settings.get("text_alignment", "left")
-        new_align = "center" if current == "left" else "left"
-        self.settings["text_alignment"] = new_align
-        self.save_settings(self.settings)
-        if self.current_lrc_text:
-            self.parse_and_load_lyrics(self.current_lrc_text)
-
-    def toggle_pin_window(self):
-        self.settings["pin_window"] = not self.settings.get("pin_window", True)
-        save_settings(self.settings)
-        if self.settings.get("pin_window"):
-            self.hide_timer.stop()
-        else:
-            self.hide_timer.start()
-
-    def set_display_lines(self):
-        current = self.settings.get("display_lines", 2)
-        val, ok = QInputDialog.getInt(self, "設定顯示行數", "請輸入要顯示的歌詞行數：", current, 1, 5, 1)
-        if ok:
-            self.settings["display_lines"] = val
-            save_settings(self.settings)
-            self.last_index = -2
-            if self.lyrics_data:
-                self.refresh_lyrics_display(self.media_worker.media_updated.pos if hasattr(self.media_worker, 'pos') else 0)
-
-    def set_font_size_menu(self):
-        current = self.settings.get("font_size", 22)
-        val, ok = QInputDialog.getInt(self, "設定字體大小", "請輸入字體大小：", current, 10, 100, 2)
-        if ok:
-            self.settings["font_size"] = val
-            save_settings(self.settings)
-            self.font_update_timer.start()
-
-    def toggle_mini_mode(self):
-        self.settings["mini_mode"] = not self.settings.get("mini_mode")
-        save_settings(self.settings)
-        self.apply_mode_styles()
-        self.last_index = -2 
-        if self.lyrics_data:
-            self.refresh_lyrics_display(self.media_worker.media_updated.pos if hasattr(self.media_worker, 'pos') else 0)
-
-    def toggle_dynamic_color(self):
-        self.settings["dynamic_color"] = not self.settings.get("dynamic_color")
-        save_settings(self.settings)
-        self.extract_dominant_color(None) 
-        self.apply_mode_styles()
-
     def adjust_sync(self, amount):
         if not self.search_title: return 
         if amount == 'reset':
@@ -1027,26 +979,7 @@ class FloatingLyricsApp(QWidget):
             self.refresh_lyrics_display(self.last_position)
         self.last_index = -2
 
-    def set_preferred_source(self):
-        current = self.settings.get("preferred_source", "NetEase")
-        sources = ["NetEase", "Lrclib", "Musixmatch", "QQMusic"]
-        try:
-            current_idx = sources.index(current)
-        except ValueError:
-            current_idx = 0
-            
-        val, ok = QInputDialog.getItem(self, "設定優先搜尋來源", "請選擇優先尋找歌詞的平台：", sources, current_idx, False)
-        if ok and val:
-            self.settings["preferred_source"] = val
-            save_settings(self.settings)
 
-    def set_custom_font(self):
-        current_font = QFont(self.settings.get("font_family", "Noto Sans JP"))
-        font, ok = QFontDialog.getFont(current_font, self, "選擇字型")
-        if ok:
-            self.settings["font_family"] = font.family()
-            save_settings(self.settings)
-            if self.current_lrc_text: self.parse_and_load_lyrics(self.current_lrc_text)
 
 if __name__ == '__main__':
     def global_exception_handler(exctype, value, tb):
