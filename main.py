@@ -1006,6 +1006,22 @@ class FloatingLyricsApp(QWidget):
         else:
             self.current_sync_offset += amount
         db.save_sync_offset(self.search_artist, self.search_title, self.current_sync_offset)
+        
+        # 即時廣播給 Node.js (靈動島會即時收到並更新)
+        def broadcast_offset():
+            try:
+                import requests
+                requests.post('http://localhost:3000/api/lyrics/offset', json={
+                    'title': self.search_title,
+                    'artist': self.search_artist,
+                    'offset': self.current_sync_offset
+                }, timeout=1)
+            except Exception:
+                pass
+        
+        import threading
+        threading.Thread(target=broadcast_offset, daemon=True).start()
+        
         ms_val = int(self.current_sync_offset * 1000)
         if hasattr(self, 'last_position'):
             self.refresh_lyrics_display(self.last_position)
