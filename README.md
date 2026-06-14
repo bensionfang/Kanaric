@@ -37,7 +37,7 @@ flowchart TD
     subgraph "核心業務與數據層 (Backend & DB)"
         NODE["2. Node.js 核心大腦<br>(server.js)"]:::node
         SQL[("SQLite 資料庫<br>(lyrics_data.db)")]:::db
-        NODE <-->|"讀寫分離"| SQL
+        NODE <-->|"WAL 並行讀寫"| SQL
     end
 
     subgraph "展示層 (Clients)"
@@ -47,7 +47,7 @@ flowchart TD
     end
 
     PY -- "stdout (JSON)" --> NODE
-    NODE -- "WebSocket (即時推播)" --> CS
+    NODE <-->|"WebSocket (推播) & REST API (請求)"| CS
     NODE <-->|"RESTful API (雙向互動)"| WEB
 ```
 
@@ -70,40 +70,41 @@ flowchart TD
         Start["作業系統播放新歌<br>Spotify / Apple Music"]:::frontend
     end
 
-    subgraph Backend ["後端處理層"]
+    subgraph Backend ["後端層 Node.js / Python"]
         direction TB
         Py["Python 攔截系統媒體狀態"]:::backend
         PyJSON["透過 stdout 輸出 JSON"]:::backend
         Node["Node.js 接收並解析歌曲資訊"]:::backend
-        Fetch["Node.js 背景抓取對應歌詞"]:::backend
+        Fetch["Node.js 根據前端請求抓取對應歌詞"]:::backend
     end
 
-    subgraph DB ["資料庫層"]
+    subgraph DB ["資料庫層 SQLite"]
         direction TB
         InsertSQL[("執行 SQL INSERT<br>寫入 listening_history")]:::database
     end
 
     subgraph UI ["介面顯示層 (多前端)"]
         direction TB
-        Island["C# 桌面靈動島<br>自動彈出顯示歌詞"]:::display
-        WebApp["Web 網頁端<br>同步更新目前播放歌曲"]:::display
+        Island["C# 桌面靈動島<br>接收 WebSocket 推播並顯示"]:::display
+        WebApp["Web 網頁端<br>每 100ms 輪詢並主動請求抓取"]:::display
     end
 
     Start --> Py
     Py --> PyJSON
     PyJSON --> Node
-    Node --> Fetch
-    Fetch --> InsertSQL
-    InsertSQL -. "寫入成功" .-> Node
-    Node == "WebSocket 廣播" ==> Island
-    WebApp -. "每 100ms 輪詢 API<br>(HTTP Polling)" .-> Node
+    Node -- "第一路：記錄聽歌歷史" --> InsertSQL
+    Node == "第二路：WebSocket 廣播新狀態" ==> Island
+    WebApp -. "HTTP Polling" .-> Node
+    WebApp -- "呼叫 /api/lyrics/fetch" --> Fetch
+    Fetch -. "抓取後觸發 WebSocket 廣播" .-> Island
 ```
 
 **🗣️ 邏輯解釋與導讀台詞：**
 1. **(破題開場)**：「大家現在看到的這張圖，是我系統的『大腦神經網路』。當我們在 Spotify 播下一首歌的瞬間，整個全自動化的資料收集流程就開始了。」
 2. **(解釋後端攔截)**：「首先，底層的 Python 監聽腳本會瞬間攔截到系統的媒體變化，把『歌名與歌手』等 metadata 打包成 JSON，發送給 Node.js 伺服器。」
 3. **(解釋資料庫寫入)**：「Node.js 收到資料後會兵分兩路。其中一路，就是立刻執行 SQL 的 `INSERT` 語法，把這首新歌的播放紀錄寫進 SQLite 資料庫的 `listening_history` 表裡面。這是我們後續做數據分析的基石。」
-4. **(解釋前端呈現)**：「接下來是前端的展示。為了適應不同平台的特性，我設計了兩種通訊機制：桌面的 C# 靈動島透過 **WebSocket** 接收 Node.js 的主動推播，達成極致的低延遲動畫；而 Web 網頁端則是透過每 100 毫秒的高頻率 **HTTP Polling (輪詢)** 與 `requestAnimationFrame` 來同步最新的播放進度，達成雙前端同時無縫更新！」
+4. **(解釋前端呈現)**：「另一路則是透過 WebSocket 廣播給所有前端。桌面的 C# 靈動島接收到推播後，會立刻得知換歌了；而 Web 網頁端則是透過每 100 毫秒的 HTTP Polling 隨時保持狀態同步。」
+5. **(解釋歌詞按需載入)**：「最後一個非常關鍵的細節：Node.js 並不會無腦抓歌詞！因為我們是以 Web 網頁端作為控制中心，當『Web 網頁端監聽到新歌曲播放時，才會主動發起 API 請求』。這時 Node.js 才會去檢查快取或向外部 API 抓取歌詞，抓取完成後再推播給靈動島。這種『由前端按需載入 (Lazy Loading)』的設計大幅節省了伺服器頻寬與無謂的爬蟲請求！」
 
 ### 流程二：前端使用者手動編輯與修正流程 (互動資料流)
 展示網頁版歌詞編輯器如何透過 API 與資料庫進行互動，達成即時的發音校正與歌詞儲存。
