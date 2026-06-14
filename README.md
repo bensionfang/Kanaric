@@ -279,8 +279,6 @@ flowchart TD
     *   `search_fallback.py`：針對特殊歌詞平台 (如 QQMusic) 的備用爬蟲腳本。
 *   **資料庫**：
     *   `lyrics_data.db`：系統共用的 SQLite 資料庫本體。
-*   **`legacy_v1_monolithic/` (第一代架構封存區)**：
-    *   包含 `main.py` (PyQt6 介面)、`fetcher.py`、`media.py`、`hotkeys.py` 等舊版單體架構程式碼。現已退居幕後，封存於此供歷史發展軌跡參考與對照。
 
 ---
 
