@@ -117,15 +117,16 @@ flowchart TD
 
     subgraph Frontend ["前端層 Web App"]
         direction TB
-        User["使用者在網頁介面<br>單擊修改漢字注音"]:::frontend
-        Send["發送 HTTP POST<br>/api/furigana/correct"]:::frontend
+        User["使用者單擊漢字喚起修改框"]:::frontend
+        Input["輸入羅馬拼音<br>(前端即時轉譯為平假名)"]:::frontend
+        Send["點擊確認，發送 HTTP POST<br>/api/furigana/correct"]:::frontend
         Update["網頁即時重新渲染正確注音"]:::frontend
     end
 
     subgraph Backend ["後端層 Node.js Server"]
         direction TB
         Recv["API 接收 JSON 參數<br>artist, title, 原始字, 新注音"]:::backend
-        Cond{"參數合法?<br>(自動將羅馬拼音轉假名)"}:::condition
+        Cond{"後端雙重驗證<br>(參數防呆與二次轉譯)"}:::condition
         SQL["執行 SQL: INSERT OR REPLACE"]:::backend
         Res["回傳 HTTP 200 成功狀態碼"]:::backend
     end
@@ -135,7 +136,8 @@ flowchart TD
         DB_Write[("成功存入 word_corrections 資料表")]:::database
     end
 
-    User --> Send
+    User --> Input
+    Input --> Send
     Send -- "傳輸資料" --> Recv
     Recv --> Cond
     Cond -- "是" --> SQL
