@@ -129,6 +129,7 @@ flowchart TD
         Cond{"後端雙重驗證<br>(參數防呆與二次轉譯)"}:::condition
         SQL["執行 SQL: INSERT OR REPLACE"]:::backend
         Res["回傳 HTTP 200 成功狀態碼"]:::backend
+        Err["回傳 HTTP 400 錯誤狀態碼"]:::backend
     end
 
     subgraph DB ["資料庫層 SQLite"]
@@ -141,10 +142,11 @@ flowchart TD
     Send -- "傳輸資料" --> Recv
     Recv --> Cond
     Cond -- "是" --> SQL
-    Cond -- "否 (缺少參數)" --> Res
+    Cond -- "否 (缺少參數)" --> Err
     SQL --> DB_Write
     DB_Write -. "寫入完成" .-> Res
     Res -- "回傳確認" --> Update
+    Err -- "前端報錯提示" --> User
 ```
 
 ### 流程三：數據讀取與排行榜呈現流程 (資料庫讀取應用)
