@@ -411,37 +411,88 @@ app.get('/api/lyrics/fetch', async (req, res) => {
   if (!title || !artist) return res.status(400).json({ error: 'Title and artist are required' });
   
   const performFetch = async () => {
-    // 2. Not in DB or force fetch, fetch from lrclib
     try {
       const qTitle = searchTitle || title;
       const qArtist = searchArtist || artist;
-      
       const cleanTitle = qTitle.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
-      const apiUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(qArtist)}&track_name=${encodeURIComponent(cleanTitle)}`;
       
-      const lrclibResp = await fetch(apiUrl);
+      let trueArtist = qArtist;
+      try {
+        const aliasRow = await new Promise((resolve) => {
+          db.get("SELECT true_name FROM artist_aliases WHERE alias=?", [qArtist], (err, row) => resolve(row));
+        });
+        if (aliasRow && aliasRow.true_name) {
+          trueArtist = aliasRow.true_name;
+        }
+      } catch (e) {}
+      
+      let preferredSource = 'Lrclib';
+      try {
+        if (fs.existsSync(SETTINGS_FILE)) {
+          const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+          if (s.preferred_source) preferredSource = s.preferred_source;
+        }
+      } catch (e) {}
+
       let bestLyric = "";
       let isLrclib = false;
-      if (lrclibResp.ok) {
-        const data = await lrclibResp.json();
-        bestLyric = data.syncedLyrics || data.plainLyrics || "";
-        if (bestLyric) isLrclib = true;
+      let plainBackup = "";
+      let fallbackSearched = false;
+      let finalSource = "";
+      
+      if (preferredSource !== 'Lrclib') {
+          const fbData = await fetchFallback(cleanTitle, qArtist);
+          fallbackSearched = true;
+          if (fbData && fbData.lyrics) {
+              const fbIsSynced = /\[\d{2}:\d{2}/.test(fbData.lyrics);
+              if (fbIsSynced) {
+                  bestLyric = fbData.lyrics;
+                  isLrclib = false;
+                  finalSource = fbData.source;
+              } else {
+                  plainBackup = fbData.lyrics;
+                  finalSource = fbData.source;
+              }
+          }
+      }
+
+      if (!bestLyric) {
+          const apiUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(trueArtist)}&track_name=${encodeURIComponent(cleanTitle)}`;
+          const lrclibResp = await fetch(apiUrl, {
+            headers: { "User-Agent": "Floating-Lyrics/1.0 (https://github.com/bensionfang/Floating-Lyrics)" }
+          });
+          if (lrclibResp.ok) {
+            const data = await lrclibResp.json();
+            if (data.syncedLyrics) {
+              bestLyric = data.syncedLyrics;
+              isLrclib = true;
+              finalSource = 'Lrclib';
+            } else if (data.plainLyrics && !plainBackup) {
+              plainBackup = data.plainLyrics;
+              finalSource = 'Lrclib';
+            }
+          }
       }
       
-      // Fallback to syncedlyrics & QQMusic
-      if (!bestLyric) {
+      if (!bestLyric && !fallbackSearched) {
         const fbData = await fetchFallback(cleanTitle, qArtist);
         if (fbData && fbData.lyrics) {
-          bestLyric = fbData.lyrics;
-          isLrclib = false;
-          // pass source to caller via side-effect or just handle below
-          lrclibResp.fallbackSource = fbData.source;
+          const fbIsSynced = /\[\d{2}:\d{2}/.test(fbData.lyrics);
+          if (fbIsSynced || !plainBackup) {
+            bestLyric = fbData.lyrics;
+            isLrclib = false;
+            finalSource = fbData.source;
+          }
         }
+      }
+      
+      if (!bestLyric && plainBackup) {
+          bestLyric = plainBackup;
       }
       
       // Save to DB under ORIGINAL title/artist
       if (bestLyric) {
-        const sourceName = isLrclib ? 'Lrclib' : (lrclibResp.fallbackSource || 'Fallback');
+        const sourceName = finalSource || 'Fallback';
         bestLyric = `[source:${sourceName}]\n${bestLyric}`;
         bestLyric = autoMarkTitleLines(bestLyric);
         await new Promise((resolve, reject) => {
@@ -497,8 +548,19 @@ app.get('/api/lyrics/options', async (req, res) => {
   try {
     const qTitle = searchTitle || title;
     const qArtist = searchArtist || artist;
+    
+    let trueArtist = qArtist;
+    try {
+      const aliasRow = await new Promise((resolve) => {
+        db.get("SELECT true_name FROM artist_aliases WHERE alias=?", [qArtist], (err, row) => resolve(row));
+      });
+      if (aliasRow && aliasRow.true_name) {
+        trueArtist = aliasRow.true_name;
+      }
+    } catch (e) {}
+    
     const cleanTitle = qTitle.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
-    const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' ' + qArtist)}`;
+    const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' ' + trueArtist)}`;
     
     let valid_lyrics = [];
     
@@ -588,7 +650,54 @@ app.get('/api/lyrics/options', async (req, res) => {
   }
 });
 
+// --- Alias Management APIs ---
+app.get('/api/aliases', (req, res) => {
+  db.all('SELECT alias, true_name FROM artist_aliases ORDER BY alias ASC', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows || []);
+  });
+});
+
+app.post('/api/aliases', express.json(), (req, res) => {
+  const { alias, true_name } = req.body;
+  if (!alias || !true_name) return res.status(400).json({ error: 'alias and true_name are required' });
+  db.run('INSERT OR REPLACE INTO artist_aliases (alias, true_name) VALUES (?, ?)', [alias, true_name], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true });
+  });
+});
+
+app.delete('/api/aliases/:alias', (req, res) => {
+  const alias = req.params.alias;
+  db.run('DELETE FROM artist_aliases WHERE alias = ?', [alias], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true });
+  });
+});
+
 app.post('/api/lyrics/custom', async (req, res) => {
+  const { title, artist, lyrics } = req.body;
+  if (!title || !artist || !lyrics) return res.status(400).json({ error: 'Missing parameters' });
+  
+  try {
+    const finalLyrics = autoMarkTitleLines(`[source:ManualEdit]\n${lyrics}`);
+    await new Promise((resolve, reject) => {
+      db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, finalLyrics], (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    const injected = await injectFurigana(artist, title, finalLyrics);
+    if (global.broadcast) {
+      global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
+    }
+    res.json({ success: true, lyrics: injected });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/lyrics/save', express.json(), async (req, res) => {
   const { title, artist, lyrics } = req.body;
   if (!title || !artist || !lyrics) return res.status(400).json({ error: 'Missing parameters' });
   

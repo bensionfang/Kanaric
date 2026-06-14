@@ -44,7 +44,16 @@ class DatabaseManager:
             self.cursor.execute("ALTER TABLE listening_history ADD COLUMN album TEXT")
         except sqlite3.OperationalError:
             pass
+            
+        # 建立歌手別名映射表
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS artist_aliases (alias TEXT PRIMARY KEY, true_name TEXT)''')
         self.conn.commit()
+
+    def get_artist_alias(self, alias: str) -> str:
+        """取得歌手的真實名稱 (如果有設定別名)"""
+        self.cursor.execute("SELECT true_name FROM artist_aliases WHERE alias=?", (alias,))
+        row = self.cursor.fetchone()
+        return row[0] if row else alias
 
     def get_word_correction(self, artist: str, title: str, word: str) -> Optional[str]:
         """取得特定歌曲中某個單字的自訂發音 (平假名)"""

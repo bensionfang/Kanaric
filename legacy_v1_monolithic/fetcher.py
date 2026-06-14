@@ -10,7 +10,7 @@ import base64
 import json
 import syncedlyrics
 from PyQt6.QtCore import QThread, pyqtSignal
-from utils import text_to_romaji_query, auto_mark_title_lines
+from utils import text_to_romaji_query, auto_mark_title_lines, romaji_to_hiragana
 from db import db
 from config import ITUNES_TIMEOUT, API_TIMEOUT, config
 
@@ -28,6 +28,8 @@ class LyricsFetcher(QThread):
         為提高搜尋命中率，根據原始歌名/歌手產生多種羅馬音查詢組合
         (處理 Lrclib 等國外平台對日文漢字支援不佳的問題)
         """
+        a = db.get_artist_alias(a)
+        
         queries = []
         seen = set()
         
@@ -35,15 +37,32 @@ class LyricsFetcher(QThread):
             if (qt, qa) not in seen and qt and qa:
                 seen.add((qt, qa))
                 queries.append((qt, qa))
-                
-        add_q(t, a)
-        
         rt = text_to_romaji_query(t)
         ra = text_to_romaji_query(a)
+        ht = romaji_to_hiragana(t)
+        ha = romaji_to_hiragana(a)
         
         rt_valid = rt and rt.lower() != t.lower()
         ra_valid = ra and ra.lower() != a.lower()
+        ht_valid = ht and ht != t
+        ha_valid = ha and ha != a
+
+        # 1. 優先：原始歌名 + 平假名歌手 (解決 Spotify 歌手羅馬音問題，例如 natori -> なとり)
+        if ha_valid:
+            add_q(t, ha)
         
+        # 2. 原始歌名 + 原始歌手 (Spotify 預設)
+        add_q(t, a)
+        
+        # 3. 平假名歌名 + 平假名歌手
+        if ht_valid and ha_valid:
+            add_q(ht, ha)
+            
+        # 4. 平假名歌名 + 原始歌手
+        if ht_valid:
+            add_q(ht, a)
+        
+        # 5. 羅馬音處理
         if rt_valid:
             add_q(rt, a)
             add_q(rt.replace(" ", ""), a) # 有些平台不含空格
@@ -215,7 +234,7 @@ class LyricsFetcher(QThread):
         客製化的 Lrclib 搜尋邏輯，使用評分機制過濾掉翻譯版 (Translation) 或純羅馬音版，
         確保抓到的是原汁原味的原文歌詞。
         """
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {"User-Agent": "Floating-Lyrics/1.0 (https://github.com/bensionfang/Floating-Lyrics)"}
         url = "https://lrclib.net/api/search"
         try:
             response = requests.get(url, params={"q": f"{target_title} {target_artist}"}, headers=headers, timeout=API_TIMEOUT)

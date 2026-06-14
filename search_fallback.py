@@ -57,6 +57,55 @@ def fetch_single_provider(query, provider):
     except:
         return None
 
+from utils import text_to_romaji_query, romaji_to_hiragana
+from db import db
+
+def generate_queries(t, a):
+    # 先過濾別名
+    a = db.get_artist_alias(a)
+    
+    queries = []
+    seen = set()
+    def add_q(qt, qa):
+        if (qt, qa) not in seen and qt and qa:
+            seen.add((qt, qa))
+            queries.append((qt, qa))
+    rt = text_to_romaji_query(t)
+    ra = text_to_romaji_query(a)
+    ht = romaji_to_hiragana(t)
+    ha = romaji_to_hiragana(a)
+    
+    rt_valid = rt and rt.lower() != t.lower()
+    ra_valid = ra and ra.lower() != a.lower()
+    ht_valid = ht and ht != t
+    ha_valid = ha and ha != a
+
+    # 1. 優先：原始歌名 + 平假名歌手
+    if ha_valid:
+        add_q(t, ha)
+        
+    # 2. 原始歌名 + 原始歌手
+    add_q(t, a)
+    
+    # 3. 平假名歌名 + 平假名歌手
+    if ht_valid and ha_valid:
+        add_q(ht, ha)
+        
+    # 4. 平假名歌名 + 原始歌手
+    if ht_valid:
+        add_q(ht, a)
+        
+    # 5. 羅馬音處理
+    if rt_valid:
+        add_q(rt, a)
+        add_q(rt.replace(" ", ""), a)
+    if ra_valid:
+        add_q(t, ra)
+    if rt_valid and ra_valid:
+        add_q(rt, ra)
+        add_q(rt.replace(" ", ""), ra)
+    return queries
+
 def main():
     """
     主程式入口，負責解析命令列參數並輸出 JSON 格式的結果
@@ -72,16 +121,60 @@ def main():
     
     query = f"{title} {artist}"
     
+    preferred_source = "NetEase"
+    try:
+        import os
+        settings_path = os.path.join(os.path.dirname(__file__), 'settings.json')
+        if os.path.exists(settings_path):
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                s = json.load(f)
+                preferred_source = s.get("preferred_source", "NetEase")
+    except:
+        pass
+
+    providers = [preferred_source]
+    for p in ["NetEase", "Lrclib", "Musixmatch", "Megalobiz"]:
+        if p != preferred_source and p not in providers:
+            providers.append(p)
+    
     if return_all:
         # 獲取所有可能的備用歌詞列表
         results = []
         qq_lyric, _ = fetch_qqmusic(title, artist)
         if qq_lyric:
             results.append({"lyrics": qq_lyric, "source": "QQMusic"})
-        for p in ["Musixmatch", "NetEase", "Megalobiz", "Lrclib"]:
-            lyric = fetch_single_provider(query, p)
-            if lyric:
-                results.append({"lyrics": lyric, "source": p})
+            
+        queries = generate_queries(title, artist)
+        for p in providers:
+            for q_title, q_artist in queries:
+                query = f"{q_title} {q_artist}"
+                lyric = fetch_single_provider(query, p)
+                if lyric:
+                    results.append({"lyrics": lyric, "source": p})
+                    break # 找到該平台的一個結果即可，跳出 query 迴圈
+                    
+        if len(results) == 0:
+            try:
+                itunes_url = "https://itunes.apple.com/search"
+                params = {"term": f"{title} {artist}", "entity": "song", "limit": 1, "country": "jp"}
+                resp = requests.get(itunes_url, params=params, timeout=5)
+                if resp.status_code == 200:
+                    it_results = resp.json().get("results", [])
+                    if it_results:
+                        jp_title = it_results[0].get("trackName", title)
+                        jp_artist = it_results[0].get("artistName", artist)
+                        if jp_title != title or jp_artist != artist:
+                            it_queries = generate_queries(jp_title, jp_artist)
+                            for p in providers:
+                                for q_title, q_artist in it_queries:
+                                    query = f"{q_title} {q_artist}"
+                                    lyric = fetch_single_provider(query, p)
+                                    if lyric:
+                                        results.append({"lyrics": lyric, "source": f"iTunes_Fallback({p})"})
+                                        break
+            except:
+                pass
+                
         print(json.dumps({"success": True, "results": results}))
         return
 
@@ -90,9 +183,30 @@ def main():
         lyric, source = fetch_qqmusic(title, artist)
         
         if not lyric:
-            query = f"{title} {artist}"
-            lyric = syncedlyrics.search(query, providers=["NetEase", "Musixmatch", "Megalobiz"])
-            source = "NetEase" # 粗略地假設為網易雲
+            queries = generate_queries(title, artist)
+            for q_title, q_artist in queries:
+                query = f"{q_title} {q_artist}"
+                lyric = syncedlyrics.search(query, providers=providers)
+                if lyric:
+                    source = "NetEase"
+                    break
+        if not lyric:
+            try:
+                itunes_url = "https://itunes.apple.com/search"
+                params = {"term": f"{title} {artist}", "entity": "song", "limit": 1, "country": "jp"}
+                resp = requests.get(itunes_url, params=params, timeout=5)
+                if resp.status_code == 200:
+                    results = resp.json().get("results", [])
+                    if results:
+                        jp_title = results[0].get("trackName", title)
+                        jp_artist = results[0].get("artistName", artist)
+                        if jp_title != title or jp_artist != artist:
+                            query = f"{jp_title} {jp_artist}"
+                            lyric = syncedlyrics.search(query, providers=providers)
+                            if lyric:
+                                source = "iTunes_Fallback"
+            except:
+                pass
             
         if lyric:
             print(json.dumps({"success": True, "lyrics": lyric, "source": source}))

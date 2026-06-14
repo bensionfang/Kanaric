@@ -1,176 +1,304 @@
-# Floating-Lyrics 專案檔案結構說明
+# Floating-Lyrics: 跨平台動態歌詞與聽歌分析系統
 
-這個專案是一個基於 Python (PyQt6) 開發的動態歌詞顯示工具，具備日文假名標註、全域快捷鍵與多來源歌詞抓取等功能。此外，專案中也包含了作為擴充或相關測試的 C# (WPF) 動態島介面與 Node.js 網頁後台管理系統。
+本專案是一個具備日文假名標註、多來源歌詞抓取與全域快捷鍵的動態歌詞系統。
+專案經歷了從「單體架構 (Monolithic)」到「微服務架構 (Microservices)」的演進，目前整合了 **Python 系統監聽**、**Node.js 核心大腦**、**C# WPF 桌面白月光靈動島** 與 **Web 網頁數據中心**，達成高度的模組化與關注點分離。
 
 ## 🌟 專案主要功能統整
 
-1.  **桌面懸浮動態歌詞**：在桌面上以透明、可穿透的視窗顯示同步歌詞，不干擾其他工作。
-2.  **自動偵測系統音樂**：透過 Windows 原生 API，自動監聽並同步 Spotify、Apple Music 等播放器的歌曲資訊與播放進度。
+1.  **C# 桌面靈動島歌詞**：在桌面上以極致流暢的 C# WPF 動畫顯示同步歌詞與專輯封面，不干擾其他工作。
+2.  **自動偵測系統音樂**：透過 Python 攔截 Windows 原生 API，免金鑰自動監聽並同步 Spotify、Apple Music 等播放器的歌曲資訊。
 3.  **日文漢字注音 (Furigana)**：內建日文分詞與拼音轉換系統，能自動為日文漢字加上平假名/羅馬音標註。
-4.  **多重歌詞來源抓取**：整合多種歌詞服務平台 (包含 QQMusic 等備用方案)，自動搜尋並下載準確的動態歌詞。
-5.  **全域快捷鍵支援**：支援透過鍵盤熱鍵快速顯示/隱藏歌詞視窗，或即時微調歌詞的時間軸 (提早/延遲)。
-6.  **高度可客製化**：可自訂字體大小、顯示行數，並支援動態提取專輯封面色彩。
-7.  **本地資料快取與修正**：使用 SQLite 快取下載過的歌詞與歷史播放紀錄，並允許儲存自訂的單字發音修正。
-8.  **網頁管理後台**：透過 Node.js 建置的網頁端，提供瀏覽器介面來手動編輯/校正歌詞、切換歌詞版本，以及查看個人的聽歌統計與排行榜。
-9.  **動態島 UI 擴充**：實驗性的 C# (WPF) 專案，實作類似動態島風格的桌面音樂互動介面。
+4.  **多重歌詞來源抓取**：Node.js 後端整合多種歌詞服務平台 (包含 QQMusic 等備用方案)，自動搜尋並下載準確的動態歌詞。
+5.  **全域快捷鍵支援**：支援透過鍵盤熱鍵快速微調歌詞的時間軸 (提早/延遲)，並即時廣播至所有介面。
+6.  **本地資料快取與修正**：使用 SQLite 快取下載過的歌詞與歷史播放紀錄，大幅減少網路請求並提升效能。
+7.  **網頁管理與數據後台**：透過 Node.js 建置的 Web 儀表板，提供瀏覽器介面來校正漢字發音、設定歌手別名、編輯歌詞時間軸，並可查看個人的聽歌統計與動態排行榜。
 
 ---
 
-## 💡 系統架構與擴充模組邏輯
-本專案採用多語言模組化架構，以 Python 負責系統底層互動與 UI 呈現，Node.js 負責資料橋接與網頁後台，並由 C# 負責靈動島動畫。以下是各模組的完整運作邏輯：
+## 🏛️ 1. 系統架構總覽 (專案核心亮點)
 
-### 🖥️ 1. Python 核心程式 (桌面歌詞主體)
-這是專案的最底層與核心部分，負責直接與 Windows 系統及外部 API 溝通：
-*   **系統媒體攔截 (`media.py` / `winrt`)**：透過 Windows Runtime API 攔截作業系統的 SMTC (System Media Transport Controls)。這讓我們不需各別串接 Spotify 或 Apple Music 的 API，就能直接獲取當前播放的歌名、歌手與進度。
-*   **歌詞獲取與處理 (`fetcher.py` / `pykakasi`)**：
-    1.  當偵測到新歌時，啟動背景執行緒 (Thread) 向多個歌詞平台 (NetEase, Lrclib, QQMusic) 發起搜尋。
-    2.  下載 LRC 格式後，交由 `pykakasi` 進行日文分詞，並將漢字轉換為平假名，最後組合為帶有 HTML `<ruby>` 標籤的字串。
-    3.  將處理好的最終歌詞與時間軸存入 SQLite 資料庫 (`lyrics_data.db`) 中快取，避免重複下載。
-*   **透明 UI 渲染 (`main.py` / `PyQt6`)**：使用 PyQt6 繪製無邊框、背景透明的視窗。透過定時器 (Timer) 不斷比對當前音樂進度與 LRC 時間軸，計算出當前應顯示的歌詞行並反白高亮。
-*   **全域快捷鍵 (`hotkeys.py`)**：利用底層鍵盤鉤子 (Keyboard Hook) 監聽按鍵事件，讓用戶在任何視窗下皆可動態微調時間軸 (`Sync Offset`)。修改時會立即寫入 DB，並透過 API 通知 Node.js 進行廣播。
+本專案最大的亮點在於**「架構重構」**：從早期的 Python 巨石陣 (Monolithic) 演進至現代化的一後端、多前端微服務架構 (Microservices)。
 
-### 🌐 2. 網頁版管理後台 (web-app) 運作邏輯
-網頁版核心是一個基於 **Node.js + Express** 建構的伺服器 (`server.js`)，扮演著「橋樑」與「資料中心」的角色：
-*   **橋接與監聽音樂**：伺服器啟動時，會在背景啟動 Python 的 `media_monitor.py` 作為子進程。它會持續攔截此腳本輸出的系統音樂播放狀態（歌名、歌手、播放進度等）。
-*   **即時推播 (WebSocket)**：當 Node.js 接收到 Python 傳來的最新播放狀態或時間軸偏移量變更時，會透過 WebSocket 即時廣播 (Broadcast) 給所有連線的客戶端（如靈動島）。
-*   **數據統計與儲存**：偵測到歌曲改變時，伺服器會自動將聽歌紀錄寫入 SQLite 資料庫 (`listening_history` 表)，作為「聽歌統計」、「排行榜」與「年度回顧」等頁面的資料來源。
-*   **API 與介面渲染**：提供 RESTful API 供前端讀寫設定，並使用 EJS 樣板引擎渲染各個前端頁面（如手動替換歌詞的編輯器）。
+*   **❌ 第一代架構 (Python 巨石陣)**：早期的 `main.py` 包辦了系統監聽、資料庫讀寫、網路爬蟲與 PyQt6 視窗繪製。高度耦合導致無法輕易加入網頁端或新功能，效能也受限於單一執行緒。
+*   **✅ 第二代架構 (微服務)**：將系統拆解成「關注點分離」的四大模組。Python 退居幕後成為感測器；Node.js 成為核心大腦；而展示層則拆分為追求視覺極致的 C# 靈動島，以及提供強大管理分析功能的 Web 網頁端。
 
-### 🏝️ 3. 靈動島 (DynamicIslandUI) 運作邏輯
-靈動島是一個獨立的 **C# WPF** 桌面應用程式 (`MainWindow.xaml.cs`)，負責呈現流暢的 UI 視覺效果：
-*   **資料來源**：它不主動抓取系統音樂，而是透過 **WebSocket 連線** 到 Node.js 伺服器，被動且即時地接收目前的歌曲、進度與歌詞狀態，確保與系統完全同步。
-*   **吸附與拖曳邏輯**：
-    *   程式允許自由拖曳視窗。
-    *   **邊緣吸附判定**：當視窗被拖曳到螢幕最頂端（Y 座標接近 0）並放開時，會觸發吸附動畫。
-    *   **形狀變換**：在吸附狀態下，視窗上半部的圓角會變平以貼齊螢幕邊緣，並顯示左右兩側的弧形過渡邊緣 (Flare)，產生從螢幕邊緣延伸出來的「動態島」視覺效果。
-*   **平滑過渡**：為了讓歌詞滾動與狀態切換不突兀，內部使用了大量的 `DispatcherTimer` 與數學插值運算 (Interpolation) 來達成毫秒級的平滑動畫過渡。
+```mermaid
+flowchart TD
+    classDef python fill:#3776ab,stroke:#fff,stroke-width:2px,color:#fff
+    classDef node fill:#339933,stroke:#fff,stroke-width:2px,color:#fff
+    classDef csharp fill:#178600,stroke:#fff,stroke-width:2px,color:#fff
+    classDef web fill:#e34f26,stroke:#fff,stroke-width:2px,color:#fff
+    classDef db fill:#003b57,stroke:#fff,stroke-width:2px,color:#fff
 
----
+    subgraph "感測層 (Sensor)"
+        PY["1. Python 媒體監聽器<br>(media_monitor.py)"]:::python
+    end
 
-以下是目前專案資料夾中所有檔案與子目錄的作用說明：
+    subgraph "核心業務與數據層 (Backend & DB)"
+        NODE["2. Node.js 核心大腦<br>(server.js)"]:::node
+        SQL[("SQLite 資料庫<br>(lyrics_data.db)")]:::db
+        NODE <-->|"讀寫分離"| SQL
+    end
 
-## 1. 核心程式碼 (Python 主專案)
+    subgraph "展示層 (Clients)"
+        direction LR
+        CS["3. C# 桌面靈動島<br>(觀賞用前端)"]:::csharp
+        WEB["4. 網頁版儀表板<br>(管理與數據前端)"]:::web
+    end
 
-*   **`main.py`**
-    應用程式的進入點與主視窗 UI 邏輯。負責統整各個模組、處理 PyQt6 介面呈現與使用者互動。
-*   **`config.py`**
-    系統常數與設定管理模組，負責載入與儲存使用者的偏好設定 (`settings.json`)。
-*   **`db.py`**
-    SQLite 資料庫操作管理，用於快取已下載的歌詞、儲存使用者修正的單字發音與聆聽歷史紀錄。
-*   **`media.py` & `media_monitor.py`**
-    媒體狀態監聽模組。透過 Windows Runtime API (`winrt`) 攔截系統目前正在播放的音樂資訊（歌名、歌手）以及播放進度。
-*   **`fetcher.py`**
-    主要歌詞抓取模組。使用多執行緒從不同的服務提供商獲取動態歌詞，避免阻塞主 UI。
-*   **`search_fallback.py`**
-    歌詞搜尋的備用邏輯，包含了直接對 QQMusic 等來源的 API 請求與解析實作。
-*   **`furigana_inject.py`**
-    日文假名注音 (Furigana) 處理模組。結合字典工具，將純日文歌詞轉換為帶有 `<ruby>` 標籤的 HTML，以利介面顯示拼音。
-*   **`utils.py`**
-    共用工具函式庫，包含羅馬拼音與平假名之間的轉換邏輯等。
-*   **`hotkeys.py`**
-    全域快捷鍵綁定模組，提供如顯示/隱藏視窗、調整歌詞時間軸等快捷操作。
-
-## 2. 設定、資料與文件 (Python 主專案)
-
-*   **`settings.json`**：記錄使用者介面與行為的偏好設定（如字體大小、顏色、顯示行數等）。
-*   **`lyrics_data.db`** (包含 `.db-shm` 與 `.db-wal`)：SQLite 資料庫本體及其中間暫存檔，存放所有快取資料。
-*   **`requirements.txt`**：Python 專案的依賴套件清單，用於 `pip install -r requirements.txt`。
-*   **`main.spec`**：PyInstaller 的打包設定檔，定義了如何將此 Python 程式編譯為可獨立執行的 .exe 檔。
-*   **`README.md`**：本專案的基礎說明文件。
-*   **`專案說明.pdf`**：專案的詳細設計或說明文件（PDF 格式）。
-*   **`check.js`**：網頁版歌詞編輯器的前端邏輯腳本，用於在瀏覽器介面上搜尋、編輯與替換歌詞。
-
-## 3. DynamicIslandUI 目錄 (C# WPF 擴充專案)
-這是一個基於 C# 和 WPF 框架的獨立專案，用於實作類似「動態島」風格的懸浮介面。
-*   **`DynamicIslandUI.csproj`**：C# 專案定義檔。
-*   **`App.xaml` & `App.xaml.cs`**：WPF 應用程式的全域進入點與資源定義。
-*   **`MainWindow.xaml` & `MainWindow.xaml.cs`**：動態島主視窗的版面配置 (XAML) 與背後的控制邏輯 (C#)。
-*   **`AssemblyInfo.cs`**：組件版本與基本資訊設定。
-*   **`crash.log`**：該程式執行時發生錯誤的崩潰紀錄檔。
-*   **`bin/` 與 `obj/` 目錄**：C# 專案編譯時產生的輸出與暫存目錄。
-
-## 4. web-app 目錄 (Node.js 網頁管理後台)
-這是一個基於 Node.js 與 Express 建構的網頁伺服器，提供網頁版的介面來管理、編輯與查看聽歌統計。
-*   **`server.js`**：Node.js 後端伺服器的主要進入點，包含 API 路由與頁面渲染邏輯。
-*   **`package.json` & `package-lock.json`**：Node.js 專案的依賴套件清單與版本鎖定檔。
-*   **`.env`**：後端伺服器的環境變數設定檔。
-*   **`database.sqlite` & `lyrics_data.db`**：網頁版使用的 SQLite 資料庫檔案。
-*   **`server_log.txt`**：伺服器執行的日誌紀錄檔。
-*   **`node_modules/`**：透過 npm 安裝的所有第三方依賴套件存放目錄。
-*   **`views/` 目錄 (前端 EJS 樣板)**
-    *   **`index.ejs`**：網站首頁。
-    *   **`editor.ejs`**：歌詞編輯器介面。
-    *   **`stats.ejs`**：聽歌數據統計介面。
-    *   **`leaderboard.ejs`**：排行榜介面。
-    *   **`wrapped.ejs`**：年度/月度聽歌回顧介面。
-    *   **`header.ejs` & `footer.ejs`**：網頁的共用頁首與頁尾區塊。
-*   **`public/` 目錄 (前端靜態資源)**
-    *   **`css/style.css`**：網頁的所有 CSS 樣式表。
-    *   **`js/app.js`**：網頁共用的前端 JavaScript 邏輯。
-
-## 5. 版本控制
-*   **`.git/` 目錄**：Git 版本控制系統的所有內部資料。
-*   **`.gitignore`**：告訴 Git 哪些檔案或目錄不需要被加入版本控制（例如暫存檔、打包結果等）。
+    PY -- "stdout (JSON)" --> NODE
+    NODE -- "WebSocket (即時推播)" --> CS
+    NODE <-->|"RESTful API (雙向互動)"| WEB
+```
 
 ---
 
-## 🚀 提前要求與安裝環境 (Prerequisites & Dependencies)
-在使用本專案之前，請確保您的系統符合以下要求。本專案採**模組化設計**，您可以根據需求選擇性安裝環境。
+## 🌊 2. 系統流程圖與資料流 (System Flowcharts)
 
-### 1. 必備：Python 核心模組
-如果您只需要最核心的「桌面懸浮歌詞」，只需滿足此項要求即可：
-*   **作業系統**：Windows 10 或 Windows 11（因為使用了 Windows 原生的 Media Control API 獲取音樂資訊）。
-*   **Python 環境**：安裝 Python 3.9 或以上版本。
-*   **音樂播放軟體**：支援 Windows 媒體控制的播放器（如 Spotify、Apple Music、網易雲音樂、Youtube Music 桌面版等）。
-*   **Python 依賴套件 (`requirements.txt`)**：
-    *   `PyQt6`：負責繪製透明、無邊框的桌面 UI。
-    *   `winrt`：攔截系統底層媒體控制項，實現**免金鑰**支援所有播放器。
-    *   `syncedlyrics`：從各大平台抓取時間軸歌詞。
-    *   `pykakasi`：處理日文分詞，是自動假名注音 (Furigana) 的核心。
-    *   `keyboard`：提供全域快捷鍵支援。
+### 流程一：背景音樂自動追蹤與寫入流程 (自動化資料收集)
+展示系統如何默默在背景運作，把使用者的聽歌行為轉化為資料庫紀錄。
 
-### 2. 可選：Node.js 網頁管理後台
-提供網頁版介面與歷史數據統計。若不啟動，完全不影響桌面版運作。
-*   **Node.js 環境**：請安裝 Node.js (建議 v18+)。
+```mermaid
+flowchart TD
+    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
+    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef display fill:#e76f51,stroke:#fff,stroke-width:2px,color:#fff
 
-### 3. 可選：.NET 8.0 靈動島介面
-靈動島 (`DynamicIslandUI.exe`) 是由 C# WPF 開發的原生 Windows 應用程式，依賴微軟的 `.NET 8.0 執行環境` 來確保 60FPS 的流暢動畫。
-若您不需要靈動島視覺效果，**完全可以不裝 .NET 8.0**。
+    subgraph OS ["系統層"]
+        direction TB
+        Start["作業系統播放新歌<br>Spotify / Apple Music"]:::frontend
+    end
+
+    subgraph Backend ["後端處理層"]
+        direction TB
+        Py["Python 攔截系統媒體狀態"]:::backend
+        PyJSON["透過 stdout 輸出 JSON"]:::backend
+        Node["Node.js 接收並解析歌曲資訊"]:::backend
+        Fetch["Node.js 背景抓取對應歌詞"]:::backend
+    end
+
+    subgraph DB ["資料庫層"]
+        direction TB
+        InsertSQL[("執行 SQL INSERT<br>寫入 listening_history")]:::database
+    end
+
+    subgraph UI ["介面顯示層"]
+        direction TB
+        Island["C# 桌面靈動島<br>自動彈出顯示專輯與歌詞"]:::display
+    end
+
+    Start --> Py
+    Py --> PyJSON
+    PyJSON --> Node
+    Node --> Fetch
+    Fetch --> InsertSQL
+    InsertSQL -. "寫入成功" .-> Node
+    Node == "WebSocket 廣播" ==> Island
+```
+
+### 流程二：前端使用者手動編輯與修正流程 (互動資料流)
+展示網頁版歌詞編輯器如何透過 API 與資料庫進行互動，達成即時的發音校正與歌詞儲存。
+
+```mermaid
+flowchart TD
+    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
+    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
+
+    subgraph Frontend ["前端層 Web App"]
+        direction TB
+        User["使用者在網頁編輯器<br>雙擊修改漢字注音"]:::frontend
+        Cond{"欄位是否合法?"}:::condition
+        Send["發送 HTTP POST<br>/api/furigana/correct"]:::frontend
+        Update["網頁即時重新渲染正確注音"]:::frontend
+    end
+
+    subgraph Backend ["後端層 Node.js Server"]
+        direction TB
+        Recv["API 接收 JSON 參數<br>artist, title, 原始字, 新注音"]:::backend
+        SQL["執行 SQL: INSERT OR REPLACE"]:::backend
+        Res["回傳 HTTP 200 成功狀態碼"]:::backend
+    end
+
+    subgraph DB ["資料庫層 SQLite"]
+        direction TB
+        DB_Write[("成功存入 word_corrections 資料表")]:::database
+    end
+
+    User --> Cond
+    Cond -- "否" --> User
+    Cond -- "是" --> Send
+    Send -- "傳輸資料" --> Recv
+    Recv --> SQL
+    SQL --> DB_Write
+    DB_Write -. "寫入完成" .-> Res
+    Res -- "回傳確認" --> Update
+```
+
+### 流程三：數據讀取與排行榜呈現流程 (資料庫讀取應用)
+展現系統如何把大量的聽歌紀錄，轉化為有價值的排行榜與統計資料。
+
+```mermaid
+flowchart TD
+    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
+    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
+
+    subgraph Frontend ["前端層 Web App"]
+        direction TB
+        Click["使用者進入「排行榜」<br>或切換時間區間 (如: 近 30 天)"]:::frontend
+        Req["發送 GET 請求到 /api/leaderboard"]:::frontend
+        View["前端收到 JSON 資料<br>動態產生 HTML 條列與排行動畫"]:::frontend
+    end
+
+    subgraph Backend ["後端層 Node.js Server"]
+        direction TB
+        Route["接收請求與參數<br>如: type=tracks, range=1m"]:::backend
+        Query["組合並執行 SQL 查詢<br>使用 SELECT, GROUP BY 與 LIMIT 50"]:::backend
+        Render["將查詢結果打包成 JSON 格式回傳"]:::backend
+    end
+
+    subgraph DB ["資料庫層 SQLite"]
+        direction TB
+        DB_Read[("篩選並統計 listening_history 表")]:::database
+    end
+
+    Click --> Req
+    Req --> Route
+    Route --> Query
+    Query --> DB_Read
+    DB_Read -. "撈出前 50 筆紀錄" .-> Render
+    Render -- "回傳 JSON 格式的排行陣列" --> View
+```
+
+### 流程四：歌手別名攔截與歌詞抓取流程 (解決髒資料問題)
+展示系統如何優雅地解決外部 API (Spotify) 給的名稱與歌詞庫名稱不一致的實務痛點。
+
+```mermaid
+flowchart TD
+    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
+    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
+    classDef external fill:#e76f51,stroke:#fff,stroke-width:2px,color:#fff
+
+    subgraph Backend ["後端邏輯層 Node.js / Python"]
+        direction TB
+        Start["準備去網路抓取歌詞<br>(拿到 Spotify 歌手名：魚韻)"]:::backend
+        QueryDB["查詢 artist_aliases 表"]:::database
+        Cond{"是否有設定別名?"}:::condition
+        Replace["將名稱替換為真名<br>(サカナクション)"]:::backend
+        Keep["保持原名"]:::backend
+        Fetch["拿著最終名稱<br>去外部 API 搜尋"]:::backend
+    end
+
+    subgraph ExternalAPI ["外部歌詞庫"]
+        direction TB
+        Lrclib["Lrclib / 網易雲等 API"]:::external
+    end
+
+    Start --> QueryDB
+    QueryDB --> Cond
+    Cond -- "是 (有找到)" --> Replace
+    Cond -- "否 (沒找到)" --> Keep
+    Replace --> Fetch
+    Keep --> Fetch
+    Fetch -- "發送 HTTP 請求" --> Lrclib
+    Lrclib -- "回傳精準歌詞" --> Fetch
+```
 
 ---
 
-## 📖 使用說明與功能操作指南 (由重要到細微)
+## 💡 3. 資料庫與資料表設計理念 (Database Schema)
 
-### 1. 啟動與基礎操作 (桌面動態歌詞)
-這是本專案最核心的功能。
-*   **啟動程式**：
-    執行 `python main.py`（或點擊編譯後的執行檔），程式會自動縮小至系統匣，並在桌面上顯示一個透明無邊框的歌詞視窗。
-*   **拖曳與鎖定**：
-    游標移至歌詞視窗上，按住**左鍵**即可自由拖曳。您可以將它放置在螢幕的任何角落。若不想誤觸，可透過右鍵選單開啟「鎖定視窗」功能。
-*   **自動偵測**：
-    只要打開 Spotify 或 Apple Music 並開始播放音樂，程式就會自動擷取歌名並上網搜尋歌詞。當音樂暫停時，歌詞也會同步停止滾動。
+本專案使用 SQLite 作為資料庫，包含 5 張核心資料表：
 
-### 2. 全域快捷鍵與時間軸微調 (Hotkeys)
-當您在使用其他軟體（如打字、寫程式或玩遊戲）時，不需切換視窗即可控制歌詞：
-*   **`Ctrl + Alt + L`**：快速切換顯示 / 隱藏歌詞視窗。
-*   **`Ctrl + Alt + ]`**：將歌詞時間軸**提早** 0.5 秒（如果發現歌詞比音樂慢）。
-*   **`Ctrl + Alt + [`**：將歌詞時間軸**延遲** 0.5 秒（如果發現歌詞比音樂快）。
-> **提示**：時間軸的微調不僅會自動記錄在本地資料庫中，還會透過背景伺服器即時廣播，讓 **桌面版歌詞** 與 **靈動島介面** 瞬間同步偏移！
+**1. cache 表 (歌詞快取字典)**
+*   **設計理念**：去網路上爬蟲抓歌詞是最耗時且最容易失敗的動作。這張表的作用是「把抓過的歌詞存起來」，避免同一首歌每次聽都要重新發送網路請求，扮演系統的樞紐角色。
+*   **複合主鍵**：`artist` & `title`。
 
-### 3. 日文漢字假名注音 (Furigana) 互動與校正
-專為學習日文歌曲設計的強大功能：
-*   **顯示注音**：程式會自動辨識日文漢字並在上方標註平假名。
-*   **即時校正**：如果有漢字發音標示錯誤，您可以直接用滑鼠**點擊該漢字**，此時會彈出修改對話框。輸入正確的平假名後按下確定，系統會將您的修改永久存入資料庫，未來再次出現該詞彙時將自動顯示正確發音。
+**2. listening_history 表 (聽歌歷史日誌)**
+*   **設計理念**：記錄使用者每一次的聽歌行為，是「排行榜」與「年度回顧」的資料來源。與 `cache` 表是一對多的關聯。
+*   **核心欄位**：`duration` (播放秒數), `played_at` (播放時間戳記)。
 
-### 4. 網頁版管理後台 (Web-App)
-提供進階的歌詞編輯與個人聽歌數據統計。
-*   **啟動後台**：在 `web-app` 目錄下執行 `npm install` 與 `npm start`，然後在瀏覽器輸入 `http://localhost:3000`。
-*   **手動修正/替換歌詞**：進入「歌詞編輯器」頁面，您可以從清單中選擇最近聽過的歌，查看所有備選歌詞並一鍵替換。您甚至可以手動編輯 LRC 時間標籤與文字內容。
-*   **聽歌統計與排行榜**：點擊導覽列的「Stats」或「Leaderboard」，可以查看您最常聽的歌手、歌曲，以及總播放時間。資料皆來自背景自動記錄的 SQLite 資料庫。
+**3. sync_offsets 表 (時間軸微調設定)**
+*   **設計理念**：記住使用者對每一首歌的歌詞時間軸微調喜好 (提早或延後多少秒)。與 `cache` 表是一對一或一對零的關聯。
 
-### 5. 靈動島介面 (Dynamic Island UI)
-如果您喜歡更具動感的桌面視覺效果，可以啟動附屬的 C# WPF 專案。
-*   **啟動方式**：需先確保 Node.js 的管理後台已啟動（因靈動島依賴其 WebSocket 廣播），接著執行 `DynamicIslandUI.exe`。
-*   **邊緣吸附**：將黑色的靈動島視窗往螢幕最上方拖曳並放開，視窗會自動貼齊邊緣並展開平滑的弧形倒角。
-*   **動態狀態切換**：當音樂播放、暫停或換歌時，靈動島會自動以彈性動畫展開或收縮，並顯示精緻的專輯封面與歌詞。
+**4. word_corrections 表 (發音修正檔)**
+*   **設計理念**：日文漢字會有一字多音的狀況，這張表允許使用者客製化並覆蓋系統原本的注音標示。與 `cache` 表是一對多的關聯。
+*   **複合主鍵**：`artist` & `title` & `word`。
 
+**5. artist_aliases 表 (歌手別名翻譯字典)**
+*   **設計理念**：為了解決 Spotify 強制將日文歌手名轉換為中文或羅馬音（如「魚韻」、「natori」），導致在日文歌詞資料庫搜尋不到的痛點。這是一張標準的對照表 (Lookup Table)。
+
+---
+
+## 🚀 4. 環境要求與安裝指南 (Prerequisites & Dependencies)
+
+本專案採**微服務架構**，需分別啟動後端與前端：
+
+### 1. 後端：Node.js 與 Python 感測器
+*   **作業系統**：Windows 10/11（依賴 Windows 原生 Media API）。
+*   **環境需求**：Node.js (建議 v18+) 以及 Python 3.9+。
+*   **安裝步驟**：
+    1. 安裝 Python 依賴：`pip install -r requirements.txt`
+    2. 安裝 Node.js 依賴：在 `web-app` 目錄下執行 `npm install`
+*   **啟動指令**：在 `web-app` 目錄下執行 `npm start` (這會同時帶起 Node.js 伺服器與背景的 Python 監聽腳本)。
+
+### 2. 展示端 A：C# 桌面靈動島
+*   **環境需求**：.NET 8.0 執行環境。
+*   **啟動指令**：確保 Node.js 後端已運行，接著執行 `DynamicIslandUI/bin/Release/net8.0-windows/DynamicIslandUI.exe`。
+
+### 3. 展示端 B：網頁管理後台
+*   **啟動指令**：開啟瀏覽器前往 `http://localhost:3000` 即可使用。
+
+---
+
+## 📖 5. 使用說明與操作指南
+
+1. **全域快捷鍵**：在任何視窗下，按下 `Ctrl + Alt + ]` 可讓歌詞提早 0.5 秒；`Ctrl + Alt + [` 可讓歌詞延遲 0.5 秒。此調整會即時同步至靈動島，並永久存入資料庫。
+2. **日文漢字校正**：若發現歌詞的平假名標註錯誤，請前往 Web 網頁端的「歌詞編輯器」，雙擊對應的漢字，即可輸入正確的平假名並覆蓋。
+3. **歌手別名設定**：若遇到 Spotify 名稱導致抓不到歌詞（如：魚韻），請前往 Web 網頁端編輯器的「歌手別名管理」，新增 `魚韻 -> サカナクション` 的對照，系統即可正確抓取歌詞。
+
+---
+
+## 📁 6. 核心檔案結構說明
+
+隨著系統架構演進，本專案已將微服務明確拆分，根目錄保持清爽：
+
+*   **`web-app/` (Node.js 核心與網頁前端)**：
+    *   `server.js`：Node.js 後端伺服器，包含 API 路由、WebSocket 廣播與歌詞處理邏輯。
+    *   `views/`：EJS 網頁前端樣板（包含編輯器、排行榜等介面）。
+*   **`DynamicIslandUI/` (C# 展示端)**：
+    *   C# WPF 靈動島前端專案，負責接收 WebSocket 即時動畫渲染。
+*   **底層微服務 (Python)**：
+    *   `media_monitor.py`：媒體監聽器，透過 `winrt` 攔截 Windows 播放狀態並吐出 JSON。
+    *   `furigana_inject.py`：結合 `pykakasi` 與字典進行日文假名注音注入。
+    *   `search_fallback.py`：針對特殊歌詞平台 (如 QQMusic) 的備用爬蟲腳本。
+*   **資料庫**：
+    *   `lyrics_data.db`：系統共用的 SQLite 資料庫本體。
+*   **`legacy_v1_monolithic/` (第一代架構封存區)**：
+    *   包含 `main.py` (PyQt6 介面)、`fetcher.py`、`media.py`、`hotkeys.py` 等舊版單體架構程式碼。現已退居幕後，封存於此供歷史發展軌跡參考與對照。
+
+---
+
+## 🎤 7. 面試問答準備 (模擬 Q&A)
+
+### Q1: 為什麼要用微服務架構取代單體架構？
+> 「因為我的系統除了要在桌面顯示外，我還想加入『網頁版歌詞編輯器』跟『排行榜』。如果全部寫在 C# 或 Python 的單體程式裡，擴充性非常差。所以我把後端與資料庫抽出來變成 Node.js 伺服器，讓 C# 專心做炫酷的動畫顯示，讓 Web 專心做資料管理，達成完美的關注點分離！」
+
+### Q2: 寫出一段你專案真正用到的 SQL，並解釋為什麼要這樣寫？
+```sql
+SELECT artist, title, COUNT(*) AS play_count, SUM(duration) AS total_duration
+FROM listening_history
+GROUP BY artist, title
+ORDER BY play_count DESC
+LIMIT 50;
+```
+> 「這段 SQL 是用在我的『排行榜網頁』上。因為我的 `listening_history` 存了使用者每一次播放的時間點，所以我想算出『最常聽的歌』時，我使用了 `GROUP BY artist, title` 將同一首歌群組起來，並用 `COUNT(*)` 計算播放次數。最後再透過 `ORDER BY play_count DESC` 取前 50 名！」
+
+### Q3: 打開你的資料庫，給我看 3 筆真實資料，並說明來源。
+> (打開 SQLite 工具，點開 `word_corrections` 或 `listening_history` 表)
+> 「這些資料都是『真實系統互動』產生的。例如這筆 `listening_history` 是本機播放時背景攔截並 `INSERT` 進來的。這筆 `word_corrections` 則是前端手動送出表單後寫入的。」

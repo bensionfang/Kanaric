@@ -414,162 +414,7 @@ class FloatingLyricsApp(QWidget):
         if self.lyrics_data:
             self.refresh_lyrics_display(position)
 
-    def show_help_dialog(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("操作說明")
-        dialog.resize(650, 650)
-        dialog.setStyleSheet("""
-            QDialog { background-color: #2b2b2b; color: white; }
-            QPushButton { background-color: #444; color: white; padding: 8px; border-radius: 4px; }
-            QPushButton:hover { background-color: #555; }
-            QTextEdit { background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #444; border-radius: 4px; padding: 10px; font-size: 14px; }
-        """)
-        
-        layout = QVBoxLayout(dialog)
-        text_edit = QTextEdit()
-        text_edit.setReadOnly(True)
-        
-        help_text = """# 桌面智慧浮動歌詞
 
-這是一款輕量級桌面浮動歌詞播放器，能自動追蹤系統音樂並在桌面上同步顯示歌詞。
-
-## 基本操作
-* 移動視窗：按住視窗空白處即可拖曳。
-* 調整大小：拖曳右下角圖示改變長寬。
-* 縮放字體：游標停留在視窗上方，滾動滑鼠滾輪即可縮放。
-* 修正拼音：雙擊歌詞漢字手動修正。支援輸入羅馬拼音，會自動轉成平假名。
-* 時間微調：點擊視窗後，按 `]` 提早 0.5 秒，按 `[` 延遲 0.5 秒。
-
-"""
-        text_edit.setMarkdown(help_text)
-        layout.addWidget(text_edit)
-        
-        close_btn = QPushButton("我知道了")
-        close_btn.clicked.connect(dialog.accept)
-        layout.addWidget(close_btn)
-        
-        dialog.exec()
-
-    def choose_alternative_lyrics(self):
-        if not hasattr(self, 'current_lyrics_options') or not self.current_lyrics_options:
-            QMessageBox.information(self, "無備選歌詞", "目前這首歌沒有在網路上找到其他的同步歌詞版本。")
-            return
-            
-        dialog = QDialog(self)
-        dialog.setWindowTitle("選擇備選歌詞")
-        dialog.resize(600, 400)
-        dialog.setStyleSheet("QDialog { background-color: #f0f0f0; } QPushButton { padding: 8px; } QListWidget { font-size: 14px; }")
-        layout = QVBoxLayout(dialog)
-        
-        label = QLabel("我們為您在背景找到了以下備選版本，請選擇最適合的套用：")
-        layout.addWidget(label)
-        
-        list_widget = QListWidget()
-        for opt in self.current_lyrics_options:
-            minutes = opt.get('duration', 0) // 60
-            seconds = opt.get('duration', 0) % 60
-            has_sync = bool(re.search(r'\[\d{2}:\d{2}', opt.get('lyrics', '')))
-            tag = "[動態 LRC]" if has_sync else "[純文字]"
-            display_text = f"{tag} [{minutes:02}:{seconds:02}] {opt.get('title', '')} - {opt.get('artist', '')}"
-            item = QListWidgetItem(display_text)
-            item.setData(Qt.ItemDataRole.UserRole, opt['lyrics'])
-            list_widget.addItem(item)
-            
-        layout.addWidget(list_widget)
-        
-        btn_layout = QHBoxLayout()
-        apply_btn = QPushButton("套用選取歌詞")
-        cancel_btn = QPushButton("取消")
-        btn_layout.addWidget(apply_btn)
-        btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-        
-        def apply_selected():
-            selected = list_widget.selectedItems()
-            if selected:
-                lrc_text = selected[0].data(Qt.ItemDataRole.UserRole)
-                db.save_cached_lyrics(self.search_artist, self.search_title, lrc_text)
-                self.parse_and_load_lyrics(lrc_text)
-                dialog.accept()
-                
-        apply_btn.clicked.connect(apply_selected)
-        cancel_btn.clicked.connect(dialog.reject)
-        
-        dialog.exec()
-
-    def manual_search_lyrics(self):
-        default_text = f"{self.search_title} - {self.search_artist}" if self.search_artist else self.search_title
-        text, ok = QInputDialog.getText(self, "手動搜尋", "請輸入 歌名 - 歌手 進行精準搜尋：", text=default_text)
-        if ok and text.strip():
-            if "-" in text:
-                parts = text.split("-", 1)
-                self.search_title = parts[0].strip()
-                self.search_artist = parts[1].strip()
-            else:
-                self.search_title = text.strip()
-                self.search_artist = ""
-                
-            self.trigger_lyric_search(manual_label=True)
-
-    def reset_manual_search(self):
-        if self.search_title == self.media_title and self.search_artist == self.media_artist:
-            QMessageBox.information(self, "提示", "目前已經是系統自動偵測的原始歌名囉！")
-            return
-            
-        self.search_title = self.media_title
-        self.search_artist = self.media_artist
-        self.trigger_lyric_search(manual_label=False)
-
-    def import_custom_lyrics(self):
-        if not self.search_title:
-            return
-            
-        dialog = QDialog(self)
-        dialog.setWindowTitle("貼上自訂歌詞")
-        dialog.resize(500, 400)
-        dialog.setStyleSheet("QDialog { background-color: #f0f0f0; } QTextEdit { font-size: 14px; }")
-        
-        layout = QVBoxLayout(dialog)
-        label = QLabel(f"請貼上「{self.search_title}」的 LRC 格式歌詞：\n提示：必須包含如 00:15.30 的時間標記")
-        layout.addWidget(label)
-        
-        text_edit = QTextEdit()
-        layout.addWidget(text_edit)
-        
-        btn_layout = QHBoxLayout()
-        save_btn = QPushButton("保存並套用")
-        cancel_btn = QPushButton("取消")
-        btn_layout.addWidget(save_btn)
-        btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-        
-        def save_and_close():
-            lrc_text = text_edit.toPlainText().strip()
-            if lrc_text:
-                if not re.search(r'\[\d{2}:\d{2}\.\d{2,3}\]', lrc_text):
-                    QMessageBox.warning(dialog, "格式錯誤", "未偵測到有效的 LRC 時間標記，但系統仍會為您存檔。")
-                
-                db.save_cached_lyrics(self.search_artist, self.search_title, lrc_text)
-                self.parse_and_load_lyrics(lrc_text)
-            dialog.accept()
-            
-        save_btn.clicked.connect(save_and_close)
-        cancel_btn.clicked.connect(dialog.reject)
-        
-        dialog.exec()
-
-    def clear_cache_and_refetch(self):
-        if not self.search_title: 
-            return
-            
-        db.delete_cached_lyrics(self.search_artist, self.search_title)
-        
-        self.lyrics_data = []
-        self.current_lyrics_options = []
-        self.last_index = -2
-        self.show_status("清除快取並重新搜尋中...")
-        
-        self.start_lyric_fetcher()
 
     def trigger_lyric_search(self, manual_label=False):
         self.current_lyrics_options = []
@@ -663,7 +508,6 @@ class FloatingLyricsApp(QWidget):
             
         self.clear_lyrics()
         self.current_lrc_text = lrc_text 
-        pattern = re.compile(r'\[(\d{2}):(\d{2}(?:\.\d{1,3})?)\](.*)')
         fs = self.settings.get("font_size", 22)
         ff = self.settings.get("font_family", "Noto Sans JP")
         
@@ -684,53 +528,13 @@ class FloatingLyricsApp(QWidget):
         self.intro_wrapper.setGraphicsEffect(intro_eff)
         self.content_layout.addWidget(self.intro_wrapper)
         
-        line_idx = 0
-        
-        source_provider = ""
+        from lrc_parser import parse_lrc
+        parsed_data = parse_lrc(lrc_text)
+        source_provider = parsed_data["source"]
+        parsed_lines = parsed_data["lines"]
         
         is_japanese_song = True
-        has_time_tags = bool(re.search(r'\[\d{2}:\d{2}', lrc_text))
         
-        parsed_lines = []
-        for line in lrc_text.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-
-            if line.startswith("[source:"):
-                source_provider = line[8:-1]
-                continue
-
-            match = pattern.match(line)
-            if match:
-                m, s, text = match.groups()
-                seconds = int(m) * 60 + float(s)
-                text = text.strip()
-            elif not has_time_tags:
-                seconds = -1.0
-                text = line
-            else:
-                text = ""
-
-            if text:
-                if "#TITLE#" in text:
-                    continue
-                parsed_lines.append({"seconds": seconds, "text": text, "translation": None})
-                
-        # Sort and merge translations
-        if has_time_tags:
-            parsed_lines.sort(key=lambda x: x["seconds"])
-            merged_lines = []
-            for item in parsed_lines:
-                if merged_lines and abs(item["seconds"] - merged_lines[-1]["seconds"]) < 0.05:
-                    if not merged_lines[-1]["translation"]:
-                        merged_lines[-1]["translation"] = item["text"]
-                    else:
-                        merged_lines[-1]["translation"] += " / " + item["text"]
-                else:
-                    merged_lines.append(item)
-            parsed_lines = merged_lines
-
         alignment = self.settings.get("text_alignment", "left")
 
         for line_idx, item in enumerate(parsed_lines):

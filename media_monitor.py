@@ -32,6 +32,7 @@ async def poll_media():
                 artist = info.artist if info.artist else ""
                 album = info.album_title if info.album_title else ""
                 real_pos = timeline.position.total_seconds() if timeline else 0.0
+                duration_sec = timeline.end_time.total_seconds() if timeline else 0.0
                 is_playing = (playback_info and playback_info.playback_status == 4)
                 
                 # 若歌曲變更，則將專輯封面轉換為 Base64 字串傳遞給 Node.js
@@ -67,6 +68,7 @@ async def poll_media():
                     "artist": artist,
                     "album": album,
                     "position": interpolated_pos,
+                    "duration": duration_sec,
                     "is_playing": is_playing
                 }
                 

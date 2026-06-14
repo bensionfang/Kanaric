@@ -337,7 +337,7 @@ function parseLrcLyrics(lrcText) {
     if (!lrcText) return;
     
     const lines = lrcText.split('\n');
-    const timeReg = /\[(\d+):(\d+)(?:\.(\d+))?\]/g;
+    const timeReg = /\[(\d+):(\d+)(?:[\.:](\d+))?\]/g;
     
     let hasTags = false;
     window.currentSourceProvider = "";
@@ -352,7 +352,7 @@ function parseLrcLyrics(lrcText) {
         }
         
         let match;
-        const text = line.replace(/\[\d+:\d+(?:\.\d+)?\]/g, '').trim();
+        const text = line.replace(/\[\d+:\d+(?:[\.:]\d+)?\]/g, '').trim();
         if (text.startsWith('#TITLE#')) return;
         
         timeReg.lastIndex = 0;
@@ -376,7 +376,7 @@ function parseLrcLyrics(lrcText) {
         isUnsyncedLyrics = true;
         lines.forEach(line => {
             const trimmed = line.trim();
-            if (trimmed && !trimmed.startsWith('#TITLE#')) {
+            if (trimmed && !trimmed.startsWith('#TITLE#') && !trimmed.startsWith('[source:')) {
                 parsedLyrics.push({ time: -1, text: trimmed });
             }
         });

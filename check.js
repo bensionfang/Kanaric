@@ -223,7 +223,7 @@
     function parseAndRenderLRC(rawText) {
         editorContainer.innerHTML = '';
         const lines = rawText.split('\n');
-        const regex = /^\[(\d{2}:\d{2}\.\d{2,3})\](.*)/;
+        const regex = /^\[(\d{2}:\d{2}[\.:]\d{2,3})\](.*)/;
         
         let hasContent = false;
         lines.forEach(line => {
