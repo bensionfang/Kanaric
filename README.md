@@ -83,9 +83,10 @@ flowchart TD
         InsertSQL[("執行 SQL INSERT<br>寫入 listening_history")]:::database
     end
 
-    subgraph UI ["介面顯示層"]
+    subgraph UI ["介面顯示層 (多前端)"]
         direction TB
-        Island["C# 桌面靈動島<br>自動彈出顯示專輯與歌詞"]:::display
+        Island["C# 桌面靈動島<br>自動彈出顯示歌詞"]:::display
+        WebApp["Web 網頁端<br>同步更新目前播放歌曲"]:::display
     end
 
     Start --> Py
@@ -95,7 +96,14 @@ flowchart TD
     Fetch --> InsertSQL
     InsertSQL -. "寫入成功" .-> Node
     Node == "WebSocket 廣播" ==> Island
+    Node == "WebSocket 廣播" ==> WebApp
 ```
+
+**🗣️ 邏輯解釋與導讀台詞：**
+1. **(破題開場)**：「大家現在看到的這張圖，是我系統的『大腦神經網路』。當我們在 Spotify 播下一首歌的瞬間，整個全自動化的資料收集流程就開始了。」
+2. **(解釋後端攔截)**：「首先，底層的 Python 監聽腳本會瞬間攔截到系統的媒體變化，把『歌名與歌手』等 metadata 打包成 JSON，發送給 Node.js 伺服器。」
+3. **(解釋資料庫寫入)**：「Node.js 收到資料後會兵分兩路。其中一路，就是立刻執行 SQL 的 `INSERT` 語法，把這首新歌的播放紀錄寫進 SQLite 資料庫的 `listening_history` 表裡面。這是我們後續做數據分析的基石。」
+4. **(解釋前端呈現)**：「資料一寫入成功，Node.js 就會立刻透過 WebSocket 向『所有前端』發送廣播！不只喚醒桌面的 C# 靈動島流暢滑出，同時網頁版也會瞬間同步更新目前的播放狀態。整個過程不到一秒鐘，完全不需要人工干預！」
 
 ### 流程二：前端使用者手動編輯與修正流程 (互動資料流)
 展示網頁版歌詞編輯器如何透過 API 與資料庫進行互動，達成即時的發音校正與歌詞儲存。
