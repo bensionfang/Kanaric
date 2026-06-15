@@ -116,12 +116,13 @@ flowchart TD
     classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
     classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
 
-    subgraph Frontend ["前端層 Web App"]
+    subgraph Frontend ["前端層 (Web App & 靈動島)"]
         direction TB
         User["使用者單擊漢字喚起修改框"]:::frontend
         Input["輸入羅馬拼音<br>(前端即時轉譯為平假名)"]:::frontend
         Send["點擊確認，發送 HTTP POST<br>/api/furigana/correct"]:::frontend
-        Update["網頁即時重新渲染正確注音"]:::frontend
+        Update["網頁端收到 HTTP 成功後<br>主動重新抓取歌詞"]:::frontend
+        Island["靈動島接收推播並<br>即時更新顯示修正後歌詞"]:::frontend
     end
 
     subgraph Backend ["後端層 Node.js Server"]
@@ -129,6 +130,7 @@ flowchart TD
         Recv["API 接收 JSON 參數<br>artist, title, 原始字, 新注音"]:::backend
         Cond{"後端雙重驗證<br>(參數防呆與二次轉譯)"}:::condition
         SQL["執行 SQL: INSERT OR REPLACE"]:::backend
+        Broadcast["若屬當前播放歌曲，重新產生假名<br>並透過 WebSocket 廣播更新"]:::backend
         Res["回傳 HTTP 200 成功狀態碼"]:::backend
         Err["回傳 HTTP 400 錯誤狀態碼"]:::backend
     end
@@ -146,6 +148,8 @@ flowchart TD
     Cond -- "否 (缺少參數)" --> Err
     SQL --> DB_Write
     DB_Write -. "寫入完成" .-> Res
+    DB_Write -. "檢查目前播放狀態" .-> Broadcast
+    Broadcast -- "WebSocket 推播" --> Island
     Res -- "回傳確認" --> Update
     Err -- "前端報錯提示" --> User
 ```

@@ -376,6 +376,18 @@ app.post('/api/furigana/correct', (req, res) => {
       (err) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true, hira: finalHira });
+        
+        // Re-inject and broadcast immediately if the current song is playing
+        if (currentMediaState && currentMediaState.title === title && currentMediaState.artist === artist) {
+          db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
+            if (!err && row && row.lyrics) {
+              const injected = await injectFurigana(artist, title, row.lyrics);
+              if (global.broadcast) {
+                global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
+              }
+            }
+          });
+        }
       }
     );
   }
