@@ -22,7 +22,27 @@ async def poll_media():
     
     while True:
         try:
-            current_session = sessions.get_current_session()
+            all_sessions = sessions.get_sessions()
+            current_session = None
+            browser_keywords = ['chrome', 'edge', 'firefox', 'opera', 'brave', 'vivaldi', 'browser']
+            
+            # 優先尋找非瀏覽器且正在播放的 Session
+            for sess in all_sessions:
+                app_id = (sess.source_app_user_model_id or "").lower()
+                if not any(k in app_id for k in browser_keywords):
+                    pb_info = sess.get_playback_info()
+                    if pb_info and pb_info.playback_status == 4: # playing
+                        current_session = sess
+                        break
+                        
+            # 若無正在播放的，找第一個非瀏覽器的 Session
+            if not current_session:
+                for sess in all_sessions:
+                    app_id = (sess.source_app_user_model_id or "").lower()
+                    if not any(k in app_id for k in browser_keywords):
+                        current_session = sess
+                        break
+
             if current_session:
                 info = await current_session.try_get_media_properties_async()
                 timeline = current_session.get_timeline_properties()

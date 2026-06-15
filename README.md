@@ -226,6 +226,90 @@ flowchart TD
     Lrclib -- "回傳精準歌詞" --> Fetch
 ```
 
+### 流程五：Apple iTunes 全域歌名攔截與還原流程 (Spotify 翻譯對策)
+展示系統如何利用背景攔截機制，將被 Spotify 自動翻譯成英文的日本歌曲（例如將「夜に駆ける」變成「Racing into the Night」），透過 iTunes API 全自動無縫還原回日文原名，確保系統能精準抓取歌詞並合併聽歌紀錄。
+
+```mermaid
+flowchart TD
+    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
+    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
+    classDef external fill:#e76f51,stroke:#fff,stroke-width:2px,color:#fff
+
+    subgraph Monitor ["系統偵測層"]
+        direction TB
+        Play["Spotify 播放新歌<br>(Racing into the Night - YOASOBI)"]:::frontend
+    end
+
+    subgraph Interceptor ["Node.js 跨區還原攔截器"]
+        direction TB
+        Intercept["攔截播放狀態<br>將原曲名送入非同步還原佇列"]:::backend
+        APIQuery["向 Apple iTunes API 發送請求<br>(強制指定 country=JP 日本區)"]:::backend
+        Cache{"iTunes 查有結果?"}:::condition
+        SaveCache["將回傳的日文真名存入內部快取<br>(夜に駆ける)"]:::backend
+        Fallback["沿用原始英文歌名"]:::backend
+        
+        Intercept --> APIQuery
+        APIQuery --> Cache
+        Cache -- "是 (找到日文原名)" --> SaveCache
+        Cache -- "否 (查無資料)" --> Fallback
+    end
+
+    subgraph Execution ["系統執行層"]
+        direction TB
+        StateBroadcast["1 秒後將最新的真名<br>推播至網頁與靈動島"]:::backend
+        FetchLyrics["使用日文真名去抓取同步歌詞"]:::backend
+        LogHistory["聽滿 30 秒後，將日文真名<br>寫入聽歌歷史"]:::database
+    end
+
+    Play --> Intercept
+    SaveCache --> StateBroadcast
+    Fallback --> StateBroadcast
+    StateBroadcast --> FetchLyrics
+    StateBroadcast --> LogHistory
+```
+
+### 流程六：聽歌歷史碼表累積機制 (30 秒防呆狀態機)
+展示系統如何像精密的碼表一樣，在使用者播放、暫停、切歌之間切換狀態，並累積真正的「有效聆聽時間」，避免產生大量的「一秒切歌」垃圾歷史紀錄。
+
+```mermaid
+flowchart TD
+    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
+    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
+    classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
+
+    subgraph UserAction ["使用者行為"]
+        direction TB
+        Play["開始播放新歌"]:::frontend
+        Pause["中途暫停"]:::frontend
+        Resume["繼續播放同一首"]:::frontend
+        Skip["未滿 30 秒即切歌"]:::frontend
+    end
+
+    subgraph StateMachine ["Node.js 碼表狀態機"]
+        direction TB
+        Init["歸零累積時間 (accumulatedMs = 0)<br>啟動 30 秒倒數計時器"]:::backend
+        TimerCancel["取消計時器<br>並把剛才聽的秒數加進 accumulatedMs"]:::backend
+        TimerRestart["扣除已經聽過的 accumulatedMs<br>重新啟動剩餘時間的倒數計時器"]:::backend
+        TimerDrop["直接丟棄當前狀態<br>不寫入資料庫"]:::backend
+    end
+
+    subgraph DB ["資料庫寫入層"]
+        direction TB
+        LogHistory[("計時器順利跑完<br>寫入 listening_history")]:::database
+    end
+
+    Play --> Init
+    Pause --> TimerCancel
+    Resume --> TimerRestart
+    Skip --> TimerDrop
+
+    Init -. "連續聽滿 30 秒" .-> LogHistory
+    TimerRestart -. "累積聽滿 30 秒" .-> LogHistory
+```
+
 ---
 
 ## 💡 3. 資料庫與資料表設計理念 (Database Schema)

@@ -70,6 +70,35 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
   }
 });
 
+// --- iTunes JP Resolution Cache ---
+const itunesCache = new Map();
+
+async function getResolvedMetadata(title, artist) {
+  const key = `${title}-${artist}`;
+  if (itunesCache.has(key)) return itunesCache.get(key);
+
+  // 先寫入原始資料避免重複發送請求
+  itunesCache.set(key, { title, artist });
+
+  try {
+    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(title + ' ' + artist)}&country=JP&entity=song&limit=1`;
+    const resp = await fetch(url, { timeout: 3000 });
+    const data = await resp.json();
+    if (data.results && data.results.length > 0) {
+      const result = {
+        title: data.results[0].trackName || title,
+        artist: data.results[0].artistName || artist
+      };
+      itunesCache.set(key, result); // 覆蓋為日文真實資料
+      return result;
+    }
+  } catch (e) {
+    console.error("iTunes API error:", e.message);
+  }
+  
+  return { title, artist };
+}
+
 // Start Media Monitor Bridge
 /**
  * 啟動 Python 媒體監聽橋接器
@@ -92,6 +121,10 @@ function startMediaMonitor() {
   
   let stdoutBuffer = '';
   let lastPlayedSongId = '';
+  let playTimer = null;
+  let songLogged = false;
+  let accumulatedMs = 0;
+  let lastResumeTime = 0;
 
   monitorProcess.stdout.on('data', (data) => {
     stdoutBuffer += data.toString('utf-8');
@@ -101,7 +134,23 @@ function startMediaMonitor() {
     for (const line of lines) {
       if (line.trim()) {
         try {
-          const state = JSON.parse(line.trim());
+          const rawState = JSON.parse(line.trim());
+          
+          // iTunes 跨區還原攔截器
+          if (rawState.title && rawState.artist) {
+            const key = `${rawState.title}-${rawState.artist}`;
+            if (!itunesCache.has(key)) {
+               getResolvedMetadata(rawState.title, rawState.artist);
+            } else {
+               const resolved = itunesCache.get(key);
+               rawState.original_title = rawState.title;
+               rawState.original_artist = rawState.artist;
+               rawState.title = resolved.title;
+               rawState.artist = resolved.artist;
+            }
+          }
+          
+          const state = rawState;
           currentMediaState = { ...currentMediaState, ...state };
           
           if (global.broadcast) {
@@ -110,17 +159,49 @@ function startMediaMonitor() {
           
           if (state.is_playing && state.title && state.artist) {
             const songId = `${state.title}-${state.artist}`;
+            
+            // 換新歌
             if (songId !== lastPlayedSongId) {
               lastPlayedSongId = songId;
-              // default duration 180s since monitor doesn't provide it yet
-              db.run(
-                'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
-                [state.artist, state.title, state.album || null, 180]
-              );
+              songLogged = false;
+              accumulatedMs = 0;
+              lastResumeTime = Date.now();
+              if (playTimer) clearTimeout(playTimer);
+              
+              playTimer = setTimeout(() => {
+                songLogged = true;
+                db.run(
+                  'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
+                  [state.artist, state.title, state.album || null, Math.round(state.duration) || 180]
+                );
+              }, 30000);
+            } 
+            // 同一首歌暫停後又繼續播放
+            else if (!songLogged && !playTimer) {
+              lastResumeTime = Date.now();
+              const remainingMs = Math.max(0, 30000 - accumulatedMs);
+              playTimer = setTimeout(() => {
+                songLogged = true;
+                db.run(
+                  'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
+                  [state.artist, state.title, state.album || null, Math.round(state.duration) || 180]
+                );
+              }, remainingMs);
             }
-          } else if (!state.is_playing && !state.title) {
-            // reset if nothing is playing to allow tracking same song if played again later
-            lastPlayedSongId = '';
+          } else if (!state.is_playing) {
+            // 暫停時取消計時，並累加已播放時間
+            if (playTimer) {
+              clearTimeout(playTimer);
+              playTimer = null;
+              if (!songLogged && lastResumeTime > 0) {
+                accumulatedMs += (Date.now() - lastResumeTime);
+              }
+            }
+            if (!state.title) {
+              lastPlayedSongId = '';
+              songLogged = false;
+              accumulatedMs = 0;
+            }
           }
         } catch (e) {
           // ignore parsing errors
@@ -762,7 +843,7 @@ app.get('/api/stats/summary', (req, res) => {
       COALESCE(SUM(duration), 0) AS totalTime,
       COUNT(DISTINCT artist) AS totalArtists,
       COUNT(DISTINCT(title || ' - ' || artist)) AS totalSongs,
-      COUNT(DISTINCT strftime('%Y-%m-%d', played_at)) AS activeDays,
+      COUNT(DISTINCT strftime('%Y-%m-%d', played_at, 'localtime')) AS activeDays,
       -- Estimate unique albums (approx 75% of unique songs, minimum 1 if songs > 0)
       CASE 
         WHEN COUNT(DISTINCT(title || ' - ' || artist)) > 0 
@@ -825,9 +906,9 @@ app.get('/api/stats/top-artists', (req, res) => {
 
 app.get('/api/stats/timeline', (req, res) => {
   const query = `
-    SELECT strftime('%Y-%m-%d', played_at) AS play_date, COUNT(*) AS play_count, SUM(duration) AS duration_sum
+    SELECT strftime('%Y-%m-%d', played_at, 'localtime') AS play_date, COUNT(*) AS play_count, SUM(duration) AS duration_sum
     FROM listening_history
-    WHERE played_at >= date('now', '-7 days')
+    WHERE date(played_at, 'localtime') >= date('now', 'localtime', '-7 days')
     GROUP BY play_date
     ORDER BY play_date ASC
   `;
@@ -838,7 +919,10 @@ app.get('/api/stats/timeline', (req, res) => {
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateString = d.toISOString().split('T')[0];
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateString = `${year}-${month}-${day}`;
       timelineData[dateString] = { count: 0, duration: 0 };
     }
     rows.forEach(row => {
@@ -861,10 +945,10 @@ app.get('/api/stats/advanced', (req, res) => {
     db.get('SELECT MAX(cnt) AS maxLoop FROM (SELECT COUNT(*) AS cnt FROM listening_history GROUP BY artist, title)', [], (err, row) => resolve(row ? row.maxLoop : 0));
   });
   const p2 = new Promise((resolve) => {
-    db.all("SELECT strftime('%H', played_at) AS hour, COUNT(*) AS count FROM listening_history GROUP BY hour ORDER BY hour", [], (err, rows) => resolve(rows || []));
+    db.all("SELECT strftime('%H', played_at, 'localtime') AS hour, COUNT(*) AS count FROM listening_history GROUP BY hour ORDER BY hour", [], (err, rows) => resolve(rows || []));
   });
   const p3 = new Promise((resolve) => {
-    db.all("SELECT strftime('%w', played_at) AS dow, COUNT(*) AS count FROM listening_history GROUP BY dow ORDER BY dow", [], (err, rows) => resolve(rows || []));
+    db.all("SELECT strftime('%w', played_at, 'localtime') AS dow, COUNT(*) AS count FROM listening_history GROUP BY dow ORDER BY dow", [], (err, rows) => resolve(rows || []));
   });
   
   Promise.all([p1, p2, p3]).then(results => {
@@ -886,15 +970,15 @@ app.get('/api/leaderboard', (req, res) => {
   
   let dateFilter = '';
   if (range === '6m') {
-    dateFilter = "WHERE played_at >= datetime('now', '-180 days')";
+    dateFilter = "WHERE datetime(played_at, 'localtime') >= datetime('now', 'localtime', '-180 days')";
   } else if (range === '3m') {
-    dateFilter = "WHERE played_at >= datetime('now', '-90 days')";
+    dateFilter = "WHERE datetime(played_at, 'localtime') >= datetime('now', 'localtime', '-90 days')";
   } else if (range === '1m') {
-    dateFilter = "WHERE played_at >= datetime('now', '-30 days')";
+    dateFilter = "WHERE datetime(played_at, 'localtime') >= datetime('now', 'localtime', '-30 days')";
   } else if (range === '7d') {
-    dateFilter = "WHERE played_at >= datetime('now', '-7 days')";
+    dateFilter = "WHERE datetime(played_at, 'localtime') >= datetime('now', 'localtime', '-7 days')";
   } else if (range === 'year') {
-    dateFilter = "WHERE strftime('%Y', played_at) = strftime('%Y', 'now')";
+    dateFilter = "WHERE strftime('%Y', played_at, 'localtime') = strftime('%Y', 'now', 'localtime')";
   }
   
   let query = '';
