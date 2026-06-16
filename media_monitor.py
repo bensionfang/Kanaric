@@ -8,8 +8,14 @@ import json
 import time
 import asyncio
 import base64
+import argparse
+import urllib.request
 from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
 from winrt.windows.storage.streams import DataReader
+
+CLOUD_URL = None
+LAST_CLOUD_SYNC_TIME = 0
+LAST_CLOUD_STATE = None
 
 async def poll_media():
     """與 media.py 邏輯類似，但輸出對象為終端機標準輸出"""
@@ -25,17 +31,28 @@ async def poll_media():
             all_sessions = sessions.get_sessions()
             current_session = None
             browser_keywords = ['chrome', 'edge', 'firefox', 'opera', 'brave', 'vivaldi', 'browser']
+            music_keywords = ['spotify', 'apple', 'itunes', 'music', 'kkbox', 'netease', 'tidal', 'foobar']
             
-            # 優先尋找非瀏覽器且正在播放的 Session
+            # 第一階段：尋找「正在播放」且是「專門音樂軟體」的 Session (最高優先級)
             for sess in all_sessions:
                 app_id = (sess.source_app_user_model_id or "").lower()
-                if not any(k in app_id for k in browser_keywords):
+                if any(k in app_id for k in music_keywords):
                     pb_info = sess.get_playback_info()
                     if pb_info and pb_info.playback_status == 4: # playing
                         current_session = sess
                         break
-                        
-            # 若無正在播放的，找第一個非瀏覽器的 Session
+
+            # 第二階段：若無音樂軟體在播，尋找「正在播放」且「非瀏覽器」的 Session
+            if not current_session:
+                for sess in all_sessions:
+                    app_id = (sess.source_app_user_model_id or "").lower()
+                    if not any(k in app_id for k in browser_keywords):
+                        pb_info = sess.get_playback_info()
+                        if pb_info and pb_info.playback_status == 4: # playing
+                            current_session = sess
+                            break
+                            
+            # 第三階段：若都沒在播，找第一個非瀏覽器的 Session (可能處於暫停狀態)
             if not current_session:
                 for sess in all_sessions:
                     app_id = (sess.source_app_user_model_id or "").lower()
@@ -107,7 +124,30 @@ async def poll_media():
                 }
             
             # 以 JSON 單行格式輸出，並強制 flush 確保 Node.js 能夠即時讀取到
-            print(json.dumps(state), flush=True)
+            state_json = json.dumps(state)
+            print(state_json, flush=True)
+            
+            # 雲端模式：發送 HTTP POST 給部署在 Heroku 的系統
+            global CLOUD_URL, LAST_CLOUD_SYNC_TIME, LAST_CLOUD_STATE
+            if CLOUD_URL:
+                now = time.time()
+                state_changed = False
+                
+                if LAST_CLOUD_STATE is None:
+                    state_changed = True
+                else:
+                    if state.get("title") != LAST_CLOUD_STATE.get("title") or state.get("is_playing") != LAST_CLOUD_STATE.get("is_playing"):
+                        state_changed = True
+                
+                # 只有換歌、播放/暫停狀態改變，或是每隔 3 秒才向雲端同步一次，避免把雲端伺服器打掛
+                if state_changed or (now - LAST_CLOUD_SYNC_TIME > 3.0 and state.get("is_playing")):
+                    try:
+                        req = urllib.request.Request(CLOUD_URL, data=state_json.encode('utf-8'), headers={'Content-Type': 'application/json'})
+                        urllib.request.urlopen(req, timeout=1.0)
+                        LAST_CLOUD_SYNC_TIME = now
+                        LAST_CLOUD_STATE = state
+                    except Exception as cloud_e:
+                        print(json.dumps({"error": f"Cloud sync failed: {str(cloud_e)}"}), flush=True)
             
         except Exception as e:
             # 發生錯誤時，輸出空狀態與錯誤訊息防止崩潰
@@ -123,6 +163,12 @@ async def poll_media():
         await asyncio.sleep(0.1)
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--url', type=str, help='Cloud server URL to sync state to (e.g. https://my-app.herokuapp.com/api/sync-state)')
+    args = parser.parse_args()
+    if args.url:
+        CLOUD_URL = args.url
+
     # 將控制台編碼設定為 UTF-8，防止在 Windows 環境下出現字串編碼問題
     sys.stdout.reconfigure(encoding='utf-8')
     asyncio.run(poll_media())

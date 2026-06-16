@@ -64,6 +64,7 @@ flowchart TD
     classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
     classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
     classDef display fill:#e76f51,stroke:#fff,stroke-width:2px,color:#fff
+    classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
 
     subgraph OS ["系統層"]
         direction TB
@@ -72,10 +73,11 @@ flowchart TD
 
     subgraph Backend ["後端層 Node.js / Python"]
         direction TB
-        Py["Python 攔截系統媒體狀態"]:::backend
-        PyJSON["透過 stdout 輸出 JSON"]:::backend
+        Py["Python 攔截系統狀態並由 stdout 輸出"]:::backend
         Node["Node.js 接收並解析歌曲資訊"]:::backend
-        Fetch["Node.js 根據前端請求抓取對應歌詞"]:::backend
+        CacheCheck{"檢查 SQLite<br>是否有歌詞快取?"}:::condition
+        Fetch["向外部 API (Lrclib) 抓取歌詞<br>並寫入資料庫"]:::backend
+        CacheHit["直接使用資料庫快取<br>(0 延遲直出)"]:::backend
     end
 
     subgraph DB ["資料庫層 SQLite"]
@@ -86,17 +88,27 @@ flowchart TD
     subgraph UI ["介面顯示層 (多前端)"]
         direction TB
         Island["C# 桌面靈動島<br>接收 WebSocket 推播並顯示"]:::display
-        WebApp["Web 網頁端<br>每 100ms 輪詢並主動請求抓取"]:::display
+        WebApp["Web 網頁端<br>接收推播並主動發起請求"]:::display
     end
 
     Start --> Py
-    Py --> PyJSON
-    PyJSON --> Node
+    Py --> Node
+    
     Node -- "第一路：記錄聽歌歷史" --> InsertSQL
+    
     Node == "第二路：WebSocket 廣播新狀態" ==> Island
-    WebApp -. "HTTP Polling" .-> Node
-    WebApp -- "呼叫 /api/lyrics/fetch" --> Fetch
-    Fetch -. "抓取後觸發 WebSocket 廣播" .-> Island
+    Node == "第二路：WebSocket 廣播新狀態" ==> WebApp
+    
+    WebApp -- "主動呼叫 /api/lyrics/fetch" --> CacheCheck
+    
+    CacheCheck -- "否 (查無資料)" --> Fetch
+    CacheCheck -- "是 (快取命中)" --> CacheHit
+    
+    Fetch -. "抓取完成後觸發 WebSocket 廣播" .-> Island
+    Fetch -. "抓取完成後觸發 WebSocket 廣播" .-> WebApp
+    
+    CacheHit -. "瞬間觸發 WebSocket 廣播" .-> Island
+    CacheHit -. "瞬間觸發 WebSocket 廣播" .-> WebApp
 ```
 
 **🗣️ 邏輯解釋與導讀台詞：**

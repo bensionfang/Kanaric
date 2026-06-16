@@ -14,6 +14,7 @@ const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { spawn } = require('child_process');
 require('dotenv').config();
 
@@ -100,14 +101,97 @@ async function getResolvedMetadata(title, artist) {
 }
 
 // Start Media Monitor Bridge
+let lastPlayedSongId = '';
+let playTimer = null;
+let songLogged = false;
+let accumulatedMs = 0;
+let lastResumeTime = 0;
+
+global.handleMediaUpdate = function(rawState) {
+  try {
+    // iTunes 跨區還原攔截器
+    if (rawState.title && rawState.artist) {
+      const key = `${rawState.title}-${rawState.artist}`;
+      if (!itunesCache.has(key)) {
+         getResolvedMetadata(rawState.title, rawState.artist);
+      } else {
+         const resolved = itunesCache.get(key);
+         rawState.original_title = rawState.title;
+         rawState.original_artist = rawState.artist;
+         rawState.title = resolved.title;
+         rawState.artist = resolved.artist;
+      }
+    }
+    
+    const state = rawState;
+    currentMediaState = { ...currentMediaState, ...state };
+    
+    if (global.broadcast) {
+      global.broadcast({ type: 'media_state', state: currentMediaState });
+    }
+    
+    if (state.is_playing && state.title && state.artist) {
+      const songId = `${state.title}-${state.artist}`;
+      
+      // 換新歌
+      if (songId !== lastPlayedSongId) {
+        lastPlayedSongId = songId;
+        songLogged = false;
+        accumulatedMs = 0;
+        lastResumeTime = Date.now();
+        if (playTimer) clearTimeout(playTimer);
+        
+        playTimer = setTimeout(() => {
+          songLogged = true;
+          db.run(
+            'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
+            [state.artist, state.title, state.album || null, Math.round(state.duration) || 180]
+          );
+        }, 30000);
+      } 
+      // 同一首歌暫停後又繼續播放
+      else if (!songLogged && !playTimer) {
+        lastResumeTime = Date.now();
+        const remainingMs = Math.max(0, 30000 - accumulatedMs);
+        playTimer = setTimeout(() => {
+          songLogged = true;
+          db.run(
+            'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
+            [state.artist, state.title, state.album || null, Math.round(state.duration) || 180]
+          );
+        }, remainingMs);
+      }
+    } else if (!state.is_playing) {
+      // 暫停時取消計時，並累加已播放時間
+      if (playTimer) {
+        clearTimeout(playTimer);
+        playTimer = null;
+        if (!songLogged && lastResumeTime > 0) {
+          accumulatedMs += (Date.now() - lastResumeTime);
+        }
+      }
+      if (!state.title) {
+        lastPlayedSongId = '';
+        songLogged = false;
+        accumulatedMs = 0;
+      }
+    }
+  } catch (e) {
+    console.error("Error processing media update:", e);
+  }
+};
+
 /**
  * 啟動 Python 媒體監聽橋接器
  * 將 media_monitor.py 作為子進程啟動，並攔截其 stdout 輸出。
- * 解析出的 JSON 資料會更新到 currentMediaState，並存入歷史紀錄。
  */
 function startMediaMonitor() {
+  if (os.platform() !== 'win32') {
+    console.log("Running in Cloud Mode (Non-Windows). Bypassing local media monitor spawn.");
+    return;
+  }
+
   const monitorScript = path.join(PARENT_DIR, 'media_monitor.py');
-  
   if (!fs.existsSync(monitorScript)) {
     console.error('media_monitor.py not found at', monitorScript);
     return;
@@ -120,11 +204,6 @@ function startMediaMonitor() {
   });
   
   let stdoutBuffer = '';
-  let lastPlayedSongId = '';
-  let playTimer = null;
-  let songLogged = false;
-  let accumulatedMs = 0;
-  let lastResumeTime = 0;
 
   monitorProcess.stdout.on('data', (data) => {
     stdoutBuffer += data.toString('utf-8');
@@ -135,76 +214,9 @@ function startMediaMonitor() {
       if (line.trim()) {
         try {
           const rawState = JSON.parse(line.trim());
-          
-          // iTunes 跨區還原攔截器
-          if (rawState.title && rawState.artist) {
-            const key = `${rawState.title}-${rawState.artist}`;
-            if (!itunesCache.has(key)) {
-               getResolvedMetadata(rawState.title, rawState.artist);
-            } else {
-               const resolved = itunesCache.get(key);
-               rawState.original_title = rawState.title;
-               rawState.original_artist = rawState.artist;
-               rawState.title = resolved.title;
-               rawState.artist = resolved.artist;
-            }
-          }
-          
-          const state = rawState;
-          currentMediaState = { ...currentMediaState, ...state };
-          
-          if (global.broadcast) {
-            global.broadcast({ type: 'media_state', state: currentMediaState });
-          }
-          
-          if (state.is_playing && state.title && state.artist) {
-            const songId = `${state.title}-${state.artist}`;
-            
-            // 換新歌
-            if (songId !== lastPlayedSongId) {
-              lastPlayedSongId = songId;
-              songLogged = false;
-              accumulatedMs = 0;
-              lastResumeTime = Date.now();
-              if (playTimer) clearTimeout(playTimer);
-              
-              playTimer = setTimeout(() => {
-                songLogged = true;
-                db.run(
-                  'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
-                  [state.artist, state.title, state.album || null, Math.round(state.duration) || 180]
-                );
-              }, 30000);
-            } 
-            // 同一首歌暫停後又繼續播放
-            else if (!songLogged && !playTimer) {
-              lastResumeTime = Date.now();
-              const remainingMs = Math.max(0, 30000 - accumulatedMs);
-              playTimer = setTimeout(() => {
-                songLogged = true;
-                db.run(
-                  'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
-                  [state.artist, state.title, state.album || null, Math.round(state.duration) || 180]
-                );
-              }, remainingMs);
-            }
-          } else if (!state.is_playing) {
-            // 暫停時取消計時，並累加已播放時間
-            if (playTimer) {
-              clearTimeout(playTimer);
-              playTimer = null;
-              if (!songLogged && lastResumeTime > 0) {
-                accumulatedMs += (Date.now() - lastResumeTime);
-              }
-            }
-            if (!state.title) {
-              lastPlayedSongId = '';
-              songLogged = false;
-              accumulatedMs = 0;
-            }
-          }
+          global.handleMediaUpdate(rawState);
         } catch (e) {
-          // ignore parsing errors
+          // ignore JSON parsing errors
         }
       }
     }
@@ -428,6 +440,16 @@ app.get('/api/furigana/candidates', async (req, res) => {
     });
   } catch(e) {
     res.json({ candidates: [] });
+  }
+});
+
+// Cloud-Edge API Endpoint: Edge agent sends media updates here
+app.post('/api/sync-state', express.json({limit: '10mb'}), (req, res) => {
+  if (req.body && typeof req.body === 'object') {
+    global.handleMediaUpdate(req.body);
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ error: 'Invalid state object' });
   }
 });
 

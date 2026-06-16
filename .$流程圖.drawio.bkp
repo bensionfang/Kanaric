@@ -1,0 +1,490 @@
+<mxfile host="app.diagrams.net" pages="7">
+  <diagram name="1. 系統架構總覽" id="BWzNfhYTNmDqDpkFBSGi">
+    <mxGraphModel dx="852" dy="470" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="front1" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#00796B;swimlaneFillColor=#FAFFFF;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="前端 (Frontend)" vertex="1">
+          <mxGeometry height="400" width="300" x="80" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d1_cs" parent="front1" style="shape=display;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="C# 桌面靈動島&lt;br&gt;(觀賞用前端)" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="d1_web" parent="front1" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="網頁版儀表板&lt;br&gt;(管理與數據前端)" vertex="1">
+          <mxGeometry height="60" width="220" x="50" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="back1" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#E65100;swimlaneFillColor=#FFFDF5;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="後端 (Backend)" vertex="1">
+          <mxGeometry height="400" width="300" x="400" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d1_py" parent="back1" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="Python 媒體監聽器&lt;br&gt;(media_monitor.py)" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d1_node" parent="back1" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="Node.js 核心大腦&lt;br&gt;(server.js)" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="db1" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#7B1FA2;swimlaneFillColor=#FCF8FC;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="資料庫 (Database)" vertex="1">
+          <mxGeometry height="400" width="300" x="720" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d1_sql" parent="db1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fontStyle=1;fillColor=#7B1FA2;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="SQLite 資料庫&lt;br&gt;(lyrics_data.db)" vertex="1">
+          <mxGeometry height="80" width="160" x="70" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="e1_1" edge="1" parent="1" source="d1_py" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d1_node" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;stdout (JSON)&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1_2" edge="1" parent="1" source="d1_node" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d1_sql" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;WAL 並行讀寫&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1_3" edge="1" parent="1" source="d1_node" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d1_cs" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;WebSocket (推播) &amp;amp; REST API (請求)&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" x="0.75" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="240" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e1_4" edge="1" parent="1" source="d1_node" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d1_web" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;RESTful API (雙向互動)&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" x="0.7692" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="240" y="320" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="2. 背景音樂追蹤寫入" id="ZSdRBV5QQ_R-Fxm0sO6n">
+    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="front2" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#00796B;swimlaneFillColor=#FAFFFF;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="前端 (Frontend)" vertex="1">
+          <mxGeometry height="500" width="300" x="80" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d2_start" parent="front2" style="ellipse;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#4285F4;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="作業系統播放新歌&lt;br&gt;Spotify / Apple Music" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d2_island" parent="front2" style="shape=display;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="C# 桌面靈動島&lt;br&gt;接收 WebSocket 推播並顯示" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="d2_webapp" parent="front2" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="Web 網頁端&lt;br&gt;每 100ms 輪詢並主動請求抓取" vertex="1">
+          <mxGeometry height="60" width="240" x="30" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="back2" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#E65100;swimlaneFillColor=#FFFDF5;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="後端 (Backend)" vertex="1">
+          <mxGeometry height="500" width="300" x="400" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d2_py" parent="back2" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="Python 攔截系統媒體狀態" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d2_pyjson" parent="back2" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="透過 stdout 輸出 JSON" vertex="1">
+          <mxGeometry height="60" width="240" x="30" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="d2_node" parent="back2" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="Node.js 接收並解析歌曲資訊" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="d2_fetch" parent="back2" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="Node.js 根據前端請求&lt;br&gt;抓取對應歌詞" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="db2" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#7B1FA2;swimlaneFillColor=#FCF8FC;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="資料庫 (Database)" vertex="1">
+          <mxGeometry height="500" width="300" x="720" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d2_insert" parent="db2" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fontStyle=1;fillColor=#7B1FA2;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="執行 SQL INSERT&lt;br&gt;寫入 listening_history" vertex="1">
+          <mxGeometry height="80" width="160" x="70" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="e2_1" edge="1" parent="1" source="d2_start" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d2_py">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2_2" edge="1" parent="1" source="d2_py" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d2_pyjson">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2_3" edge="1" parent="1" source="d2_pyjson" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d2_node">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2_4" edge="1" parent="1" source="d2_node" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d2_insert" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;第一路：記錄聽歌歷史&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2_5" edge="1" parent="1" source="d2_node" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d2_island" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;第二路：WebSocket 廣播新狀態&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2_6" edge="1" parent="1" source="d2_webapp" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;dashed=1;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d2_node" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;HTTP Polling&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="385" y="440" />
+              <mxPoint x="385" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e2_7" edge="1" parent="1" source="d2_webapp" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d2_fetch" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;呼叫 /api/lyrics/fetch&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2_8" edge="1" parent="1" source="d2_fetch" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;dashed=1;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d2_island" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;抓取後觸發 WebSocket 廣播&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="395" y="460" />
+              <mxPoint x="395" y="280" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="3. 手動編輯與修正流程" id="uRjr7jX8f7vgnZSWm_Op">
+    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="front3" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#00796B;swimlaneFillColor=#FAFFFF;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="前端 (Frontend)" vertex="1">
+          <mxGeometry height="720" width="300" x="80" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_user" parent="front3" style="ellipse;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#4285F4;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="使用者單擊漢字喚起修改框" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_input" parent="front3" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="輸入羅馬拼音&lt;br&gt;(前端即時轉譯為平假名)" vertex="1">
+          <mxGeometry height="60" width="240" x="30" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_send" parent="front3" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="點擊確認，發送 HTTP POST&lt;br&gt;/api/furigana/correct" vertex="1">
+          <mxGeometry height="60" width="240" x="30" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_island" parent="front3" style="shape=display;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="靈動島接收推播並&lt;br&gt;即時更新顯示修正後歌詞" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_update" parent="front3" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="網頁端收到 HTTP 成功後&lt;br&gt;主動重新抓取歌詞" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="back3" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#E65100;swimlaneFillColor=#FFFDF5;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="後端 (Backend)" vertex="1">
+          <mxGeometry height="720" width="300" x="400" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_recv" parent="back3" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="API 接收 JSON 參數&lt;br&gt;artist, title, 原始字, 新注音" vertex="1">
+          <mxGeometry height="60" width="240" x="30" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_cond" parent="back3" style="rhombus;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00838F;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="後端雙重驗證&lt;br&gt;(參數防呆與二次轉譯)" vertex="1">
+          <mxGeometry height="80" width="180" x="50" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_err" parent="back3" style="shape=document;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="回傳 HTTP 400 錯誤狀態碼" vertex="1">
+          <mxGeometry height="60" width="200" x="50" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_sql" parent="back3" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="執行 SQL: INSERT OR REPLACE" vertex="1">
+          <mxGeometry height="60" width="200" x="50" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_cast" parent="back3" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="若屬當前播放歌曲，重新產生假名&lt;br&gt;並透過 WebSocket 廣播更新" vertex="1">
+          <mxGeometry height="80" width="240" x="30" y="520" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_res" parent="back3" style="shape=document;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="回傳 HTTP 200 成功狀態碼" vertex="1">
+          <mxGeometry height="60" width="200" x="50" y="640" as="geometry" />
+        </mxCell>
+        <mxCell id="db3" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#7B1FA2;swimlaneFillColor=#FCF8FC;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="資料庫 (Database)" vertex="1">
+          <mxGeometry height="720" width="300" x="720" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d3_dbwrite" parent="db3" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fontStyle=1;fillColor=#7B1FA2;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="成功存入 word_corrections 資料表" vertex="1">
+          <mxGeometry height="80" width="160" x="50" y="410" as="geometry" />
+        </mxCell>
+        <mxCell id="e3_1" edge="1" parent="1" source="d3_user" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_input">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3_2" edge="1" parent="1" source="d3_input" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_send">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3_3" edge="1" parent="1" source="d3_send" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_recv" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;傳輸資料&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3_4" edge="1" parent="1" source="d3_recv" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_cond">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3_5" edge="1" parent="1" source="d3_cond" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_sql" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;是&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="650" y="210" />
+              <mxPoint x="650" y="450" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3_6" edge="1" parent="1" source="d3_cond" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_err" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;否 (缺少參數)&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3_7" edge="1" parent="1" source="d3_err" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_user" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;前端報錯提示&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="390" y="350" />
+              <mxPoint x="390" y="90" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3_8" edge="1" parent="1" source="d3_sql" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_dbwrite">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3_9" edge="1" parent="1" source="d3_dbwrite" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;dashed=1;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_cast" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;檢查目前播放狀態&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3_10" edge="1" parent="1" source="d3_dbwrite" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;dashed=1;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_res" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;寫入完成&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="820" y="670" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3_11" edge="1" parent="1" source="d3_cast" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_island" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;WebSocket 推播&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3_12" edge="1" parent="1" source="d3_res" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d3_update" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;回傳確認&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="4. 數據讀取與排行榜" id="QUWJZktTtBg5bYrciRsW">
+    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="front4" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#00796B;swimlaneFillColor=#FAFFFF;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="前端 (Frontend)" vertex="1">
+          <mxGeometry height="400" width="300" x="80" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d4_click" parent="front4" style="ellipse;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#4285F4;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="使用者進入「排行榜」&lt;br&gt;或切換時間區間 (如: 近 30 天)" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d4_req" parent="front4" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="發送 GET 請求到&lt;br&gt;/api/leaderboard" vertex="1">
+          <mxGeometry height="60" width="240" x="30" y="180" as="geometry" />
+        </mxCell>
+        <mxCell id="d4_view" parent="front4" style="ellipse;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#4285F4;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="前端收到 JSON 資料&lt;br&gt;動態產生 HTML 條列與排行動畫" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="back4" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#E65100;swimlaneFillColor=#FFFDF5;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="後端 (Backend)" vertex="1">
+          <mxGeometry height="400" width="300" x="400" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d4_route" parent="back4" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="接收請求與參數&lt;br&gt;如: type=tracks, range=1m" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d4_query" parent="back4" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="組合並執行 SQL 查詢&lt;br&gt;使用 SELECT, GROUP BY 與 LIMIT 50" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="180" as="geometry" />
+        </mxCell>
+        <mxCell id="d4_render" parent="back4" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="將查詢結果打包成&lt;br&gt;JSON 格式回傳" vertex="1">
+          <mxGeometry height="60" width="240" x="30" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="db4" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#7B1FA2;swimlaneFillColor=#FCF8FC;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="資料庫 (Database)" vertex="1">
+          <mxGeometry height="400" width="300" x="720" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d4_dbread" parent="db4" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fontStyle=1;fillColor=#7B1FA2;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="篩選並統計&lt;br&gt;listening_history 表" vertex="1">
+          <mxGeometry height="80" width="160" x="70" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="e4_1" edge="1" parent="1" source="d4_click" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d4_req">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4_2" edge="1" parent="1" source="d4_req" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d4_route">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4_3" edge="1" parent="1" source="d4_route" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d4_query">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4_4" edge="1" parent="1" source="d4_query" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d4_dbread">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4_5" edge="1" parent="1" source="d4_dbread" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;dashed=1;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d4_render" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;撈出前 50 筆紀錄&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4_6" edge="1" parent="1" source="d4_render" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d4_view" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;回傳 JSON 格式的排行陣列&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="5. 歌手別名與抓取" id="qilDMqR7oW5XECAumyeq">
+    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="front5" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#00796B;swimlaneFillColor=#FAFFFF;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="前端 (Frontend)" vertex="1">
+          <mxGeometry height="650" width="300" x="80" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="back5" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#E65100;swimlaneFillColor=#FFFDF5;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="後端 (Backend)" vertex="1">
+          <mxGeometry height="650" width="300" x="400" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d5_start" parent="back5" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="準備去網路抓取歌詞&lt;br&gt;(拿到 Spotify 歌手名：魚韻)" vertex="1">
+          <mxGeometry height="80" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d5_cond" parent="back5" style="rhombus;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00838F;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="是否有設定別名?" vertex="1">
+          <mxGeometry height="80" width="180" x="50" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="d5_replace" parent="back5" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="將名稱替換為真名&lt;br&gt;(サカナクション)" vertex="1">
+          <mxGeometry height="80" width="220" x="5" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="d5_keep" parent="back5" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="保持原名" vertex="1">
+          <mxGeometry height="80" width="220" x="155" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="d5_fetch" parent="back5" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="拿著最終名稱去外部 API 搜尋" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="520" as="geometry" />
+        </mxCell>
+        <mxCell id="db5" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#7B1FA2;swimlaneFillColor=#FCF8FC;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="資料庫與外部 API" vertex="1">
+          <mxGeometry height="650" width="300" x="720" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d5_query" parent="db5" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fontStyle=1;fillColor=#7B1FA2;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="查詢 artist_aliases 表" vertex="1">
+          <mxGeometry height="80" width="160" x="70" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="d5_lrclib" parent="db5" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#4285F4;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="Lrclib / 網易雲等 API" vertex="1">
+          <mxGeometry height="80" width="200" x="50" y="490" as="geometry" />
+        </mxCell>
+        <mxCell id="e5_1" edge="1" parent="1" source="d5_start" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d5_query">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5_2" edge="1" parent="1" source="d5_query" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d5_cond">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5_3" edge="1" parent="1" source="d5_cond" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d5_replace" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;是 (有找到)&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5_4" edge="1" parent="1" source="d5_cond" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d5_keep" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;否 (沒找到)&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5_5" edge="1" parent="1" source="d5_replace" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d5_fetch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5_6" edge="1" parent="1" source="d5_keep" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d5_fetch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5_7" edge="1" parent="1" source="d5_fetch" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d5_lrclib" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;發送 HTTP 請求&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5_8" edge="1" parent="1" source="d5_lrclib" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d5_fetch" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;回傳精準歌詞&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="750" y="550" />
+              <mxPoint x="750" y="550" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="6. iTunes 還原" id="QZLsfGWK-I5oViefgees">
+    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="front6" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#00796B;swimlaneFillColor=#FAFFFF;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="前端 (Frontend)" vertex="1">
+          <mxGeometry height="750" width="300" x="80" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d6_play" parent="front6" style="ellipse;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#4285F4;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="Spotify 播放新歌&lt;br&gt;(Racing into the Night - YOASOBI)" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="back6" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#E65100;swimlaneFillColor=#FFFDF5;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="後端 (Backend)" vertex="1">
+          <mxGeometry height="750" width="300" x="400" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d6_int" parent="back6" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="攔截播放狀態&lt;br&gt;將原曲名送入非同步還原佇列" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d6_apiq" parent="back6" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="向 Apple iTunes API 發送請求&lt;br&gt;(強制指定 country=JP 日本區)" vertex="1">
+          <mxGeometry height="80" width="240" x="30" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="d6_cache" parent="back6" style="rhombus;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00838F;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="iTunes 查有結果?" vertex="1">
+          <mxGeometry height="80" width="180" x="50" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="d6_save" parent="back6" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="將回傳的日文真名存入內部快取&lt;br&gt;(夜に駆ける)" vertex="1">
+          <mxGeometry height="80" width="220" x="5" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="d6_fall" parent="back6" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="沿用原始英文歌名" vertex="1">
+          <mxGeometry height="80" width="220" x="155" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="d6_broad" parent="back6" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="1 秒後將最新的真名&lt;br&gt;推播至網頁與靈動島" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="d6_fetch" parent="back6" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="使用日文真名去抓取同步歌詞" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="610" as="geometry" />
+        </mxCell>
+        <mxCell id="db6" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#7B1FA2;swimlaneFillColor=#FCF8FC;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="資料庫 (Database)" vertex="1">
+          <mxGeometry height="750" width="300" x="720" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d6_log" parent="db6" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fontStyle=1;fillColor=#7B1FA2;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="聽滿 30 秒後，將日文真名&lt;br&gt;寫入聽歌歷史" vertex="1">
+          <mxGeometry height="80" width="160" x="50" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="e6_1" edge="1" parent="1" source="d6_play" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d6_int">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6_2" edge="1" parent="1" source="d6_int" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d6_apiq">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6_3" edge="1" parent="1" source="d6_apiq" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d6_cache">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6_4" edge="1" parent="1" source="d6_cache" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d6_save" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;是 (找到日文原名)&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6_5" edge="1" parent="1" source="d6_cache" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d6_fall" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;否 (查無資料)&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6_6" edge="1" parent="1" source="d6_save" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d6_broad">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6_7" edge="1" parent="1" source="d6_fall" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d6_broad">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6_8" edge="1" parent="1" source="d6_broad" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d6_fetch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6_9" edge="1" parent="1" source="d6_broad" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d6_log">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="7. 碼表狀態機" id="nehG8icQQe4zaATpdtdF">
+    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="front7" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#00796B;swimlaneFillColor=#FAFFFF;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="前端 (Frontend)" vertex="1">
+          <mxGeometry height="600" width="300" x="80" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d7_play" parent="front7" style="ellipse;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#4285F4;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="開始播放新歌" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d7_pause" parent="front7" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="中途暫停" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="d7_resume" parent="front7" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="繼續播放同一首" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="d7_skip" parent="front7" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#00796B;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="未滿 30 秒即切歌" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="back7" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#E65100;swimlaneFillColor=#FFFDF5;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="後端 (Backend)" vertex="1">
+          <mxGeometry height="600" width="300" x="400" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d7_init" parent="back7" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="歸零累積時間 (accumulatedMs = 0)&lt;br&gt;啟動 30 秒倒數計時器" vertex="1">
+          <mxGeometry height="80" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d7_cancel" parent="back7" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="取消計時器&lt;br&gt;並把剛才聽的秒數加進 accumulatedMs" vertex="1">
+          <mxGeometry height="80" width="220" x="40" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="d7_restart" parent="back7" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="扣除已經聽過的 accumulatedMs&lt;br&gt;重新啟動剩餘時間的倒數計時器" vertex="1">
+          <mxGeometry height="80" width="220" x="40" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="d7_drop" parent="back7" style="whiteSpace=wrap;html=1;fontStyle=1;fillColor=#E65100;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="直接丟棄當前狀態&lt;br&gt;不寫入資料庫" vertex="1">
+          <mxGeometry height="80" width="220" x="40" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="db7" parent="1" style="swimlane;fontSize=16;fontStyle=1;swimlane;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;strokeWidth=1;fontSize=16;fontStyle=1;swimlane;fillColor=#7B1FA2;swimlaneFillColor=#FCF8FC;strokeColor=#999999;strokeWidth=1;fontSize=16;fontStyle=1;fontColor=#FFFFFF;" value="資料庫 (Database)" vertex="1">
+          <mxGeometry height="600" width="300" x="720" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d7_log" parent="db7" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fontStyle=1;fillColor=#7B1FA2;strokeColor=#FFFFFF;strokeWidth=2;fontColor=#FFFFFF;shadow=1;rounded=1;" value="計時器順利跑完&lt;br&gt;寫入 listening_history" vertex="1">
+          <mxGeometry height="80" width="160" x="70" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="e7_1" edge="1" parent="1" source="d7_play" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d7_init">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7_2" edge="1" parent="1" source="d7_pause" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d7_cancel">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7_3" edge="1" parent="1" source="d7_resume" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d7_restart">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7_4" edge="1" parent="1" source="d7_skip" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d7_drop">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7_5" edge="1" parent="1" source="d7_init" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;dashed=1;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d7_log" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;連續聽滿 30 秒&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7_6" edge="1" parent="1" source="d7_restart" style="edgeStyle=orthogonalEdgeStyle;html=1;labelBorderColor=none;dashed=1;labelBackgroundColor=#121212;strokeColor=#999999;strokeWidth=2;fontColor=#FF0000;labelBackgroundColor=#FFFFFF;" target="d7_log" value="  &lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;&amp;nbsp;累積聽滿 30 秒&amp;nbsp;&amp;nbsp;&lt;/font&gt;&lt;/span&gt;  ">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
