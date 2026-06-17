@@ -143,7 +143,7 @@ async def poll_media():
                 if state_changed or (now - LAST_CLOUD_SYNC_TIME > 3.0 and state.get("is_playing")):
                     try:
                         req = urllib.request.Request(CLOUD_URL, data=state_json.encode('utf-8'), headers={'Content-Type': 'application/json'})
-                        urllib.request.urlopen(req, timeout=1.0)
+                        urllib.request.urlopen(req, timeout=3.0)
                         LAST_CLOUD_SYNC_TIME = now
                         LAST_CLOUD_STATE = state
                     except Exception as cloud_e:
