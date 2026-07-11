@@ -10,8 +10,14 @@ import os
 
 # 確保可以匯入同目錄下的模組
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from utils import kks
+import fugashi
 from db import db
+
+tagger = fugashi.Tagger()
+
+def kata2hira(text):
+    if not text: return ""
+    return "".join(chr(ord(c) - 0x60) if 0x30a1 <= ord(c) <= 0x30f6 else c for c in text)
 
 def split_internal_kana(orig_chunk, hira_chunk, full_orig, full_hira):
     """
@@ -38,8 +44,14 @@ def build_ruby_html(text, artist, title):
     if not text.strip():
         return text
     
-    # 檢查是否包含日文，使用 pykakasi 進行分詞
-    words = kks.convert(text)
+    # 使用 fugashi 進行上下文感知的形態素分析
+    words = []
+    for w in tagger(text):
+        kana = getattr(w.feature, 'kana', None)
+        if not kana:
+            kana = w.surface
+        words.append({'orig': w.surface, 'hira': kata2hira(kana)})
+        
     html_parts = []
     
     for item in words:
@@ -129,8 +141,8 @@ def process_lrc(artist, title, lrc_text):
             
     return '\n'.join(new_lines)
 
-if __name__ == "__main__":
-    # 若作為獨立腳本執行，預期從 stdin 接收 JSON 輸入
+def main():
+    # 從 stdin 接收 JSON 輸入 (由 Node.js 或 pytools.py 呼叫)
     try:
         input_data = sys.stdin.read()
         data = json.loads(input_data)
@@ -145,3 +157,7 @@ if __name__ == "__main__":
             print(json.dumps({"success": False, "error": "No lyrics provided"}))
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))
+
+
+if __name__ == "__main__":
+    main()

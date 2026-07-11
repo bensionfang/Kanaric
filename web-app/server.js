@@ -41,9 +41,22 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
+// 使用者資料目錄 (打包後由 Electron 指向 %APPDATA%,開發模式維持專案根目錄)
+const DATA_DIR = process.env.DATA_DIR || PARENT_DIR;
+
 // Python Environment Detection
 const venvPythonPath = path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe');
 const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
+
+// 打包模式下改用 PyInstaller 產出的 pytools.exe;開發模式用 python pytools.py
+const PYTOOLS_EXE = process.env.PYTOOLS_EXE || '';
+function spawnPy(args, opts = {}) {
+  const base = { env: { ...process.env, PYTHONIOENCODING: 'utf-8' }, windowsHide: true, ...opts };
+  if (PYTOOLS_EXE) {
+    return spawn(PYTOOLS_EXE, args, { cwd: path.dirname(PYTOOLS_EXE), ...base });
+  }
+  return spawn(pythonCmd, [path.join(PARENT_DIR, 'pytools.py'), ...args], { cwd: PARENT_DIR, ...base });
+}
 
 // Database initialization
 console.log(`Connecting to SQLite database at: ${DB_PATH}`);
@@ -68,6 +81,12 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
         if (!err) console.log('✓ Added album column to listening_history');
       });
     });
+
+    // 全新安裝時建立其餘資料表 (schema 與 db.py 一致)
+    db.run(`CREATE TABLE IF NOT EXISTS cache (artist TEXT, title TEXT, lyrics TEXT, PRIMARY KEY (artist, title))`);
+    db.run(`CREATE TABLE IF NOT EXISTS word_corrections (artist TEXT, title TEXT, word TEXT, hira TEXT, PRIMARY KEY (artist, title, word))`);
+    db.run(`CREATE TABLE IF NOT EXISTS sync_offsets (artist TEXT, title TEXT, offset REAL, PRIMARY KEY (artist, title))`);
+    db.run(`CREATE TABLE IF NOT EXISTS artist_aliases (alias TEXT PRIMARY KEY, true_name TEXT)`);
   }
 });
 
@@ -191,17 +210,9 @@ function startMediaMonitor() {
     return;
   }
 
-  const monitorScript = path.join(PARENT_DIR, 'media_monitor.py');
-  if (!fs.existsSync(monitorScript)) {
-    console.error('media_monitor.py not found at', monitorScript);
-    return;
-  }
-  
-  console.log(`Starting media monitor bridge: ${pythonCmd} ${monitorScript}`);
-  const monitorProcess = spawn(pythonCmd, [monitorScript], {
-    cwd: PARENT_DIR,
-    env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
-  });
+  console.log(`Starting media monitor bridge (${PYTOOLS_EXE || pythonCmd})`);
+  const monitorProcess = spawnPy(['monitor']);
+  global.monitorProcess = monitorProcess; // Electron 殼結束時需要收掉這個子進程
   
   let stdoutBuffer = '';
 
@@ -227,6 +238,7 @@ function startMediaMonitor() {
   });
   
   monitorProcess.on('close', (code) => {
+    if (global.isShuttingDown) return; // App 正在結束,不要重生
     console.log(`Media monitor bridge exited with code ${code}. Restarting in 3 seconds...`);
     setTimeout(startMediaMonitor, 3000);
   });
@@ -264,7 +276,7 @@ app.get('/api/current-media', (req, res) => {
   res.json(currentMediaState);
 });
 
-const SETTINGS_FILE = path.join(PARENT_DIR, 'settings.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 app.get('/api/settings', (req, res) => {
   try {
@@ -340,17 +352,7 @@ function autoMarkTitleLines(lrcText) {
 function injectFurigana(artist, title, lyrics) {
   return new Promise((resolve) => {
     console.log("injectFurigana called for:", title, artist);
-    const scriptPath = path.join(PARENT_DIR, 'furigana_inject.py');
-    
-    if (!fs.existsSync(scriptPath)) {
-      console.log("scriptPath does not exist:", scriptPath);
-      return resolve(lyrics);
-    }
-    
-    const pyProcess = spawn(pythonCmd, [scriptPath], {
-      cwd: PARENT_DIR,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
-    });
+    const pyProcess = spawnPy(['furigana']);
     
     pyProcess.stdin.write(JSON.stringify({ artist, title, lyrics }));
     pyProcess.stdin.end();
@@ -379,12 +381,9 @@ function injectFurigana(artist, title, lyrics) {
 
 function fetchFallback(title, artist, fetchAll = false) {
   return new Promise((resolve) => {
-    const args = ['search_fallback.py', title, artist];
+    const args = ['fallback', title, artist];
     if (fetchAll) args.push('--all');
-    const pyProcess = spawn(pythonCmd, args, {
-      cwd: PARENT_DIR,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
-    });
+    const pyProcess = spawnPy(args);
     
     let output = '';
     pyProcess.stdout.on('data', (data) => { output += data.toString('utf-8'); });
@@ -426,7 +425,7 @@ app.get('/api/furigana/candidates', async (req, res) => {
     }
     
     // Add pykakasi default reading
-    const pyProcess = spawn(pythonCmd, ['-c', 'import sys, pykakasi; kks=pykakasi.kakasi(); res=kks.convert(sys.argv[1]); print("".join([item["hira"] for item in res]))', word]);
+    const pyProcess = spawnPy(['kana', word]);
     let out = '';
     pyProcess.stdout.on('data', d => out += d.toString('utf-8'));
     pyProcess.on('close', () => {
@@ -443,16 +442,6 @@ app.get('/api/furigana/candidates', async (req, res) => {
   }
 });
 
-// Cloud-Edge API Endpoint: Edge agent sends media updates here
-app.post('/api/sync-state', express.json({limit: '10mb'}), (req, res) => {
-  if (req.body && typeof req.body === 'object') {
-    global.handleMediaUpdate(req.body);
-    res.json({ success: true });
-  } else {
-    res.status(400).json({ error: 'Invalid state object' });
-  }
-});
-
 // 1.5 Update Furigana Correction
 app.post('/api/furigana/correct', (req, res) => {
   const { artist, title, orig, hira } = req.body;
@@ -460,7 +449,7 @@ app.post('/api/furigana/correct', (req, res) => {
   
   let finalHira = hira || '';
   if (finalHira) {
-    const pyProcess = spawn(pythonCmd, ['-c', 'import sys, jaconv; print(jaconv.alphabet2kana(sys.argv[1]))', finalHira]);
+    const pyProcess = spawnPy(['romaji', finalHira]);
     
     let out = '';
     pyProcess.stdout.on('data', (d) => out += d.toString());
@@ -1041,7 +1030,7 @@ app.get('/api/leaderboard', (req, res) => {
 
 // 6. Launch/Toggle PyQt6
 app.get('/api/desktop-status', (req, res) => {
-  const pidFile = path.join(PARENT_DIR, 'app.pid');
+  const pidFile = path.join(DATA_DIR, 'app.pid');
   let isRunning = false;
   if (fs.existsSync(pidFile)) {
     try {
@@ -1057,7 +1046,7 @@ app.get('/api/desktop-status', (req, res) => {
 
 app.post('/api/launch-pyqt6', (req, res) => {
   try {
-    const pidFile = path.join(PARENT_DIR, 'app.pid');
+    const pidFile = path.join(DATA_DIR, 'app.pid');
     let isRunning = false;
     let existingPid = null;
     
@@ -1079,13 +1068,13 @@ app.post('/api/launch-pyqt6', (req, res) => {
       return res.json({ success: true, action: 'stopped' });
     }
 
-    const exePath = path.join(PARENT_DIR, 'DynamicIslandUI', 'bin', 'Release', 'net8.0-windows', 'DynamicIslandUI.exe');
+    const exePath = process.env.ISLAND_EXE || path.join(PARENT_DIR, 'DynamicIslandUI', 'bin', 'Release', 'net8.0-windows', 'DynamicIslandUI.exe');
     if (!fs.existsSync(exePath)) return res.status(404).json({ error: 'C# UI not found. Please build it first.' });
-    
+
     // Minimize the active window (browser) using ctypes
-    spawn(pythonCmd, ['-c', 'import ctypes; ctypes.windll.user32.ShowWindow(ctypes.windll.user32.GetForegroundWindow(), 6)'], { windowsHide: false });
-    
-    const child = spawn(exePath, [], { detached: true, stdio: 'ignore', cwd: path.join(PARENT_DIR, 'DynamicIslandUI', 'bin', 'Release', 'net8.0-windows') });
+    spawnPy(['minimize']);
+
+    const child = spawn(exePath, [], { detached: true, stdio: 'ignore', cwd: path.dirname(exePath) });
     child.unref();
     fs.writeFileSync(pidFile, child.pid.toString());
     res.json({ success: true, pid: child.pid, action: 'started' });
@@ -1132,6 +1121,34 @@ app.post('/api/lyrics/update', (req, res) => {
     }
     res.json({ success: true });
   });
+});
+
+app.post('/api/lyrics/diff', (req, res) => {
+  const { current, reference } = req.body;
+  if (!current || !reference) return res.status(400).json({ error: 'Missing lyrics' });
+
+  const pyProcess = spawnPy(['diff']);
+  let outData = '';
+  let errData = '';
+
+  pyProcess.stdout.on('data', (data) => outData += data.toString());
+  pyProcess.stderr.on('data', (data) => errData += data.toString());
+
+  pyProcess.on('close', (code) => {
+    if (code !== 0) {
+      console.error("Diff Error:", errData);
+      return res.status(500).json({ error: 'Diff processing failed' });
+    }
+    try {
+      const diffs = JSON.parse(outData);
+      res.json({ diffs });
+    } catch (e) {
+      res.status(500).json({ error: 'Invalid diff output' });
+    }
+  });
+
+  pyProcess.stdin.write(JSON.stringify({ current, reference }));
+  pyProcess.stdin.end();
 });
 
 // 8. Export Playlist API

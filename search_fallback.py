@@ -124,7 +124,7 @@ def main():
     preferred_source = "NetEase"
     try:
         import os
-        settings_path = os.path.join(os.path.dirname(__file__), 'settings.json')
+        settings_path = os.environ.get('LYRICS_SETTINGS_PATH') or os.path.join(os.path.dirname(__file__), 'settings.json')
         if os.path.exists(settings_path):
             with open(settings_path, 'r', encoding='utf-8') as f:
                 s = json.load(f)

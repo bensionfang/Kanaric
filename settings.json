@@ -1,5 +1,5 @@
 {
-    "font_size": 22,
+    "font_size": 32,
     "font_family": "Noto Sans JP",
     "custom_css_path": "",
     "mini_mode": false,
@@ -13,6 +13,6 @@
     "hk-delay": "ArrowRight",
     "hk-plain-prev": "ArrowUp",
     "hk-plain-next": "ArrowDown",
-    "dynamic_island": true,
+    "dynamic_island": false,
     "island_lines": 2
 }

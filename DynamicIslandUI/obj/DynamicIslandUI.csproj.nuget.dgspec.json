@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\USER\\Desktop\\Floating-Lyrics\\DynamicIslandUI\\DynamicIslandUI.csproj": {}
+    "C:\\Users\\USER\\Desktop\\project\\Floating-Lyrics\\DynamicIslandUI\\DynamicIslandUI.csproj": {}
   },
   "projects": {
-    "C:\\Users\\USER\\Desktop\\Floating-Lyrics\\DynamicIslandUI\\DynamicIslandUI.csproj": {
+    "C:\\Users\\USER\\Desktop\\project\\Floating-Lyrics\\DynamicIslandUI\\DynamicIslandUI.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\USER\\Desktop\\Floating-Lyrics\\DynamicIslandUI\\DynamicIslandUI.csproj",
+        "projectUniqueName": "C:\\Users\\USER\\Desktop\\project\\Floating-Lyrics\\DynamicIslandUI\\DynamicIslandUI.csproj",
         "projectName": "DynamicIslandUI",
-        "projectPath": "C:\\Users\\USER\\Desktop\\Floating-Lyrics\\DynamicIslandUI\\DynamicIslandUI.csproj",
+        "projectPath": "C:\\Users\\USER\\Desktop\\project\\Floating-Lyrics\\DynamicIslandUI\\DynamicIslandUI.csproj",
         "packagesPath": "C:\\Users\\USER\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\USER\\Desktop\\Floating-Lyrics\\DynamicIslandUI\\obj\\",
+        "outputPath": "C:\\Users\\USER\\Desktop\\project\\Floating-Lyrics\\DynamicIslandUI\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\USER\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -42,6 +42,14 @@
       "frameworks": {
         "net8.0-windows7.0": {
           "targetAlias": "net8.0-windows",
+          "dependencies": {
+            "Microsoft.NET.ILLink.Tasks": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[8.0.28, )",
+              "autoReferenced": true
+            }
+          },
           "imports": [
             "net461",
             "net462",
@@ -53,6 +61,20 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
+          "downloadDependencies": [
+            {
+              "name": "Microsoft.AspNetCore.App.Runtime.win-x64",
+              "version": "[8.0.28, 8.0.28]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Runtime.win-x64",
+              "version": "[8.0.28, 8.0.28]"
+            },
+            {
+              "name": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
+              "version": "[8.0.28, 8.0.28]"
+            }
+          ],
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"
@@ -62,6 +84,11 @@
             }
           },
           "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.422/PortableRuntimeIdentifierGraph.json"
+        }
+      },
+      "runtimes": {
+        "win-x64": {
+          "#import": []
         }
       }
     }

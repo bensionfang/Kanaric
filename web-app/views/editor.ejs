@@ -34,6 +34,15 @@
             <div style="color: var(--text-secondary); text-align: center; margin-top: 200px;">在左側選擇一首歌以開始編輯...</div>
         </div>
     </div>
+    
+    <!-- [NEW] 對照區面板 -->
+    <div class="dashboard-card" id="ref-card" style="flex: 1; display: none; flex-direction: column;">
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid var(--panel-border); margin-bottom: 10px;">
+            <h3 style="margin: 0; font-size: 16px;"><i class="fa-solid fa-book-open"></i> 對照區</h3>
+            <button class="lrc-btn del" onclick="closeRefPanel()" style="font-size: 18px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer;"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div id="ref-diff-container" style="flex: 1; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 10px; border-radius: 4px; overflow-y: auto; font-family: monospace; font-size: 13px;"></div>
+    </div>
 </div>
 
 <!-- Editor Advanced Options Modal -->
@@ -188,6 +197,60 @@
         });
     }
 
+    function loadToReference(refLyrics, refProvider) {
+        closeEditorOptionsModal();
+        const refCard = document.getElementById('ref-card');
+        const diffContainer = document.getElementById('ref-diff-container');
+        refCard.style.display = 'flex';
+        diffContainer.innerHTML = '<div style="color:var(--text-secondary); text-align:center; padding: 20px;">載入並比對中...</div>';
+
+        // Extract current lyrics from the editor
+        const rows = editorContainer.querySelectorAll('.lrc-row');
+        let currentLines = [];
+        rows.forEach(row => {
+            const txt = row.querySelector('.lrc-text').value;
+            if (txt) currentLines.push(txt);
+        });
+        const currentLyrics = currentLines.join('\n');
+
+        fetch('/api/lyrics/diff', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current: currentLyrics, reference: refLyrics })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.diffs || data.diffs.length === 0) {
+                diffContainer.innerHTML = '<div style="color:var(--text-secondary); text-align:center; padding: 20px;">與目前的歌詞讀音完全一致！無特殊差異。</div>';
+                return;
+            }
+            
+            let html = '';
+            const currSourceLabel = window.currentEditorSource || 'Unknown';
+            const refSourceLabel = refProvider || 'Unknown';
+            
+            data.diffs.forEach(d => {
+                html += `<div style="margin-bottom: 12px; border-bottom: 1px solid var(--panel-border); padding-bottom: 10px; background: var(--panel-bg); padding: 8px; border-radius: 6px;">`;
+                if (d.curr && d.curr.length > 0) {
+                    html += `<div style="color: #ff6b6b; margin-bottom: 6px;"><strong style="color: var(--text-secondary); font-size: 11px;">目前編輯器 (${currSourceLabel}):</strong><br>${d.curr.join('<br>')}</div>`;
+                }
+                if (d.ref && d.ref.length > 0) {
+                    html += `<div style="color: #1dd1a1;"><strong style="color: var(--text-secondary); font-size: 11px;">對照來源 (${refSourceLabel}):</strong><br>${d.ref.join('<br>')}</div>`;
+                }
+                html += `</div>`;
+            });
+            diffContainer.innerHTML = html;
+        })
+        .catch(err => {
+            diffContainer.innerHTML = '<div style="color:#ff6b6b; text-align:center; padding: 20px;">比對失敗</div>';
+        });
+    }
+
+    function closeRefPanel() {
+        document.getElementById('ref-card').style.display = 'none';
+        document.getElementById('ref-diff-container').innerHTML = '';
+    }
+
     function editorCustomLyrics() {
         const text = document.getElementById('editor-custom-text').value.trim();
         if (text) applyLyricsToEditor(text);
@@ -226,13 +289,13 @@
             listEl.innerHTML = '';
             if (data.options && data.options.length > 0) {
                 data.options.forEach(opt => {
-                    const btn = document.createElement('button');
-                    btn.className = 'nav-btn';
-                    btn.style.flexDirection = 'column';
-                    btn.style.alignItems = 'flex-start';
-                    btn.style.padding = '8px 12px';
-                    btn.innerHTML = `
-                        <div style="display: flex; width: 100%; justify-content: space-between; align-items: center;">
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'lrc-row';
+                    itemDiv.style.flexDirection = 'column';
+                    itemDiv.style.alignItems = 'stretch';
+                    itemDiv.style.padding = '10px';
+                    itemDiv.innerHTML = `
+                        <div style="display: flex; width: 100%; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                             <div style="flex: 1; min-width: 0; text-align: left;">
                                 <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.title}</div>
                                 <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.artist}${opt.album ? ' [' + opt.album + ']' : ''}</div>
@@ -244,9 +307,14 @@
                                 <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; opacity: 0.8;">${opt.provider || 'Unknown'}</div>
                             </div>
                         </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="nav-btn apply-btn" style="flex: 1; justify-content: center; font-size: 12px; padding: 6px;"><i class="fa-solid fa-check"></i> 覆寫歌詞</button>
+                            <button class="nav-btn ref-btn" style="flex: 1; justify-content: center; font-size: 12px; padding: 6px;"><i class="fa-solid fa-book-open"></i> 載入對照</button>
+                        </div>
                     `;
-                    btn.onclick = () => { applyLyricsToEditor(opt.lyrics); };
-                    listEl.appendChild(btn);
+                    itemDiv.querySelector('.apply-btn').onclick = () => { applyLyricsToEditor(opt.lyrics); };
+                    itemDiv.querySelector('.ref-btn').onclick = () => { loadToReference(opt.lyrics, opt.provider); };
+                    listEl.appendChild(itemDiv);
                 });
             } else {
                 listEl.innerHTML = '<div style="color:var(--text-secondary); text-align:center;">找不到備選歌詞</div>';
@@ -393,15 +461,20 @@
         const lines = rawText.split('\n');
         const regex = /^\[(\d{2}:\d{2}[\.:]\d{2,3})\](.*)/;
         
+        window.currentEditorSource = 'Unknown';
+        
         let hasContent = false;
         lines.forEach(line => {
             if (!line.trim()) return;
+            if (line.startsWith('[source:')) {
+                window.currentEditorSource = line.replace('[source:', '').replace(']', '').trim();
+                return;
+            }
             const match = line.match(regex);
             if (match) {
                 editorContainer.appendChild(createRow(match[1], match[2]));
                 hasContent = true;
             } else {
-                if (line.startsWith('[source:')) return;
                 // Keep metadata or malformed lines as generic rows without time
                 if (line.startsWith('[')) {
                     editorContainer.appendChild(createRow(line, ''));
@@ -457,6 +530,10 @@
         
         const rows = editorContainer.querySelectorAll('.lrc-row');
         let newLrcLines = [];
+        
+        if (window.currentEditorSource && window.currentEditorSource !== 'Unknown') {
+            newLrcLines.push(`[source:${window.currentEditorSource}]`);
+        }
         
         rows.forEach(row => {
             const t = row.querySelector('.lrc-time').value.trim();

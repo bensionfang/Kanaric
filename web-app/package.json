@@ -1,30 +1,68 @@
 {
-  "name": "web-app",
+  "name": "floating-lyrics",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "跨平台動態歌詞與聽歌分析系統",
+  "main": "electron.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "app": "electron.cmd .",
+    "build:py": "..\\venv\\Scripts\\python.exe -m PyInstaller --noconfirm --onedir --name pytools --collect-data pykakasi --collect-data unidic_lite --collect-data fugashi --distpath ..\\dist-py --workpath ..\\build-py --specpath ..\\build-py ..\\pytools.py",
+    "build:island": "dotnet publish ..\\DynamicIslandUI -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o ..\\dist-island",
+    "dist": "npm run build:py && npm run build:island && electron-builder",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "engines": {
-    "node": "20.x"
-  },
   "dependencies": {
     "body-parser": "^2.2.2",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "ejs": "^6.0.1",
     "express": "^5.2.1",
-    "sqlite3": "5.1.7",
+    "sqlite3": "^5.1.7",
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
     "nodemon": "^3.1.14"
+  },
+  "build": {
+    "appId": "com.resuaumis.floatinglyrics",
+    "productName": "FloatingLyrics",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron.js",
+      "server.js",
+      "views/**",
+      "public/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist-py/pytools",
+        "to": "pytools"
+      },
+      {
+        "from": "../dist-island",
+        "to": "island"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": true,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "sqlite3@5.1.7": true
   }
 }
