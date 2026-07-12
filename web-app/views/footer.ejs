@@ -1,203 +1,222 @@
             </div>
         </main>
-    </div>
 
-    <!-- Settings Modal -->
-    <div id="settings-modal" class="modal-overlay" onclick="if(event.target===this) closeSettingsModal()">
-        <div class="modal-content glass-panel settings-modal-content">
-            <!-- Settings Sidebar -->
-            <div class="settings-sidebar">
-                <div class="settings-header">
-                    <i class="fa-solid fa-gear"></i> 設定
-                </div>
-                <div class="settings-tabs">
-                    <button class="settings-tab active" onclick="switchSettingsTab('appearance', this)"><i class="fa-solid fa-palette"></i> 外觀與顯示</button>
-                    <button class="settings-tab" onclick="switchSettingsTab('lyrics', this)"><i class="fa-solid fa-music"></i> 歌詞行為</button>
-                    <button class="settings-tab" onclick="switchSettingsTab('about', this)"><i class="fa-solid fa-circle-info"></i> 關於</button>
+        <footer class="player-bar" id="player-bar">
+            <div class="player-left">
+                <img src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=300&auto=format&fit=crop" id="album-cover" alt="Cover" class="player-cover">
+                <div class="player-info">
+                    <div class="current-title" id="current-title">--</div>
+                    <div class="current-artist" id="current-artist">--</div>
                 </div>
             </div>
-            
-            <!-- Settings Content -->
-            <div class="settings-main">
-                <div class="settings-close-bar">
-                    <button class="close-btn" onclick="closeSettingsModal()"><i class="fa-solid fa-xmark"></i></button>
+            <div class="player-center">
+                <div class="player-controls">
+                    <button class="media-btn" onclick="mediaAction('prev')"><i class="fa-solid fa-backward-step"></i></button>
+                    <button class="media-btn play-pause-btn" onclick="mediaAction('playpause')"><i class="fa-solid fa-play" id="play-pause-icon"></i></button>
+                    <button class="media-btn" onclick="mediaAction('next')"><i class="fa-solid fa-forward-step"></i></button>
                 </div>
-                
-                <div class="settings-body">
-                    <!-- Appearance Tab -->
-                    <div id="tab-appearance" class="settings-pane active">
-                        <h3>外觀與顯示</h3>
-                        
-                        <div class="setting-item">
-                            <div>
-                                <div class="setting-title">整體外觀</div>
-                                <div class="setting-desc">選擇明亮、黑暗或跟隨系統主題</div>
-                            </div>
-                            <div class="segmented-control" id="theme-segmented">
-                                <button class="segment-btn active" data-theme="system" onclick="changeTheme('system', this)">系統</button>
-                                <button class="segment-btn" data-theme="light" onclick="changeTheme('light', this)">淺色</button>
-                                <button class="segment-btn" data-theme="dark" onclick="changeTheme('dark', this)">深色</button>
-                            </div>
-                        </div>
-
-                        <div class="setting-item">
-                            <div>
-                                <div class="setting-title">顯示日文假名</div>
-                                <div class="setting-desc">在漢字上方標示平假名注音</div>
-                            </div>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="setting-furigana" onchange="updateFuriganaSetting(this.checked)" checked>
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
-
-                        <div class="setting-item">
-                            <div>
-                                <div class="setting-title">網頁歌詞文字大小</div>
-                                <div class="setting-desc">調整網頁歌詞的文字大小</div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 12px;">
-                                <input type="range" min="14" max="32" value="22" id="setting-fontsize" oninput="updateFontSize(this.value)">
-                                <div style="display: flex; align-items: center; gap: 4px;">
-                                    <input type="number" id="fontsize-input" value="22" min="14" max="32" onchange="updateFontSize(this.value)" class="styled-input-number">
-                                    <span style="color: var(--text-secondary); font-size: 13px;">px</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div>
-                                <div class="setting-title">歌詞對齊方式</div>
-                                <div class="setting-desc">選擇置中對齊或置左對齊</div>
-                            </div>
-                            <div class="segmented-control" id="align-segmented">
-                                <button class="segment-btn" data-align="left" onclick="changeTextAlign('left', this)">置左</button>
-                                <button class="segment-btn active" data-align="center" onclick="changeTextAlign('center', this)">置中</button>
-                                <button class="segment-btn" data-align="right" onclick="changeTextAlign('right', this)">置右</button>
-                            </div>
-                        </div>
-                        
-                        <div class="setting-item">
-                            <div>
-                                <div class="setting-title">靈動島歌詞行數</div>
-                                <div class="setting-desc">在桌面靈動島顯示 1 或 2 行歌詞</div>
-                            </div>
-                            <select id="setting-island-lines" onchange="saveSettingsToServer('island_lines', parseInt(this.value))" style="background: var(--bg-main); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 8px; padding: 6px 12px; font-size: 14px; outline: none;">
-                                <option value="1">1 行</option>
-                                <option value="2" selected>2 行</option>
-                            </select>
-                        </div>
+                <div class="progress-container">
+                    <span class="time-label" id="current-time">0:00</span>
+                    <div class="slider-wrapper">
+                        <input type="range" id="progress-slider" min="0" max="100" value="0">
+                        <div class="progress-bar-fill" id="progress-fill"></div>
                     </div>
+                    <span class="time-label" id="total-time">0:00</span>
+                </div>
+            </div>
+            <div class="player-right">
+                <button id="toggle-ruby-mode-btn" class="ctrl-btn" onclick="toggleRubyEditMode()" title="編輯假名模式"><i class="fa-solid fa-pen"></i></button>
+                <button class="ctrl-btn" onclick="openLyricsModal()" title="取得備選歌詞"><i class="fa-solid fa-list"></i></button>
+                <button class="ctrl-btn" onclick="reloadCurrentLyrics()" title="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
+                <button id="desktop-toggle-btn" class="ctrl-btn" onclick="launchPyQt6()" title="桌面靈動島">
+                    <i class="fa-solid fa-mobile-screen"></i>
+                </button>
+                <button class="ctrl-btn fullscreen-btn" onclick="toggleFullscreen()" title="放大模式">
+                    <i class="fa-solid fa-expand icon-expand"></i>
+                    <i class="fa-solid fa-compress icon-compress"></i>
+                </button>
+            </div>
+        </footer>
+    </div>
 
-                    <!-- Lyrics Tab -->
-                    <div id="tab-lyrics" class="settings-pane" style="display: none;">
-                        <h3>歌詞行為</h3>
-                        
-                        <div class="setting-item">
-                            <div>
-                                <div class="setting-title">優先搜尋來源</div>
-                                <div class="setting-desc">選擇自動抓取歌詞的首選平台</div>
-                            </div>
-                            <select id="setting-preferred-source" onchange="localStorage.setItem('preferred_source', this.value); saveSettingsToServer('preferred_source', this.value)" style="background: var(--bg-main); color: var(--text-main); border: 1px solid var(--panel-border); border-radius: 8px; padding: 6px 12px; font-size: 14px; outline: none;">
-                                <option value="NetEase">NetEase (網易雲)</option>
-                                <option value="Lrclib">Lrclib</option>
-                                <option value="Musixmatch">Musixmatch</option>
-                                <option value="QQMusic">QQ 音樂</option>
-                            </select>
-                        </div>
-                        
-                        
-                        <div class="setting-item" style="display: block; margin-top: 20px;">
-                            <div style="margin-bottom: 10px;">
-                                <div class="setting-title">自訂快捷鍵</div>
-                                <div class="setting-desc">自訂微調時間軸或切換純文字歌詞的按鍵</div>
-                            </div>
-                            
-                            <div style="background: var(--bg-main); padding: 12px; border-radius: 8px; border: 1px solid var(--panel-border);">
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
-                                    <span style="font-size: 13px; color: var(--text-secondary);">歌詞提早 0.1 秒</span>
-                                    <input type="text" id="hk-advance" class="styled-input" readonly onclick="recordHotkey(this, 'hk-advance')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
-                                </div>
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
-                                    <span style="font-size: 13px; color: var(--text-secondary);">歌詞延遲 0.1 秒</span>
-                                    <input type="text" id="hk-delay" class="styled-input" readonly onclick="recordHotkey(this, 'hk-delay')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
-                                </div>
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
-                                    <span style="font-size: 13px; color: var(--text-secondary);">純文字上一句</span>
-                                    <input type="text" id="hk-plain-prev" class="styled-input" readonly onclick="recordHotkey(this, 'hk-plain-prev')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
-                                </div>
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
-                                    <span style="font-size: 13px; color: var(--text-secondary);">純文字下一句</span>
-                                    <input type="text" id="hk-plain-next" class="styled-input" readonly onclick="recordHotkey(this, 'hk-plain-next')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
-                                </div>
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
-                                    <div style="font-size: 11px; color: var(--text-secondary);">* 點擊輸入框綁定，按 ESC 可取消。</div>
-                                    <button onclick="resetHotkeys()" style="background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">恢復預設</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+    <!-- Hotkeys Modal -->
+    <div id="hotkeys-modal" class="modal-overlay" onclick="if(event.target===this) closeHotkeysModal()">
+        <div class="modal-content glass-panel small-settings-modal">
+            <div class="settings-close-bar">
+                <button class="close-btn" onclick="closeHotkeysModal()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <h3>自訂快捷鍵</h3>
+            <div class="setting-desc" style="margin-bottom: 10px;">自訂微調時間軸或切換純文字歌詞的按鍵</div>
 
-                    <!-- About Tab -->
-                    <div id="tab-about" class="settings-pane" style="display: none;">
-                        <h3>關於 Floating Lyrics</h3>
-                        
-                        <div class="about-hero" style="text-align: center; padding: 20px 0 30px; border-bottom: 1px solid var(--panel-border); margin-bottom: 25px;">
-                            <div class="app-logo" style="position: relative; display: inline-block;">
-                                <i class="fa-solid fa-compact-disc fa-spin" style="font-size: 64px; color: var(--accent-main); filter: drop-shadow(0 0 15px rgba(29, 185, 84, 0.4)); animation: spin 4s linear infinite;"></i>
-                                <div style="position: absolute; bottom: -5px; right: -5px; background: var(--panel-bg); border-radius: 50%; padding: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.2);">
-                                    <i class="fa-solid fa-music" style="font-size: 18px; color: var(--text-primary);"></i>
-                                </div>
-                            </div>
-                            <h4 style="font-size: 32px; margin: 20px 0 8px; font-family: 'Outfit', sans-serif; font-weight: 800; background: linear-gradient(90deg, var(--text-primary), var(--accent-main)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Floating Lyrics</h4>
-                            <div style="display: inline-block; background: rgba(29, 185, 84, 0.1); border: 1px solid rgba(29, 185, 84, 0.2); color: var(--accent-main); padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: 1.5px;">VERSION 2.0.0 PRO</div>
-                        </div>
-                        
-                        <div class="about-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 25px;">
-                            <div class="glass-panel" style="padding: 15px; border-radius: 12px; text-align: center; border: 1px solid var(--panel-border); transition: transform 0.2s; cursor: default;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-                                <i class="fa-brands fa-node-js" style="font-size: 28px; color: #68a063; margin-bottom: 10px;"></i>
-                                <h5 style="margin-bottom: 5px; color: var(--text-primary); font-size: 14px;">Web Engine</h5>
-                                <span style="font-size: 12px; color: var(--text-dim);">Node.js & Express</span>
-                            </div>
-                            <div class="glass-panel" style="padding: 15px; border-radius: 12px; text-align: center; border: 1px solid var(--panel-border); transition: transform 0.2s; cursor: default;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-                                <i class="fa-brands fa-python" style="font-size: 28px; color: #3776ab; margin-bottom: 10px;"></i>
-                                <h5 style="margin-bottom: 5px; color: var(--text-primary); font-size: 14px;">Desktop Core</h5>
-                                <span style="font-size: 12px; color: var(--text-dim);">Python & WinRT API</span>
-                            </div>
-                        </div>
-                        
-                        <div class="glass-panel" style="padding: 20px; border-radius: 12px; border-left: 4px solid var(--accent-main); background: linear-gradient(90deg, rgba(29, 185, 84, 0.05) 0%, transparent 100%);">
-                            <h5 style="color: var(--text-primary); margin-bottom: 8px; font-size: 15px; display: flex; align-items: center; gap: 8px;">
-                                <i class="fa-solid fa-wand-magic-sparkles" style="color: var(--accent-main);"></i> 核心理念
-                            </h5>
-                            <p style="color: var(--text-secondary); font-size: 13px; line-height: 1.7;">
-                                打破傳統歌詞軟體的限制。透過網頁作為控制中樞，結合桌面原生 API 的超強效能，為你打造最流暢、最智慧且零干擾的完美音樂體驗。
-                            </p>
-                        </div>
-                        
-                    </div>
+            <div style="background: var(--bg-main); padding: 12px; border-radius: 8px; border: 1px solid var(--panel-border);">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 13px; color: var(--text-secondary);">歌詞提早 0.1 秒</span>
+                    <input type="text" id="hk-advance" class="styled-input" readonly onclick="recordHotkey(this, 'hk-advance')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 13px; color: var(--text-secondary);">歌詞延遲 0.1 秒</span>
+                    <input type="text" id="hk-delay" class="styled-input" readonly onclick="recordHotkey(this, 'hk-delay')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 13px; color: var(--text-secondary);">純文字上一句</span>
+                    <input type="text" id="hk-plain-prev" class="styled-input" readonly onclick="recordHotkey(this, 'hk-plain-prev')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 13px; color: var(--text-secondary);">純文字下一句</span>
+                    <input type="text" id="hk-plain-next" class="styled-input" readonly onclick="recordHotkey(this, 'hk-plain-next')" style="text-align: center; cursor: pointer; font-size: 13px; padding: 4px;">
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
+                    <div style="font-size: 11px; color: var(--text-secondary);">* 點擊輸入框綁定，按 ESC 可取消。</div>
+                    <button onclick="resetHotkeys()" style="background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--panel-border); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">恢復預設</button>
                 </div>
             </div>
         </div>
     </div>
+
     <script>
-        function toggleSidebar() {
-            const sidebar = document.getElementById('app-sidebar');
-            if (sidebar) {
-                sidebar.classList.toggle('collapsed');
-                localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
-            }
-        }
-        
-        function openSettingsModal() {
-            const modal = document.getElementById('settings-modal');
-            if (modal) modal.classList.add('show');
+        function toggleSettingsMenu(e) {
+            if (e) e.stopPropagation();
+            const menu = document.getElementById('settings-menu');
+            if (menu) menu.classList.toggle('show');
         }
 
-        function closeSettingsModal() {
-            const modal = document.getElementById('settings-modal');
-            if (modal) modal.classList.remove('show');
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('settings-menu');
+            if (menu && menu.classList.contains('show') && !menu.contains(e.target)) {
+                menu.classList.remove('show');
+            }
+        });
+
+        function openHotkeysModal() {
+            document.getElementById('settings-menu').classList.remove('show');
+            document.getElementById('hotkeys-modal').classList.add('show');
         }
-        
+
+        function closeHotkeysModal() {
+            document.getElementById('hotkeys-modal').classList.remove('show');
+        }
+
+        // ── 使用說明:引導式導覽 ──
+        const tourSteps = [
+            { page: '/',       el: '.nav-menu',      title: '側欄導覽',   text: '這裡可以切換頁面：懸浮歌詞、統計數據、排行榜、歌詞編輯器。滑鼠移到圖示上會顯示名稱。' },
+            { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '所有設定都在這裡：主題外觀、日文假名、文字大小、歌詞對齊、快捷鍵等。' },
+            { page: '/',       el: '#lyrics-scroll', title: '歌詞區',     text: '歌詞會隨播放自動同步捲動，漢字上方標示假名注音。點任一句歌詞可以直接跳轉到該時間點。' },
+            { page: '/',       el: '.player-center', title: '播放控制',   text: '控制播放/暫停、上下一首，拖曳進度條可跳轉。' },
+            { page: '/',       el: '.player-right',  title: '工具列',     text: '由左至右：編輯假名、取得備選歌詞、重新載入歌詞、桌面靈動島、放大模式。' },
+            { page: '/',       el: 'a.nav-item[href="/editor"]', title: '歌詞編輯器', text: '找不到歌詞、時間軸不準？歌詞編輯器可以手動修正。點「下一步」帶你進去看看。' },
+            { page: '/editor', el: '.stats-dashboard-grid > .dashboard-card:first-child', title: '選擇歌曲', text: '聽過的歌都存在這裡，可用歌名或歌手搜尋，點選後載入歌詞開始編輯。' },
+            { page: '/editor', el: '.stats-dashboard-grid > .dashboard-card:nth-child(2)', title: '編輯歌詞', text: '直接修改每句歌詞與時間戳。右上角可以設定歌手別名、尋找更多來源或貼上自訂歌詞，改完記得按「儲存修改」。' },
+            { page: '/editor', el: null,             title: '完成！',     text: '就是這些！開始享受你的音樂吧 🎵 想重看說明，隨時從左上角選單點「使用說明」。' }
+        ];
+        let tourIndex = -1;
+
+        function startTour() {
+            const menu = document.getElementById('settings-menu');
+            if (menu) menu.classList.remove('show');
+            if (!document.getElementById('lyrics-scroll')) {
+                location.href = '/?tour=1';
+                return;
+            }
+            localStorage.setItem('tourSeen', '1');
+            tourIndex = 0;
+            renderTourStep();
+            document.addEventListener('keydown', tourEscHandler);
+        }
+
+        function endTour() {
+            tourIndex = -1;
+            const hl = document.getElementById('tour-highlight');
+            const po = document.getElementById('tour-popover');
+            if (hl) hl.remove();
+            if (po) po.remove();
+            document.removeEventListener('keydown', tourEscHandler);
+        }
+
+        function tourEscHandler(e) {
+            if (e.key === 'Escape') endTour();
+        }
+
+        function tourStepMove(delta) {
+            tourIndex += delta;
+            if (tourIndex < 0 || tourIndex >= tourSteps.length) { endTour(); return; }
+            renderTourStep();
+        }
+
+        function renderTourStep() {
+            const step = tourSteps[tourIndex];
+            // 跨頁步驟:記住進度後跳轉,載入後由 DOMContentLoaded 恢復
+            if (step.page !== location.pathname) {
+                sessionStorage.setItem('tourResume', tourIndex);
+                location.href = step.page;
+                return;
+            }
+            let hl = document.getElementById('tour-highlight');
+            if (!hl) {
+                hl = document.createElement('div');
+                hl.id = 'tour-highlight';
+                document.body.appendChild(hl);
+            }
+            let po = document.getElementById('tour-popover');
+            if (!po) {
+                po = document.createElement('div');
+                po.id = 'tour-popover';
+                document.body.appendChild(po);
+            }
+
+            const target = step.el ? document.querySelector(step.el) : null;
+            if (target) {
+                const r = target.getBoundingClientRect();
+                const pad = 8;
+                hl.style.display = 'block';
+                hl.style.top = (r.top - pad) + 'px';
+                hl.style.left = (r.left - pad) + 'px';
+                hl.style.width = (r.width + pad * 2) + 'px';
+                hl.style.height = (r.height + pad * 2) + 'px';
+            } else {
+                // 無目標:整頁遮罩,卡片置中
+                hl.style.display = 'block';
+                hl.style.top = '50%';
+                hl.style.left = '50%';
+                hl.style.width = '0';
+                hl.style.height = '0';
+            }
+
+            const isLast = tourIndex === tourSteps.length - 1;
+            po.innerHTML = `
+                <div class="tour-title">${step.title}</div>
+                <div class="tour-text">${step.text}</div>
+                <div class="tour-footer">
+                    <span class="tour-count">${tourIndex + 1}/${tourSteps.length}</span>
+                    <div class="tour-btns">
+                        ${!isLast ? '<button class="tour-btn" onclick="endTour()">跳過</button>' : ''}
+                        ${tourIndex > 0 ? '<button class="tour-btn" onclick="tourStepMove(-1)">上一步</button>' : ''}
+                        ${isLast
+                            ? '<button class="tour-btn tour-btn-primary" onclick="endTour()">完成</button>'
+                            : '<button class="tour-btn tour-btn-primary" onclick="tourStepMove(1)">下一步</button>'}
+                    </div>
+                </div>`;
+
+            // 定位說明卡:目標下方,放不下改上方;無目標置中
+            po.style.visibility = 'hidden';
+            po.style.display = 'block';
+            const poH = po.offsetHeight, poW = po.offsetWidth;
+            if (target) {
+                const r = target.getBoundingClientRect();
+                let top = r.bottom + 16;
+                if (top + poH > window.innerHeight - 10) top = r.top - poH - 16;
+                if (top < 10) top = Math.max(10, (window.innerHeight - poH) / 2);
+                let left = Math.min(Math.max(10, r.left), window.innerWidth - poW - 10);
+                po.style.top = top + 'px';
+                po.style.left = left + 'px';
+                po.style.transform = 'none';
+            } else {
+                po.style.top = '50%';
+                po.style.left = '50%';
+                po.style.transform = 'translate(-50%, -50%)';
+            }
+            po.style.visibility = 'visible';
+        }
+
         async function saveSettingsToServer(key, val) {
             try {
                 await fetch('/api/settings', {
@@ -221,7 +240,7 @@
         function updateFontSize(val) {
             let num = parseInt(val);
             if (isNaN(num)) num = 22;
-            num = Math.max(14, Math.min(32, num));
+            num = Math.max(14, Math.min(60, num));
             
             document.documentElement.style.setProperty('--lyrics-fs', num + 'px');
             localStorage.setItem('fontsize', num);
@@ -235,14 +254,6 @@
             saveSettingsToServer('font_size', num);
         }
 
-        function switchSettingsTab(tabId, btn) {
-            document.querySelectorAll('.settings-pane').forEach(p => p.style.display = 'none');
-            document.getElementById('tab-' + tabId).style.display = 'block';
-            
-            document.querySelectorAll('.settings-tab').forEach(b => b.classList.remove('active'));
-            if(btn) btn.classList.add('active');
-        }
-        
         function changeTheme(themeValue, btn) {
             localStorage.setItem('theme', themeValue);
             applyTheme(themeValue);
@@ -348,11 +359,6 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            const sidebar = document.getElementById('app-sidebar');
-            if (sidebar && localStorage.getItem('sidebarCollapsed') === 'true') {
-                sidebar.classList.add('collapsed');
-            }
-            
             const savedTheme = localStorage.getItem('theme') || 'system';
             document.querySelectorAll('#theme-segmented .segment-btn').forEach(b => {
                 if (b.dataset.theme === savedTheme) b.classList.add('active');
@@ -379,12 +385,14 @@
             fetch('/api/settings')
             .then(res => res.json())
             .then(data => {
-                if (data.furigana !== undefined) document.getElementById('setting-furigana').checked = data.furigana;
-                if (data.dynamic_color !== undefined) document.getElementById('setting-dynamic-color').checked = data.dynamic_color;
-                if (data.auto_scroll !== undefined) document.getElementById('setting-auto-scroll').checked = data.auto_scroll;
-                if (data.pin_window !== undefined) document.getElementById('setting-pin-window').checked = data.pin_window;
-                if (data.hide_empty !== undefined) document.getElementById('setting-hide-empty').checked = data.hide_empty;
-                if (data.island_lines !== undefined) document.getElementById('setting-island-lines').value = data.island_lines;
+                if (data.show_furigana !== undefined) {
+                    const fEl = document.getElementById('setting-furigana');
+                    if (fEl) fEl.checked = data.show_furigana;
+                }
+                if (data.island_lines !== undefined) {
+                    const ilEl = document.getElementById('setting-island-lines');
+                    if (ilEl) ilEl.value = data.island_lines;
+                }
                 
                 if (data.font_size !== undefined) {
                     const savedFs = data.font_size;
@@ -411,7 +419,79 @@
             });
             
             if (window.updateActiveHotkeys) window.updateActiveHotkeys();
+
+            // 跨頁導覽:上一頁跳轉過來時恢復進度
+            const tourResume = sessionStorage.getItem('tourResume');
+            if (tourResume !== null) {
+                sessionStorage.removeItem('tourResume');
+                tourIndex = parseInt(tourResume);
+                setTimeout(() => {
+                    renderTourStep();
+                    document.addEventListener('keydown', tourEscHandler);
+                }, 500);
+            } else if (document.getElementById('lyrics-scroll')) {
+                // 首頁:首次進站或帶 ?tour=1 時自動播放使用說明
+                const params = new URLSearchParams(location.search);
+                if (params.get('tour') === '1' || !localStorage.getItem('tourSeen')) {
+                    setTimeout(startTour, 800);
+                }
+            }
         });
+
+        // ── 非首頁:同步下方播放列(歌曲資訊/播放狀態/進度/靈動島狀態) ──
+        // 首頁由 app.js 全權處理;這裡只給其他頁面輕量版
+        if (!document.getElementById('lyrics-scroll')) {
+            window.mediaAction = function(action) {
+                fetch('/api/media-control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action })
+                });
+            };
+            window.launchPyQt6 = async function() {
+                const toggle = document.getElementById('desktop-toggle-btn');
+                if (toggle) toggle.disabled = true;
+                try {
+                    const resp = await fetch('/api/launch-pyqt6', { method: 'POST' });
+                    const result = await resp.json();
+                    if (resp.ok && result.success && toggle) toggle.classList.toggle('active', result.action === 'started');
+                } catch (e) {}
+                setTimeout(() => { if (toggle) toggle.disabled = false; }, 1000);
+            };
+            // 首頁專屬功能:點了帶回首頁使用
+            window.toggleRubyEditMode = window.openLyricsModal = window.reloadCurrentLyrics = window.toggleFullscreen = () => { location.href = '/'; };
+
+            const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+            let barTitle = null;
+            async function syncPlayerBar() {
+                try {
+                    const r = await fetch('/api/current-media', { cache: 'no-store' });
+                    if (!r.ok) return;
+                    const d = await r.json();
+                    const ppIcon = document.getElementById('play-pause-icon');
+                    if (ppIcon) ppIcon.className = 'fa-solid ' + (d.is_playing ? 'fa-pause' : 'fa-play');
+                    if (d.title !== barTitle) {
+                        barTitle = d.title || '';
+                        document.getElementById('current-title').textContent = d.title || '--';
+                        document.getElementById('current-artist').textContent = d.title ? (d.artist || 'Unknown Artist') : '--';
+                        if (d.thumbnail) document.getElementById('album-cover').src = 'data:image/jpeg;base64,' + d.thumbnail;
+                    }
+                    if (d.title && d.duration > 0) {
+                        const pct = Math.min(100, d.position / d.duration * 100);
+                        document.getElementById('progress-slider').value = pct;
+                        document.getElementById('progress-fill').style.width = pct + '%';
+                        document.getElementById('current-time').textContent = fmtTime(d.position);
+                        document.getElementById('total-time').textContent = fmtTime(d.duration);
+                    }
+                } catch (e) {}
+            }
+            syncPlayerBar();
+            setInterval(syncPlayerBar, 1000);
+            fetch('/api/desktop-status').then(r => r.json()).then(d => {
+                const t = document.getElementById('desktop-toggle-btn');
+                if (t) t.classList.toggle('active', d.isRunning);
+            }).catch(() => {});
+        }
     </script>
 </body>
 </html>

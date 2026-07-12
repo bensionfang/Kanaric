@@ -96,6 +96,47 @@ def main():
                         "ref": r_chunk
                     })
         print(json.dumps(diffs, ensure_ascii=False))
+    elif cmd == "seek":
+        import asyncio
+        from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+        async def do_seek(sec):
+            sessions = await GlobalSystemMediaTransportControlsSessionManager.request_async()
+            sess = None
+            for s in sessions.get_sessions():
+                if "spotify" in (s.source_app_user_model_id or "").lower():
+                    sess = s
+                    break
+            if sess:
+                try:
+                    await sess.try_change_playback_position_async(int(float(sec) * 10000000))
+                except Exception:
+                    pass
+        asyncio.run(do_seek(args[0]))
+    elif cmd == "media-action":
+        import asyncio
+        from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+        async def do_media_action(action):
+            sessions = await GlobalSystemMediaTransportControlsSessionManager.request_async()
+            sess = None
+            for s in sessions.get_sessions():
+                if "spotify" in (s.source_app_user_model_id or "").lower():
+                    sess = s
+                    break
+            if sess:
+                try:
+                    if action == "play":
+                        await sess.try_play_async()
+                    elif action == "pause":
+                        await sess.try_pause_async()
+                    elif action == "playpause":
+                        await sess.try_toggle_play_pause_async()
+                    elif action == "next":
+                        await sess.try_skip_next_async()
+                    elif action == "prev":
+                        await sess.try_skip_previous_async()
+                except Exception:
+                    pass
+        asyncio.run(do_media_action(args[0]))
     else:
         print(f"Unknown command: {cmd!r}", file=sys.stderr)
         sys.exit(1)

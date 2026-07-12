@@ -7,11 +7,11 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Poppins:ital,wght@0,400;0,600;0,700;0,800;1,400;1,600;1,700;1,800&display=swap" rel="stylesheet">
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Style -->
-    <link rel="stylesheet" href="/css/style.css?v=7">
+    <link rel="stylesheet" href="/css/style.css?v=31">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
@@ -33,20 +33,69 @@
 <body>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar" id="app-sidebar">
-            <script>
-                if (localStorage.getItem('sidebarCollapsed') === 'true') {
-                    document.getElementById('app-sidebar').classList.add('collapsed');
-                }
-            </script>
+        <aside class="sidebar collapsed" id="app-sidebar">
             <div class="brand">
-                <button class="hamburger-btn" onclick="toggleSidebar()">
-                    <i class="fa-solid fa-bars"></i>
+                <button id="menu-dots-btn" class="menu-dots-btn" onclick="toggleSettingsMenu(event)" title="設定">
+                    <i class="fa-solid fa-ellipsis"></i>
                 </button>
-                <div class="brand-icon">
-                    <i class="fa-solid fa-compact-disc fa-spin-slow"></i>
+                <!-- Settings Dropdown Menu -->
+                <div id="settings-menu" class="settings-menu">
+                    <div class="menu-row">
+                        <span class="menu-label">整體外觀</span>
+                        <div class="segmented-control" id="theme-segmented">
+                            <button class="segment-btn active" data-theme="system" onclick="changeTheme('system', this)">系統</button>
+                            <button class="segment-btn" data-theme="light" onclick="changeTheme('light', this)">淺色</button>
+                            <button class="segment-btn" data-theme="dark" onclick="changeTheme('dark', this)">深色</button>
+                        </div>
+                    </div>
+                    <div class="menu-row">
+                        <span class="menu-label">顯示日文假名</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-furigana" onchange="updateFuriganaSetting(this.checked)" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="menu-row">
+                        <span class="menu-label">歌詞文字大小</span>
+                        <div class="menu-fontsize">
+                            <input type="range" min="14" max="60" value="22" id="setting-fontsize" oninput="updateFontSize(this.value)">
+                            <input type="number" id="fontsize-input" value="22" min="14" max="60" onchange="updateFontSize(this.value)" class="styled-input-number">
+                        </div>
+                    </div>
+                    <div class="menu-row">
+                        <span class="menu-label">歌詞對齊</span>
+                        <div class="segmented-control" id="align-segmented">
+                            <button class="segment-btn" data-align="left" onclick="changeTextAlign('left', this)">左</button>
+                            <button class="segment-btn active" data-align="center" onclick="changeTextAlign('center', this)">中</button>
+                            <button class="segment-btn" data-align="right" onclick="changeTextAlign('right', this)">右</button>
+                        </div>
+                    </div>
+                    <div class="menu-row">
+                        <span class="menu-label">靈動島歌詞行數</span>
+                        <select id="setting-island-lines" class="menu-select" onchange="saveSettingsToServer('island_lines', parseInt(this.value))">
+                            <option value="1">1 行</option>
+                            <option value="2" selected>2 行</option>
+                        </select>
+                    </div>
+                    <div class="menu-row">
+                        <span class="menu-label">優先搜尋來源</span>
+                        <select id="setting-preferred-source" class="menu-select" onchange="localStorage.setItem('preferred_source', this.value); saveSettingsToServer('preferred_source', this.value)">
+                            <option value="NetEase">NetEase (網易雲)</option>
+                            <option value="Lrclib">Lrclib</option>
+                            <option value="Musixmatch">Musixmatch</option>
+                            <option value="QQMusic">QQ 音樂</option>
+                        </select>
+                    </div>
+                    <div class="menu-divider"></div>
+                    <button class="menu-row menu-action" onclick="openHotkeysModal()">
+                        <span class="menu-label">自訂快捷鍵…</span>
+                        <i class="fa-solid fa-chevron-right"></i>
+                    </button>
+                    <button class="menu-row menu-action" onclick="startTour()">
+                        <span class="menu-label">使用說明</span>
+                        <i class="fa-solid fa-chevron-right"></i>
+                    </button>
                 </div>
-                <h2>Floating Lyrics</h2>
             </div>
             
             <nav class="nav-menu">
@@ -68,19 +117,12 @@
                 </a>
             </nav>
             
-            <div class="sidebar-bottom" id="settings-btn-container">
-                <a href="#" class="nav-item" onclick="openSettingsModal(); return false;">
-                    <i class="fa-solid fa-gear"></i>
-                    <span>設定</span>
-                </a>
-            </div>
-            
             <div class="sidebar-footer">
                 <div class="version">v2.0.0 Web Premium</div>
             </div>
         </aside>
 
         <!-- Main Body -->
-        <main class="main-content">
+        <main class="main-content <%= activePage === 'home' ? 'is-home-page' : '' %>">
 
             <div class="content-body">

@@ -41,14 +41,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize zoom mode if persisted
     if (localStorage.getItem('zoomModeActive') === 'true') {
         document.body.classList.add('window-maximized');
-        const playerCard = document.querySelector('.player-lyrics-card');
-        if (playerCard) playerCard.classList.add('window-maximized');
     }
 
     // Initialize alignment if persisted
     const alignMode = localStorage.getItem('lyricsAlignMode');
-    if (alignMode === 'left') {
-        document.getElementById('lyrics-scroll').classList.add('align-left');
+    if (alignMode === 'left' || alignMode === 'right') {
+        document.getElementById('lyrics-scroll').classList.add('align-' + alignMode);
         const icon = document.getElementById('align-icon-modal');
         if (icon) { icon.classList.remove('fa-align-left'); icon.classList.add('fa-align-center'); }
     }
@@ -230,18 +228,27 @@ async function pollSystemMedia() {
         const dot = document.getElementById('sync-dot');
         const statusText = document.getElementById('sync-status-text');
         
-        if (data.is_playing) {
+                if (data.is_playing) {
             dot.classList.add('active');
-            statusText.textContent = `即時同步中...`;
-            document.getElementById('vinyl-disc').classList.add('playing');
+            statusText.textContent = isUnsyncedLyrics ? `無動態歌詞 (純文字模式)` : `即時同步中...`;
+            const vd = document.getElementById('vinyl-disc');
+            if (vd) vd.classList.add('playing');
+            const ppIcon = document.getElementById('play-pause-icon');
+            if (ppIcon) ppIcon.className = 'fa-solid fa-pause';
         } else {
             dot.classList.remove('active');
             statusText.textContent = data.title ? `音樂已暫停` : `等待播放...`;
-            document.getElementById('vinyl-disc').classList.remove('playing');
+            const vd = document.getElementById('vinyl-disc');
+            if (vd) vd.classList.remove('playing');
+            const ppIcon = document.getElementById('play-pause-icon');
+            if (ppIcon) ppIcon.className = 'fa-solid fa-play';
         }
 
         // Update interpolation state from server
         isCurrentlyPlaying = data.is_playing;
+        if (data.duration !== undefined) {
+            window.currentMediaDuration = data.duration;
+        }
         if (data.title) {
             if (data.position !== lastServerPosition) {
                 const diff = data.position - currentInterpolatedPosition;
@@ -263,12 +270,51 @@ async function pollSystemMedia() {
             document.getElementById('current-artist').textContent = data.artist || 'Unknown Artist';
             
             const coverImg = document.getElementById('album-cover');
+            // Extract dominant color from cover image once loaded
+            coverImg.onload = function() {
+                try {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = coverImg.width || 56;
+                    canvas.height = coverImg.height || 56;
+                    ctx.drawImage(coverImg, 0, 0, canvas.width, canvas.height);
+                    
+                    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                    let r = 0, g = 0, b = 0;
+                    for (let i = 0; i < imgData.length; i += 4) {
+                        r += imgData[i];
+                        g += imgData[i+1];
+                        b += imgData[i+2];
+                    }
+                    const count = imgData.length / 4;
+                    r = Math.floor(r / count);
+                    g = Math.floor(g / count);
+                    b = Math.floor(b / count);
+                    
+                    // Darken to ~65% brightness for Spotify-like vibrant background
+                    const bgR = Math.floor(r * 0.65);
+                    const bgG = Math.floor(g * 0.65);
+                    const bgB = Math.floor(b * 0.65);
+                    
+                    // Luminance check for text contrast
+                    const luminance = (0.299*bgR + 0.587*bgG + 0.114*bgB);
+                    const inactiveColor = luminance > 80 ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)';
+                    
+                    document.documentElement.style.setProperty('--lyrics-bg', `rgb(${bgR}, ${bgG}, ${bgB})`);
+                    document.documentElement.style.setProperty('--lyrics-inactive', inactiveColor);
+                } catch(e) {
+                    document.documentElement.style.setProperty('--lyrics-bg', '#121212');
+                    document.documentElement.style.setProperty('--lyrics-inactive', 'rgba(255, 255, 255, 0.5)');
+                }
+            };
+            
             if (data.thumbnail) {
                 coverImg.src = 'data:image/jpeg;base64,' + data.thumbnail;
             } else {
                 coverImg.src = 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=300&auto=format&fit=crop';
             }
-            
+
+
             fetch('/api/lyrics/offset?title=' + encodeURIComponent(data.title) + '&artist=' + encodeURIComponent(data.artist || ''))
                 .then(r => r.json())
                 .then(d => {
@@ -430,7 +476,7 @@ function renderLyrics() {
         if (lyric.translation) {
             content += `<div class="lyrics-translation">${lyric.translation}</div>`;
         }
-        return `<div class="lyrics-line ${isUnsyncedLyrics ? 'active' : ''}" id="lyric-line-${index}">${content}</div>`;
+        return `<div class="lyrics-line ${isUnsyncedLyrics ? 'active' : ''}" id="lyric-line-${index}" data-time="${lyric.time}">${content}</div>`;
     }).join('');
     
     if (window.currentSourceProvider) {
@@ -447,12 +493,15 @@ function updatePlaybackProgress(position) {
     const currentTimeEl = document.getElementById('current-time');
     
     // Estimate total time based on current position and song duration
-    const actualDuration = Math.max(songDurationSeconds, position + 10);
+    let durationToUse = window.currentMediaDuration > 0 ? window.currentMediaDuration : songDurationSeconds;
+    const actualDuration = Math.max(durationToUse, position + 10);
     
-    const percentage = (position / actualDuration) * 100;
+    const percentage = actualDuration > 0 ? (position / actualDuration) * 100 : 0;
     slider.value = percentage;
     fill.style.width = `${Math.min(100, percentage)}%`;
     currentTimeEl.textContent = formatTime(position);
+    const totalTimeEl = document.getElementById('total-time');
+    if (totalTimeEl) totalTimeEl.textContent = formatTime(actualDuration);
 }
 
 function syncLyricsToTime(position) {
@@ -611,7 +660,7 @@ async function checkDesktopStatus() {
         const data = await res.json();
         const toggle = document.getElementById('desktop-toggle-btn');
         if (toggle) {
-            toggle.checked = data.isRunning;
+            toggle.classList.toggle('active', data.isRunning);
         }
     } catch (e) {}
 }
@@ -628,14 +677,14 @@ async function launchPyQt6() {
         
         if (resp.ok && result.success) {
             showToast(result.action === 'started' ? '靈動島已啟動！' : '靈動島已關閉！', 'fa-solid fa-rocket');
-            if (toggle) toggle.checked = (result.action === 'started');
+            if (toggle) toggle.classList.toggle('active', result.action === 'started');
         } else {
             showToast('操作失敗。', 'fa-solid fa-circle-xmark');
-            if (toggle) toggle.checked = !toggle.checked; // revert
+            checkDesktopStatus();
         }
     } catch (err) {
         showToast('連線失敗。', 'fa-solid fa-circle-xmark');
-        if (toggle) toggle.checked = !toggle.checked; // revert
+        checkDesktopStatus();
     } finally {
         setTimeout(() => {
             if (toggle) toggle.disabled = false;
@@ -742,18 +791,27 @@ function changeSidebarRange(range) {
 }
 
 let currentEditingRuby = null;
+let isRubyEditMode = false;
+
+window.toggleRubyEditMode = function() {
+    isRubyEditMode = !isRubyEditMode;
+    const btn = document.getElementById('toggle-ruby-mode-btn');
+    if (btn) btn.classList.toggle('active', isRubyEditMode);
+};
 
 document.getElementById('lyrics-scroll').addEventListener('click', (e) => {
-    const ruby = e.target.closest('ruby');
-    if (ruby) {
+    if (isRubyEditMode) {
+        const ruby = e.target.closest('ruby');
+        if (ruby) {
         currentEditingRuby = ruby;
         
         const clone = ruby.cloneNode(true);
         const rtNode = clone.querySelector('rt');
         if (rtNode) clone.removeChild(rtNode);
-        const kanji = clone.textContent.trim();
-        
-        const currentRt = ruby.querySelector('rt') ? ruby.querySelector('rt').textContent : '';
+        // 修正發音以整個斷詞 (data-orig) 為單位,單一漢字可能只是斷詞的一部分
+        const kanji = ruby.dataset.orig || clone.textContent.trim();
+
+        const currentRt = ruby.dataset.hira || (ruby.querySelector('rt') ? ruby.querySelector('rt').textContent : '');
         
         document.getElementById('ruby-edit-kanji').textContent = kanji;
         document.getElementById('ruby-edit-rt').value = currentRt;
@@ -790,6 +848,21 @@ document.getElementById('lyrics-scroll').addEventListener('click', (e) => {
             .catch(() => { cdiv.innerHTML = ''; });
         
         setTimeout(() => document.getElementById('ruby-edit-rt').focus(), 100);
+        }
+        return;
+    }
+    
+    // Seek mode
+    const line = e.target.closest('.lyrics-line');
+    if (line) {
+        const timeSec = line.getAttribute('data-time');
+        if (timeSec) {
+            fetch('/api/seek', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ position: parseFloat(timeSec) })
+            });
+        }
     }
 });
 
@@ -860,16 +933,21 @@ async function saveRubyEdit() {
     const newRtText = document.getElementById('ruby-edit-rt').value.trim();
     const kanji = document.getElementById('ruby-edit-kanji').textContent.trim();
     
-    // Optimistic update
-    let rt = currentEditingRuby.querySelector('rt');
-    if (!newRtText) {
-        if (rt) currentEditingRuby.removeChild(rt);
-    } else {
-        if (!rt) {
-            rt = document.createElement('rt');
-            currentEditingRuby.appendChild(rt);
+    // Optimistic update — 只在點到的 ruby 就是整個斷詞時直接改,跨多個 ruby 的斷詞交給後續 reload
+    const visClone = currentEditingRuby.cloneNode(true);
+    const visRt = visClone.querySelector('rt');
+    if (visRt) visClone.removeChild(visRt);
+    if (visClone.textContent.trim() === kanji) {
+        let rt = currentEditingRuby.querySelector('rt');
+        if (!newRtText) {
+            if (rt) currentEditingRuby.removeChild(rt);
+        } else {
+            if (!rt) {
+                rt = document.createElement('rt');
+                currentEditingRuby.appendChild(rt);
+            }
+            rt.textContent = newRtText;
         }
-        rt.textContent = newRtText;
     }
     
     closeRubyModal();
@@ -905,30 +983,9 @@ async function saveRubyEdit() {
 // Window Maximize / Zoom Mode Logic
 // -------------------------------------------------------------
 function toggleFullscreen() {
-    const playerCard = document.querySelector('.player-lyrics-card');
-    const btn = document.querySelector('.fullscreen-btn');
-    const reloadBtn = document.querySelector('.reload-lyrics-btn');
-    const isMaximized = playerCard.classList.contains('window-maximized');
-    
-    // Disable pointer events on the buttons container during transition to prevent accidental clicks
-    const btnContainer = document.querySelector('.lyrics-header > div');
-    if (btnContainer) {
-        btnContainer.style.pointerEvents = 'none';
-        setTimeout(() => {
-            btnContainer.style.pointerEvents = 'auto';
-        }, 400);
-    }
-    
-    if (!isMaximized) {
-        document.body.classList.add('window-maximized');
-        playerCard.classList.add('window-maximized');
-        localStorage.setItem('zoomModeActive', 'true');
-    } else {
-        document.body.classList.remove('window-maximized');
-        playerCard.classList.remove('window-maximized');
-        localStorage.setItem('zoomModeActive', 'false');
-    }
-    
+    const isMaximized = document.body.classList.toggle('window-maximized');
+    localStorage.setItem('zoomModeActive', isMaximized ? 'true' : 'false');
+
     // Re-center the lyrics after the transition
     setTimeout(() => {
         if (activeLyricIndex >= 0) {
@@ -942,3 +999,13 @@ function toggleFullscreen() {
     }, 300);
 }
 
+
+
+// Spotify Player Controls
+function mediaAction(action) {
+    fetch('/api/media-control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action })
+    });
+}

@@ -510,6 +510,22 @@ app.post('/api/lyrics/offset', (req, res) => {
   });
 });
 
+app.post('/api/seek', express.json(), (req, res) => {
+  const { position } = req.body;
+  if (position === undefined) return res.status(400).json({ error: 'Missing position' });
+  spawnPy(['seek', position.toString()]);
+  res.json({ success: true });
+});
+
+app.post('/api/media-control', express.json(), (req, res) => {
+  const { action } = req.body;
+  if (!['play', 'pause', 'playpause', 'next', 'prev'].includes(action)) {
+    return res.status(400).json({ error: 'Invalid action' });
+  }
+  spawnPy(['media-action', action]);
+  res.json({ success: true });
+});
+
 app.get('/api/lyrics/fetch', async (req, res) => {
   const { title, artist, force, searchTitle, searchArtist } = req.query;
   if (!title || !artist) return res.status(400).json({ error: 'Title and artist are required' });

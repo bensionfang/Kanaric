@@ -1,0 +1,12 @@
+<div id="ruby-edit-modal" class="modal-overlay hidden">
+    <div class="modal-content" style="padding: 20px; position: relative;">
+        <button onclick="closeRubyModal()" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer; transition: color 0.3s;"><i class="fa-solid fa-xmark"></i></button>
+        <h3><i class="fa-solid fa-pen"></i> 編輯假名/拼音</h3>
+        <div style="margin-top: 15px;">
+            <div style="font-size: 24px; text-align: center; margin-bottom: 15px; color: var(--text-primary);" id="ruby-edit-kanji">漢字</div>
+            <input type="text" id="ruby-edit-rt" placeholder="輸入假名或羅馬拼音..." style="width:100%; margin-bottom:10px; background: var(--bg-main); border: 1px solid var(--panel-border); padding: 8px; color: var(--text-color); border-radius: 4px; font-size: 16px; text-align: center;">
+            <div id="ruby-edit-candidates" style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 15px; min-height: 28px;"></div>
+            <button onclick="saveRubyEdit()" class="nav-btn" style="width: 100%; justify-content: center; background: var(--accent-main); color: white; border: none;"><i class="fa-solid fa-check"></i> 套用並儲存</button>
+        </div>
+    </div>
+</div>

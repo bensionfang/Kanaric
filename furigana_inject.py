@@ -45,16 +45,33 @@ def build_ruby_html(text, artist, title):
         return text
     
     # 使用 fugashi 進行上下文感知的形態素分析
+    # 注意：fugashi 會吃掉 token 之間的空白，需要手動還原
     words = []
+    pos = 0  # 追蹤在原始文字中的位置
     for w in tagger(text):
+        surface = w.surface
+        # 找到此 token 在原始文字中的位置
+        idx = text.find(surface, pos)
+        if idx > pos:
+            # 在此 token 之前有被 fugashi 吃掉的空白/字元，需要保留
+            words.append({'orig': text[pos:idx], 'hira': text[pos:idx], 'is_space': True})
         kana = getattr(w.feature, 'kana', None)
         if not kana:
-            kana = w.surface
-        words.append({'orig': w.surface, 'hira': kata2hira(kana)})
+            kana = surface
+        words.append({'orig': surface, 'hira': kata2hira(kana), 'is_space': False})
+        pos = idx + len(surface) if idx >= 0 else pos + len(surface)
+    # 處理尾部可能殘留的空白
+    if pos < len(text):
+        words.append({'orig': text[pos:], 'hira': text[pos:], 'is_space': True})
         
     html_parts = []
     
     for item in words:
+        # 空白/分隔符號直接保留
+        if item.get('is_space'):
+            html_parts.append(item['orig'])
+            continue
+            
         orig = item['orig'] # 原始文字 (包含漢字)
         hira = item['hira'] # 轉換後的平假名
 

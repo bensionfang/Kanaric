@@ -30,33 +30,21 @@ async def poll_media():
         try:
             all_sessions = sessions.get_sessions()
             current_session = None
-            browser_keywords = ['chrome', 'edge', 'firefox', 'opera', 'brave', 'vivaldi', 'browser']
-            music_keywords = ['spotify', 'apple', 'itunes', 'music', 'kkbox', 'netease', 'tidal', 'foobar']
             
-            # 第一階段：尋找「正在播放」且是「專門音樂軟體」的 Session (最高優先級)
+            # 第一階段：尋找「正在播放」的 Spotify Session
             for sess in all_sessions:
                 app_id = (sess.source_app_user_model_id or "").lower()
-                if any(k in app_id for k in music_keywords):
+                if "spotify" in app_id:
                     pb_info = sess.get_playback_info()
                     if pb_info and pb_info.playback_status == 4: # playing
                         current_session = sess
                         break
-
-            # 第二階段：若無音樂軟體在播，尋找「正在播放」且「非瀏覽器」的 Session
+                        
+            # 第二階段：若 Spotify 沒有在播，尋找暫停中的 Spotify Session
             if not current_session:
                 for sess in all_sessions:
                     app_id = (sess.source_app_user_model_id or "").lower()
-                    if not any(k in app_id for k in browser_keywords):
-                        pb_info = sess.get_playback_info()
-                        if pb_info and pb_info.playback_status == 4: # playing
-                            current_session = sess
-                            break
-                            
-            # 第三階段：若都沒在播，找第一個非瀏覽器的 Session (可能處於暫停狀態)
-            if not current_session:
-                for sess in all_sessions:
-                    app_id = (sess.source_app_user_model_id or "").lower()
-                    if not any(k in app_id for k in browser_keywords):
+                    if "spotify" in app_id:
                         current_session = sess
                         break
 
