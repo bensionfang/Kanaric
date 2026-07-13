@@ -24,6 +24,14 @@ tagger = fugashi.Tagger()
 _KANA_EQ = str.maketrans({'づ': 'ず', 'ぢ': 'じ', 'を': 'お', 'へ': 'え', 'は': 'わ'})
 _KANA_ONLY = re.compile(r'^[ぁ-ゟァ-ヿー]+$')
 
+# 兩邊來源都不可信的字:unidic-lite 挑錯,網易雲/酷狗的羅馬字多半也是機器產的,
+# 常常跟著錯同一個 (例如 私 兩邊都給 watakushi)。所以這張表套在 apply_hint 之後,
+# 只有使用者的 word_corrections 蓋得過它 —— 真的唱 わたくし 的歌手動改一次即可。
+# 只在「整個斷詞完全等於 key」時才套用,所以 私的 (してき) 之類的複合詞不受影響。
+_COMMON_READING = {
+    '私': 'わたし',   # 兩邊來源預設都是 わたくし
+}
+
 def kata2hira(text):
     if not text: return ""
     return "".join(chr(ord(c) - 0x60) if 0x30a1 <= ord(c) <= 0x30f6 else c for c in text)
@@ -74,10 +82,13 @@ def apply_hint(words, hint):
 
         w['hira'] = candidate
 
-def split_internal_kana(orig_chunk, hira_chunk, full_orig, full_hira):
+def split_internal_kana(orig_chunk, hira_chunk, full_orig, full_hira, h_off=0):
     """
     遞迴處理漢字與平假名混合的詞彙 (如 送り仮名)。
     例如：「食べて」中「食」是漢字，「べて」是平假名，此函式負責將它們正確拆分。
+    h_off 是 hira_chunk 在 full_hira 中的起始位置。一個斷詞可能被拆成多個 ruby
+    (如 噛み締め → 噛(か) + 締(し))，前端得靠 data-hs/data-hlen 知道自己編輯的是
+    整詞讀音的哪一段，存回資料庫時才拼得回整詞。
     """
     match = re.search(r'([\u3040-\u30ff]+)', orig_chunk) # 找出原始文字中的平假/片假名
     if match:
@@ -86,11 +97,13 @@ def split_internal_kana(orig_chunk, hira_chunk, full_orig, full_hira):
             # 根據找到的假名將字詞切分為左右兩半
             parts_orig = orig_chunk.split(kana, 1)
             parts_hira = hira_chunk.split(kana, 1)
-            left = split_internal_kana(parts_orig[0], parts_hira[0], full_orig, full_hira) if parts_orig[0] else ''
-            right = split_internal_kana(parts_orig[1], parts_hira[1], full_orig, full_hira) if parts_orig[1] else ''
+            right_off = h_off + len(parts_hira[0]) + len(kana)
+            left = split_internal_kana(parts_orig[0], parts_hira[0], full_orig, full_hira, h_off) if parts_orig[0] else ''
+            right = split_internal_kana(parts_orig[1], parts_hira[1], full_orig, full_hira, right_off) if parts_orig[1] else ''
             return f"{left}{kana}{right}"
     # 若無內部假名可拆分，則直接包裝成 ruby 標籤
-    return f"<ruby class='editable-ruby' data-orig='{full_orig}' data-hira='{full_hira}'>{orig_chunk}<rt>{hira_chunk}</rt></ruby>"
+    return (f"<ruby class='editable-ruby' data-orig='{full_orig}' data-hira='{full_hira}' "
+            f"data-hs='{h_off}' data-hlen='{len(hira_chunk)}'>{orig_chunk}<rt>{hira_chunk}</rt></ruby>")
 
 def build_ruby_html(text, artist, title, hint=None):
     """
@@ -122,6 +135,11 @@ def build_ruby_html(text, artist, title, hint=None):
 
     # 用羅馬字來源的假名校正小辭典挑錯的讀音
     apply_hint(words, hint)
+
+    # 連羅馬字來源也一起錯的字,用預設表壓過去 (見 _COMMON_READING)
+    for w in words:
+        if not w.get('is_space') and w['orig'] in _COMMON_READING:
+            w['hira'] = _COMMON_READING[w['orig']]
 
     html_parts = []
     

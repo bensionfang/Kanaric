@@ -903,7 +903,8 @@ document.getElementById('lyrics-scroll').addEventListener('click', (e) => {
 
 // 就地編輯假名:直接把 <rt> 變成可編輯,不開視窗
 let editingRt = null;
-let rubyEditOriginal = '';
+let rubyEditOriginal = '';   // 整個斷詞的讀音,存進 DB 的單位
+let rubyEditRtOriginal = ''; // 這個 <rt> 原本顯示的字,可能只是整詞讀音的一部分
 
 function placeCaretAtEnd(el) {
     const range = document.createRange();
@@ -922,9 +923,9 @@ function startRubyEdit(ruby) {
         rt = document.createElement('rt');
         ruby.appendChild(rt);
     }
-    // data-hira 是整個斷詞的讀音,才是要存進資料庫的單位
-    rubyEditOriginal = ruby.dataset.hira || rt.textContent || '';
-    rt.textContent = rubyEditOriginal;
+    // 就地編輯這個 rt 自己的字,不要把整詞讀音塞進來 (噛み締め 的 噛 只該顯示 か)
+    rubyEditRtOriginal = rt.textContent || '';
+    rubyEditOriginal = ruby.dataset.hira || rubyEditRtOriginal;
 
     currentEditingRuby = ruby;
     editingRt = rt;
@@ -952,23 +953,32 @@ async function finishRubyEdit(save) {
     const ruby = currentEditingRuby;
     const rt = editingRt;
     const kanji = ruby.dataset.orig || '';
-    const newHira = rt.textContent.trim();
+    const newPart = romajiToHiragana(rt.textContent.trim(), true);
 
     currentEditingRuby = null;
     editingRt = null;
     rt.contentEditable = 'false';
     ruby.classList.remove('editing');
 
-    if (!save || !kanji || newHira === rubyEditOriginal) {
-        rt.textContent = rubyEditOriginal;
-        if (!rubyEditOriginal) ruby.removeChild(rt);
+    // word_corrections 的單位是整個斷詞,但這個 ruby 可能只佔整詞讀音的一段
+    // (噛み締め=かみしめ 拆成 噛(か) 與 締(し)),所以把改過的那段拼回整詞
+    const hs = parseInt(ruby.dataset.hs, 10);
+    const hlen = parseInt(ruby.dataset.hlen, 10);
+    const newHira = Number.isNaN(hs)
+        ? newPart
+        : rubyEditOriginal.slice(0, hs) + newPart + rubyEditOriginal.slice(hs + hlen);
+
+    // 取消或沒改動:還原成這個 <rt> 原本的字
+    if (!save || !kanji || newPart === rubyEditRtOriginal) {
+        rt.textContent = rubyEditRtOriginal;
+        if (!rubyEditRtOriginal) ruby.removeChild(rt);
         resumeSync();
         return;
     }
 
-    // 先更新畫面,再去打 API
+    // 先更新畫面,再去打 API (存檔成功後 reloadCurrentLyrics 會重新切一次)
     ruby.dataset.hira = newHira;
-    if (!newHira) ruby.removeChild(rt);
+    if (!newPart) ruby.removeChild(rt);
 
     try {
         const resp = await fetch('/api/furigana/correct', {
@@ -1045,10 +1055,18 @@ lyricsScrollPane.addEventListener('dblclick', async (e) => {
     }
 });
 
-function romajiToHiragana(text) {
+// final=true 代表輸入結束 (Enter/blur),此時結尾殘留的單一 n 才轉成 ん;
+// 編輯中不能轉,否則 na 行永遠打不出來 (打 n 就先被吃掉)
+function romajiToHiragana(text, final = false) {
     text = text.toLowerCase();
-    text = text.replace(/([bcdfghjklmpqrstvwxyz])\1/g, 'っ$1');
-    
+    // 促音:n 不算,nn 是 ん 不是 っん
+    text = text.replace(/([bcdfghjklmpqrstvwxyz])\1/g, (m, c) => c === 'n' ? m : 'っ' + c);
+    // nn 後面接母音時,第一個 n 是 ん,第二個留給 na 行 (onna → おんな)
+    text = text.replace(/nn(?=[aiueoy])/g, 'んn');
+    // 其餘的 nn 或 n+子音 = ん;n+母音/y 走 na/nya 行
+    text = text.replace(/nn/g, 'ん').replace(/n(?=[^aiueoyん])/g, 'ん');
+    if (final) text = text.replace(/n$/, 'ん');
+
     const mapping = {
         'kya':'きゃ', 'kyu':'きゅ', 'kyo':'きょ',
         'sha':'しゃ', 'shu':'しゅ', 'sho':'しょ',
@@ -1070,7 +1088,7 @@ function romajiToHiragana(text) {
         'ma':'ま', 'mi':'み', 'mu':'む', 'me':'め', 'mo':'も',
         'ya':'や', 'yu':'ゆ', 'yo':'よ',
         'ra':'ら', 'ri':'り', 'ru':'る', 're':'れ', 'ro':'ろ',
-        'wa':'わ', 'wo':'を', 'n':'ん',
+        'wa':'わ', 'wo':'を',
         'ga':'が', 'gi':'ぎ', 'gu':'ぐ', 'ge':'げ', 'go':'ご',
         'za':'ざ', 'ji':'じ', 'zu':'ず', 'ze':'ぜ', 'zo':'ぞ',
         'da':'だ', 'de':'で', 'do':'ど',
