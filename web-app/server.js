@@ -309,9 +309,29 @@ app.post('/api/settings', (req, res) => {
   }
 });
 
+// 製作人員/職位名。繁簡成對列出,因為中國平台的日文歌詞混用兩種寫法。
+const CREDIT_KEYWORDS = [
+  "作詞", "作词", "作曲", "編曲", "编曲", "製作", "制作", "混音", "演唱", "原唱",
+  "和聲", "和声", "企劃", "企划", "監製", "监制", "發行", "发行", "出品", "統籌", "统筹",
+  "錄音", "录音", "母帶", "母带", "翻譯", "翻译", "編集", "编辑", "校對", "校对",
+  "吉他", "貝斯", "贝斯", "鼓手", "鋼琴", "钢琴", "鍵盤", "键盘", "弦樂", "弦乐", "提琴",
+  "合唱", "伴奏", "配唱", "封面", "設計", "设计", "曲繪", "曲绘", "調校", "调校",
+  "厂牌", "廠牌", "工作室", "鳴謝", "鸣谢",
+  "vocal", "lyric", "music", "arrange", "mix", "mastering", "master", "compose",
+  "produce", "producer", "engineer", "record", "guitar", "bass", "drum", "piano",
+  "strings", "chorus", "keyboard", "synth", "programming"
+];
+
+// 版權聲明行 (「未經著作權人許可不得使用」之類)。這種行通常又長又沒冒號,
+// 過不了上面那套「像不像標籤」的判斷,所以獨立計分:命中夠多個宣告用詞就算。
+function isCopyrightClaim(text) {
+  const words = ["未經", "未经", "許可", "许可", "授權", "授权", "不得", "請勿", "请勿", "使用", "版權", "版权", "翻唱", "轉載", "转载"];
+  const hits = words.filter(w => text.includes(w)).length;
+  return hits >= 3;
+}
+
 function autoMarkTitleLines(lrcText) {
   if (!lrcText) return lrcText;
-  const keywords = ["作詞", "作词", "作曲", "編曲", "编曲", "製作", "制作", "混音", "演唱", "原唱", "vocal", "lyric", "music", "arrange", "mix", "mastering", "和聲", "和声", "企劃", "企划"];
   const lines = lrcText.split('\n');
   const newLines = [];
   for (let line of lines) {
@@ -326,14 +346,14 @@ function autoMarkTitleLines(lrcText) {
       let text = match[2].trim();
       if (!text.startsWith("#TITLE#")) {
         const lowerText = text.toLowerCase();
-        let isTitle = false;
-        for (let kw of keywords) {
+        let isTitle = isCopyrightClaim(text);
+        for (let kw of CREDIT_KEYWORDS) {
+          if (isTitle) break;
           if (lowerText.includes(kw) && text.length < 40) {
             // Ensure it's acting like a label
             const kwRegex = new RegExp(`${kw}\\s+`, 'i');
             if (/[:：]/.test(text) || kwRegex.test(lowerText) || text.length < kw.length + 5) {
               isTitle = true;
-              break;
             }
           }
         }
@@ -379,11 +399,20 @@ function injectFurigana(artist, title, lyrics) {
   });
 }
 
+// 正在播的這首歌的長度 (秒)。搜尋結果撞名/翻唱時拿來當佐證,只有查詢的就是當前曲目才算數。
+function currentDuration(title, artist) {
+  const s = currentMediaState;
+  if (!s || !s.duration) return null;
+  if (s.title !== title || s.artist !== artist) return null;
+  return s.duration;
+}
+
 // 網易雲 / 酷狗:歌詞與日文讀音提示在同一次請求裡拿到,提示由 Python 端直接寫進 DB
 function fetchCnLyrics({ title, artist, searchTitle, searchArtist, source = 'auto' }) {
   return new Promise((resolve) => {
     const pyProcess = spawnPy(['cnlyrics']);
-    pyProcess.stdin.write(JSON.stringify({ title, artist, searchTitle, searchArtist, source }));
+    const duration = currentDuration(title, artist);
+    pyProcess.stdin.write(JSON.stringify({ title, artist, searchTitle, searchArtist, source, duration }));
     pyProcess.stdin.end();
 
     let output = '';

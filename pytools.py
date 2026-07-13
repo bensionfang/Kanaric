@@ -45,10 +45,11 @@ def main():
         q_title = data.get("searchTitle") or title
         q_artist = data.get("searchArtist") or artist
         source = data.get("source", "auto")
+        duration = data.get("duration") or None  # 秒;拿來擋同名歌/翻唱
 
         try:
             if source == "all":
-                results = cn_music.fetch_all(q_artist, q_title)
+                results = cn_music.fetch_all(q_artist, q_title, duration)
                 # 讀音提示搭歌詞的便車存起來,注音時就不用再打一次網路
                 for r in results:
                     if r.get("hints"):
@@ -59,7 +60,7 @@ def main():
                     "results": [{"lyrics": r["lyrics"], "source": r["source"]} for r in results]
                 }, ensure_ascii=False))
             else:
-                r = cn_music.fetch(q_artist, q_title, source)
+                r = cn_music.fetch(q_artist, q_title, source, duration)
                 if r.get("lyrics"):
                     db.save_romaji_hints(artist, title, r.get("hints") or {})
                     print(json.dumps({
