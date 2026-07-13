@@ -226,6 +226,93 @@ button.menu-action {
     font: inherit;
 }
 
+/* 自訂快捷鍵:直接在設定選單裡展開 */
+.hotkeys-chevron {
+    transition: transform 0.15s ease;
+}
+
+#hotkeys-toggle.open .hotkeys-chevron {
+    transform: rotate(90deg);
+}
+
+/* 往右飛出的子選單,不擠壓主選單的高度。定位錨在那一列上,對齊自己的觸發列 */
+.menu-sub {
+    position: relative;
+}
+
+.menu-hotkeys {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: calc(100% + 12px);
+    width: 240px;
+    padding: 10px;
+    background: var(--panel-hover);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.menu-hotkeys.show {
+    display: block;
+    animation: popIn 0.12s ease-out;
+}
+
+.hk-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.hk-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.hk-input {
+    width: 120px;
+    text-align: center;
+    font-size: 12px;
+    padding: 4px 6px;
+    background: var(--bg-main);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.hk-input:focus {
+    outline: none;
+    border-color: var(--accent-main, #1db954);
+}
+
+.hk-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.hk-reset {
+    background: var(--panel-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--panel-border);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.hk-reset:hover {
+    background: var(--panel-hover);
+}
+
 button.menu-action:hover {
     background: var(--panel-bg);
 }
@@ -764,6 +851,36 @@ html.light-mode .song-item:hover { background: rgba(0, 0, 0, 0.06); }
     color: rgba(255, 255, 255, 0.7);
 }
 
+/* 假名編輯模式:整行的 hover 反白關掉,只有游標指到的漢字亮起來 */
+body.ruby-edit-mode .lyrics-line:not(.active):hover,
+body.ruby-edit-mode .lyrics-line:not(.active):hover rt {
+    color: var(--lyrics-inactive, rgba(255, 255, 255, 0.5));
+    text-decoration: none;
+    cursor: default;
+}
+
+body.ruby-edit-mode .lyrics-line ruby.editable-ruby:hover,
+body.ruby-edit-mode .lyrics-line ruby.editable-ruby:hover rt {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+/* 就地編輯:不加任何背景/外框,維持原本的畫面,只用白字與游標表示可打字 */
+.lyrics-line ruby.editing,
+.lyrics-line ruby.editing rt {
+    color: #ffffff;
+    background: transparent;
+}
+
+.lyrics-line ruby.editing rt {
+    min-width: 1em;
+    outline: none;
+    caret-color: #ffffff;
+    cursor: text;
+}
+
 /* Status banner */
 .status-banner {
     background: transparent;
@@ -840,8 +957,8 @@ html.light-mode .song-item:hover { background: rgba(0, 0, 0, 0.06); }
 /* Offset panel */
 .offset-panel {
     position: absolute;
-    bottom: 20px;
-    right: 25px;
+    bottom: 8px;
+    right: 8px;
     background: rgba(24, 24, 24, 0.9);
     backdrop-filter: blur(8px);
     padding: 6px 12px;
@@ -857,7 +974,8 @@ html.light-mode .song-item:hover { background: rgba(0, 0, 0, 0.06); }
 }
 
 .lyrics-view-container { position: relative; }
-.lyrics-view-container:hover .offset-panel { opacity: 1; }
+.main-content.is-home-page { position: relative; }
+.offset-panel:hover { opacity: 1; }
 .offset-panel:hover #offset-tooltip { opacity: 1; }
 
 .offset-panel button {
@@ -883,6 +1001,14 @@ html.light-mode .song-item:hover { background: rgba(0, 0, 0, 0.06); }
     text-align: center;
     font-family: monospace;
     font-size: 13px;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+#offset-display:hover {
+    background: rgba(255, 255, 255, 0.1);
 }
 
 /* Alignment variants */
@@ -1193,6 +1319,12 @@ input[type="range"] {
     transition: all 0.3s ease;
 }
 
+/* 導覽框住平常半透明的元素時,強制讓它現形 */
+.tour-reveal {
+    opacity: 1 !important;
+    z-index: 10502;
+}
+
 #tour-popover {
     position: fixed;
     z-index: 10501;
@@ -1423,6 +1555,11 @@ body.window-maximized .main-content {
     border-radius: 0 !important;
 }
 
+/* container padding 已歸零,播放列的負 margin 會讓左右內容溢出 */
+body.window-maximized .player-bar {
+    margin: 0 !important;
+}
+
 body.window-maximized .lyrics-view-container {
     flex: 1 !important;
     display: flex !important;
@@ -1539,7 +1676,7 @@ body.window-maximized .reload-lyrics-btn .text-maximized {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 8px;
+    padding: 0 16px;
     z-index: 100;
     margin: 0 -8px; /* Offset the container padding */
 }
@@ -1565,9 +1702,7 @@ body.window-maximized .reload-lyrics-btn .text-maximized {
     font-weight: 500;
     color: var(--text-primary);
     margin-bottom: 2px;
-    display: -webkit-box;
-    -webkit-line-clamp: 1;
-    -webkit-box-orient: vertical;
+    white-space: nowrap;
     overflow: hidden;
 }
 
@@ -1575,6 +1710,32 @@ body.window-maximized .reload-lyrics-btn .text-maximized {
     font-size: 11px;
     color: var(--text-secondary);
     font-weight: 400;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+/* 名字太長時來回滾動 (捲動距離與秒數由 JS 依實際溢出量寫進 CSS 變數) */
+.current-title > span,
+.current-artist > span {
+    display: inline-block;
+    max-width: none;
+}
+
+.current-title.marquee > span,
+.current-artist.marquee > span {
+    animation: player-marquee var(--marquee-duration, 6s) ease-in-out 1.5s infinite alternate;
+}
+
+@keyframes player-marquee {
+    from { transform: translateX(0); }
+    to   { transform: translateX(var(--marquee-shift, 0)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .current-title.marquee > span,
+    .current-artist.marquee > span {
+        animation: none;
+    }
 }
 
 .player-center {
@@ -1634,6 +1795,42 @@ body.window-maximized .reload-lyrics-btn .text-maximized {
 
 .play-pause-btn:hover {
     transform: scale(1.05);
+    color: var(--bg-shell);
+}
+
+/* 隨機/循環:開啟時 Spotify 綠 + 下方小綠點 (2.png) */
+.media-btn.toggle-btn {
+    position: relative;
+    font-size: 16px;
+}
+
+.media-btn.toggle-btn.active,
+.media-btn.toggle-btn.active:hover {
+    color: var(--accent-main);
+}
+
+.media-btn.toggle-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--accent-main);
+}
+
+/* 單曲循環:圖示右上角疊一個小 1 (FA free 沒有 repeat-1) */
+#repeat-btn[data-mode="1"]::before {
+    content: '1';
+    position: absolute;
+    top: -3px;
+    right: -4px;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--accent-main);
 }
 
 .progress-container {
@@ -1684,6 +1881,68 @@ html.light-mode .slider-wrapper { background: rgba(0, 0, 0, 0.2); }
     position: relative;
 }
 
+.lyrics-opt-wrap {
+    position: relative;
+    display: inline-flex;
+}
+
+.lyrics-opt-bubble {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%) translateY(4px);
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--accent-main, #1db954);
+    color: #fff;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 10;
+}
+
+.lyrics-opt-bubble::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: var(--accent-main, #1db954);
+}
+
+.lyrics-opt-bubble.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.seek-tooltip {
+    position: absolute;
+    bottom: 14px;
+    transform: translateX(-50%);
+    padding: 3px 7px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s;
+    z-index: 3;
+}
+
+.slider-wrapper:hover .seek-tooltip {
+    opacity: 1;
+}
+
 .slider-wrapper input[type="range"] {
     position: absolute;
     top: 0;
@@ -1732,13 +1991,11 @@ html.light-mode .slider-wrapper { background: rgba(0, 0, 0, 0.2); }
     position: relative;
 }
 
-.player-right .ctrl-btn.active,
-body.window-maximized .player-right .fullscreen-btn {
+.player-right .ctrl-btn.active {
     color: var(--accent-main);
 }
 
-.player-right .ctrl-btn.active::after,
-body.window-maximized .player-right .fullscreen-btn::after {
+.player-right .ctrl-btn.active::after {
     content: '';
     position: absolute;
     bottom: -7px;

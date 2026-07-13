@@ -33,7 +33,7 @@ if (app.isPackaged) {
     fs.writeFileSync(process.env.LYRICS_SETTINGS_PATH, JSON.stringify({
       font_size: 32, font_family: 'Noto Sans JP', custom_css_path: '', mini_mode: false,
       dynamic_color: true, sync_offset: 0, pin_window: true, show_furigana: true,
-      hotkeys_enable: false, autoscroll: true,
+      hotkeys_enable: false, autoscroll: true, auto_lyrics_options: false,
       'hk-advance': 'ArrowLeft', 'hk-delay': 'ArrowRight',
       'hk-plain-prev': 'ArrowUp', 'hk-plain-next': 'ArrowDown',
       dynamic_island: false, island_lines: 2

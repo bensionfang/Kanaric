@@ -76,7 +76,59 @@ function reloadCurrentLyrics() {
 // -------------------------------------------------------------
 // Advanced Lyrics Modal
 // -------------------------------------------------------------
+// 按鈕還原成原本的清單圖示
+function resetLyricsOptBtn() {
+    const btn = document.getElementById('lyrics-opt-btn');
+    if (!btn) return;
+    btn.innerHTML = '<i class="fa-solid fa-list"></i>';
+    btn.classList.remove('active');
+    delete btn.dataset.ready;
+    btn.title = '搜尋備選歌詞';
+}
+
+// 直接在背景搜尋，完成後按鈕變綠色打勾 + 泡泡提醒；再按一次進備選歌詞視窗
+async function searchLyricsOptions(force = false, manual = false) {
+    const btn = document.getElementById('lyrics-opt-btn');
+    const bubble = document.getElementById('lyrics-opt-bubble');
+    if (btn.dataset.loading) return;
+    if (btn.dataset.ready && !force) {
+        openLyricsModal();
+        return;
+    }
+    if (!lastMediaTitle) {
+        showToast('目前沒有播放任何歌曲', 'fa-solid fa-circle-exclamation', 2000);
+        return;
+    }
+
+    bubble.classList.remove('show');
+    window._lyricsOptions = [];
+    btn.dataset.loading = '1';
+    btn.classList.add('active');
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    try {
+        await performGetOptions(manual);
+    } finally {
+        delete btn.dataset.loading;
+    }
+
+    const count = (window._lyricsOptions || []).length;
+    if (count) {
+        btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+        btn.dataset.ready = '1';
+        btn.title = '查看備選歌詞';
+    } else {
+        resetLyricsOptBtn();
+    }
+    bubble.textContent = count ? `找到 ${count} 筆備選歌詞，點此查看` : '找不到備選歌詞';
+    bubble.classList.add('show');
+    clearTimeout(window._lyricsBubbleTimer);
+    window._lyricsBubbleTimer = setTimeout(() => bubble.classList.remove('show'), 8000);
+}
+
 function openLyricsModal() {
+    const bubble = document.getElementById('lyrics-opt-bubble');
+    if (bubble) bubble.classList.remove('show');
+
     const modal = document.getElementById('lyrics-options-modal');
     modal.classList.remove('hidden');
     modal.classList.add('show');
@@ -101,7 +153,7 @@ function closeLyricsModal() {
 }
 
 function manualSearchLyrics() {
-    performGetOptions(true);
+    searchLyricsOptions(true, true);
 }
 
 async function performGetOptions(forceManual = false) {
@@ -225,23 +277,25 @@ async function pollSystemMedia() {
         if (!resp.ok) return;
         const data = await resp.json();
         
-        const dot = document.getElementById('sync-dot');
-        const statusText = document.getElementById('sync-status-text');
-        
-                if (data.is_playing) {
-            dot.classList.add('active');
-            statusText.textContent = isUnsyncedLyrics ? `無動態歌詞 (純文字模式)` : `即時同步中...`;
-            const vd = document.getElementById('vinyl-disc');
+        const vd = document.getElementById('vinyl-disc');
+        const ppIcon = document.getElementById('play-pause-icon');
+        if (data.is_playing) {
             if (vd) vd.classList.add('playing');
-            const ppIcon = document.getElementById('play-pause-icon');
             if (ppIcon) ppIcon.className = 'fa-solid fa-pause';
         } else {
-            dot.classList.remove('active');
-            statusText.textContent = data.title ? `音樂已暫停` : `等待播放...`;
-            const vd = document.getElementById('vinyl-disc');
             if (vd) vd.classList.remove('playing');
-            const ppIcon = document.getElementById('play-pause-icon');
             if (ppIcon) ppIcon.className = 'fa-solid fa-play';
+        }
+
+        // 隨機播放 / 循環模式 (0=關閉, 1=單曲, 2=整張清單)
+        const shuffleBtn = document.getElementById('shuffle-btn');
+        if (shuffleBtn) shuffleBtn.classList.toggle('active', !!data.shuffle);
+        const repeatBtn = document.getElementById('repeat-btn');
+        if (repeatBtn) {
+            const mode = data.repeat || 0;
+            repeatBtn.classList.toggle('active', mode !== 0);
+            repeatBtn.dataset.mode = mode;
+            repeatBtn.title = mode === 1 ? '單曲循環' : (mode === 2 ? '清單循環' : '循環播放');
         }
 
         // Update interpolation state from server
@@ -265,9 +319,15 @@ async function pollSystemMedia() {
         if (data.title && (data.title !== lastMediaTitle || data.artist !== lastMediaArtist)) {
             lastMediaTitle = data.title;
             lastMediaArtist = data.artist;
-            
-            document.getElementById('current-title').textContent = data.title;
-            document.getElementById('current-artist').textContent = data.artist || 'Unknown Artist';
+
+            // 換歌 = 備選歌詞失效，按鈕回到搜尋狀態
+            window._lyricsOptions = [];
+            resetLyricsOptBtn();
+            // 清掉上一首殘留的手動捲動狀態，讓新歌恢復自動捲動
+            resumeSync();
+
+            setMarqueeText(document.getElementById('current-title'), data.title);
+            setMarqueeText(document.getElementById('current-artist'), data.artist || 'Unknown Artist');
             
             const coverImg = document.getElementById('album-cover');
             // Extract dominant color from cover image once loaded
@@ -332,12 +392,19 @@ async function pollSystemMedia() {
             const manualArtistEl = document.getElementById('manual-artist');
             if (manualTitleEl) manualTitleEl.value = data.title;
             if (manualArtistEl) manualArtistEl.value = data.artist || '';
+
+            // 開了自動搜尋就直接跑一輪 (轉圈 → 綠色打勾 → 泡泡提醒,與手動按下完全同一套流程)
+            if (localStorage.getItem('auto_lyrics_options') === 'true') {
+                searchLyricsOptions();
+            }
         } else if (!data.title && lastMediaTitle) {
             // Stopped completely
             lastMediaTitle = "";
             lastMediaArtist = "";
-            document.getElementById('current-title').textContent = "--";
-            document.getElementById('current-artist').textContent = "--";
+            window._lyricsOptions = [];
+            resetLyricsOptBtn();
+            setMarqueeText(document.getElementById('current-title'), "--");
+            setMarqueeText(document.getElementById('current-artist'), "--");
             parsedLyrics = [];
             renderLyrics();
             loadSidebarLeaderboard();
@@ -496,6 +563,8 @@ function updatePlaybackProgress(position) {
     let durationToUse = window.currentMediaDuration > 0 ? window.currentMediaDuration : songDurationSeconds;
     const actualDuration = Math.max(durationToUse, position + 10);
     
+    window.currentSeekDuration = actualDuration;
+
     const percentage = actualDuration > 0 ? (position / actualDuration) * 100 : 0;
     slider.value = percentage;
     fill.style.width = `${Math.min(100, percentage)}%`;
@@ -600,8 +669,8 @@ window.updateActiveHotkeys = function() {
 window.updateActiveHotkeys();
 
 document.addEventListener('keydown', (e) => {
-    // Ignore keydown if typing in an input or textarea
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    // Ignore keydown if typing in an input, textarea, or an inline-editable ruby
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
     
     let keyName = e.key.length === 1 ? e.key.toUpperCase() : e.key;
     if (keyName === ' ') keyName = 'Space';
@@ -691,6 +760,17 @@ async function launchPyQt6() {
         }, 1000);
     }
 }
+
+document.addEventListener('mousemove', (e) => {
+    const wrapper = e.target.closest('.slider-wrapper');
+    if (!wrapper) return;
+    const tip = wrapper.querySelector('.seek-tooltip');
+    if (!tip) return;
+    const rect = wrapper.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    tip.style.left = `${ratio * 100}%`;
+    tip.textContent = formatTime(ratio * (window.currentSeekDuration || 0));
+});
 
 function formatTime(totalSeconds) {
     const minutes = Math.floor(totalSeconds / 60);
@@ -797,61 +877,16 @@ window.toggleRubyEditMode = function() {
     isRubyEditMode = !isRubyEditMode;
     const btn = document.getElementById('toggle-ruby-mode-btn');
     if (btn) btn.classList.toggle('active', isRubyEditMode);
+    document.body.classList.toggle('ruby-edit-mode', isRubyEditMode);
 };
 
 document.getElementById('lyrics-scroll').addEventListener('click', (e) => {
     if (isRubyEditMode) {
         const ruby = e.target.closest('ruby');
-        if (ruby) {
-        currentEditingRuby = ruby;
-        
-        const clone = ruby.cloneNode(true);
-        const rtNode = clone.querySelector('rt');
-        if (rtNode) clone.removeChild(rtNode);
-        // 修正發音以整個斷詞 (data-orig) 為單位,單一漢字可能只是斷詞的一部分
-        const kanji = ruby.dataset.orig || clone.textContent.trim();
-
-        const currentRt = ruby.dataset.hira || (ruby.querySelector('rt') ? ruby.querySelector('rt').textContent : '');
-        
-        document.getElementById('ruby-edit-kanji').textContent = kanji;
-        document.getElementById('ruby-edit-rt').value = currentRt;
-        document.getElementById('ruby-edit-modal').classList.remove('hidden');
-        document.getElementById('ruby-edit-modal').classList.add('show');
-        
-        const cdiv = document.getElementById('ruby-edit-candidates');
-        cdiv.innerHTML = '<span style="color:var(--text-secondary); font-size:12px;">載入候選字...</span>';
-        fetch(`/api/furigana/candidates?word=${encodeURIComponent(kanji)}`)
-            .then(r => r.json())
-            .then(data => {
-                cdiv.innerHTML = '';
-                if (data.candidates && data.candidates.length > 0) {
-                    data.candidates.forEach(cand => {
-                        const btn = document.createElement('button');
-                        btn.textContent = cand;
-                        btn.style.background = 'var(--panel-bg)';
-                        btn.style.border = '1px solid var(--panel-border)';
-                        btn.style.color = 'var(--text-primary)';
-                        btn.style.padding = '4px 10px';
-                        btn.style.borderRadius = '12px';
-                        btn.style.cursor = 'pointer';
-                        btn.style.fontSize = '14px';
-                        btn.onclick = () => {
-                            document.getElementById('ruby-edit-rt').value = cand;
-                            document.getElementById('ruby-edit-rt').focus();
-                        };
-                        cdiv.appendChild(btn);
-                    });
-                } else {
-                    cdiv.innerHTML = '<span style="color:var(--text-secondary); font-size:12px;">無備選假名</span>';
-                }
-            })
-            .catch(() => { cdiv.innerHTML = ''; });
-        
-        setTimeout(() => document.getElementById('ruby-edit-rt').focus(), 100);
-        }
+        if (ruby && ruby !== currentEditingRuby) startRubyEdit(ruby);
         return;
     }
-    
+
     // Seek mode
     const line = e.target.closest('.lyrics-line');
     if (line) {
@@ -866,12 +901,149 @@ document.getElementById('lyrics-scroll').addEventListener('click', (e) => {
     }
 });
 
-function closeRubyModal() {
-    const modal = document.getElementById('ruby-edit-modal');
-    modal.classList.remove('show');
-    setTimeout(() => modal.classList.add('hidden'), 300);
-    currentEditingRuby = null;
+// 就地編輯假名:直接把 <rt> 變成可編輯,不開視窗
+let editingRt = null;
+let rubyEditOriginal = '';
+
+function placeCaretAtEnd(el) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
 }
+
+function startRubyEdit(ruby) {
+    finishRubyEdit(false);
+
+    let rt = ruby.querySelector('rt');
+    if (!rt) {
+        rt = document.createElement('rt');
+        ruby.appendChild(rt);
+    }
+    // data-hira 是整個斷詞的讀音,才是要存進資料庫的單位
+    rubyEditOriginal = ruby.dataset.hira || rt.textContent || '';
+    rt.textContent = rubyEditOriginal;
+
+    currentEditingRuby = ruby;
+    editingRt = rt;
+    ruby.classList.add('editing');
+    rt.contentEditable = 'true';
+    rt.spellcheck = false;
+    // 編輯中別讓自動捲動把字帶走
+    isUserScrolling = true;
+
+    rt.focus();
+    const range = document.createRange();
+    range.selectNodeContents(rt);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    rt.addEventListener('blur', () => {
+        if (editingRt === rt) finishRubyEdit(true);
+    });
+}
+
+async function finishRubyEdit(save) {
+    if (!currentEditingRuby || !editingRt) return;
+
+    const ruby = currentEditingRuby;
+    const rt = editingRt;
+    const kanji = ruby.dataset.orig || '';
+    const newHira = rt.textContent.trim();
+
+    currentEditingRuby = null;
+    editingRt = null;
+    rt.contentEditable = 'false';
+    ruby.classList.remove('editing');
+
+    if (!save || !kanji || newHira === rubyEditOriginal) {
+        rt.textContent = rubyEditOriginal;
+        if (!rubyEditOriginal) ruby.removeChild(rt);
+        resumeSync();
+        return;
+    }
+
+    // 先更新畫面,再去打 API
+    ruby.dataset.hira = newHira;
+    if (!newHira) ruby.removeChild(rt);
+
+    try {
+        const resp = await fetch('/api/furigana/correct', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: lastMediaTitle,
+                artist: lastMediaArtist,
+                orig: kanji,
+                hira: newHira
+            })
+        });
+        if (resp.ok) {
+            showToast('假名已更新', 'fa-solid fa-check', 1500);
+            // 同一個斷詞可能在別行也出現,重載讓它們一起更新
+            setTimeout(reloadCurrentLyrics, 500);
+        } else {
+            showToast('儲存失敗', 'fa-solid fa-xmark', 2000);
+        }
+    } catch (e) {
+        console.error(e);
+        showToast('儲存失敗', 'fa-solid fa-xmark', 2000);
+    }
+    resumeSync();
+}
+
+const lyricsScrollPane = document.getElementById('lyrics-scroll');
+
+lyricsScrollPane.addEventListener('input', (e) => {
+    if (!editingRt || e.target !== editingRt) return;
+    const converted = romajiToHiragana(editingRt.textContent);
+    if (converted !== editingRt.textContent) {
+        editingRt.textContent = converted;
+        placeCaretAtEnd(editingRt);
+    }
+});
+
+lyricsScrollPane.addEventListener('keydown', (e) => {
+    if (!editingRt) return;
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        finishRubyEdit(true);
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        finishRubyEdit(false);
+    }
+});
+
+// 雙擊:刪掉自訂讀音,回到自動判讀的假名
+lyricsScrollPane.addEventListener('dblclick', async (e) => {
+    if (!isRubyEditMode) return;
+    const ruby = e.target.closest('ruby');
+    if (!ruby) return;
+
+    // 雙擊的第一下已經進入編輯狀態了,先取消掉
+    if (currentEditingRuby === ruby) finishRubyEdit(false);
+
+    const kanji = ruby.dataset.orig;
+    if (!kanji) return;
+
+    try {
+        const resp = await fetch('/api/furigana/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: lastMediaTitle, artist: lastMediaArtist, orig: kanji })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error);
+        showToast(data.removed ? '已回復原本的假名' : '這個字沒有改過', 'fa-solid fa-rotate-left', 1500);
+        if (data.removed) setTimeout(reloadCurrentLyrics, 300);
+    } catch (err) {
+        console.error(err);
+        showToast('回復失敗', 'fa-solid fa-xmark', 2000);
+    }
+});
 
 function romajiToHiragana(text) {
     text = text.toLowerCase();
@@ -912,71 +1084,6 @@ function romajiToHiragana(text) {
     const pattern = new RegExp(keys.join('|'), 'g');
     
     return text.replace(pattern, m => mapping[m]);
-}
-
-document.getElementById('ruby-edit-rt').addEventListener('input', (e) => {
-    const input = e.target;
-    const start = input.selectionStart;
-    const end = input.selectionEnd;
-    const oldLength = input.value.length;
-    
-    input.value = romajiToHiragana(input.value);
-    
-    const newLength = input.value.length;
-    const diff = newLength - oldLength;
-    input.setSelectionRange(start + diff, end + diff);
-});
-
-async function saveRubyEdit() {
-    if (!currentEditingRuby) return;
-    
-    const newRtText = document.getElementById('ruby-edit-rt').value.trim();
-    const kanji = document.getElementById('ruby-edit-kanji').textContent.trim();
-    
-    // Optimistic update — 只在點到的 ruby 就是整個斷詞時直接改,跨多個 ruby 的斷詞交給後續 reload
-    const visClone = currentEditingRuby.cloneNode(true);
-    const visRt = visClone.querySelector('rt');
-    if (visRt) visClone.removeChild(visRt);
-    if (visClone.textContent.trim() === kanji) {
-        let rt = currentEditingRuby.querySelector('rt');
-        if (!newRtText) {
-            if (rt) currentEditingRuby.removeChild(rt);
-        } else {
-            if (!rt) {
-                rt = document.createElement('rt');
-                currentEditingRuby.appendChild(rt);
-            }
-            rt.textContent = newRtText;
-        }
-    }
-    
-    closeRubyModal();
-    showToast('儲存修改中...', 'fa-solid fa-spinner', 1000);
-    
-    try {
-        const resp = await fetch('/api/furigana/correct', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                title: lastMediaTitle,
-                artist: lastMediaArtist,
-                orig: kanji,
-                hira: newRtText
-            })
-        });
-        
-        if (resp.ok) {
-            showToast('假名修改已同步至資料庫！', 'fa-solid fa-check', 2000);
-            setTimeout(() => {
-                reloadCurrentLyrics();
-            }, 500);
-        } else {
-            showToast('儲存失敗', 'fa-solid fa-xmark', 2000);
-        }
-    } catch (e) {
-        console.error(e);
-        showToast('儲存失敗', 'fa-solid fa-xmark', 2000);
-    }
 }
 
 // -------------------------------------------------------------

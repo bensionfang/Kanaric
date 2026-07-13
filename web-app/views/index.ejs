@@ -1,15 +1,5 @@
 <%- include('header') %>
 
-<div class="page-header animate-fade-in" style="margin-bottom: 10px;">
-    <div style="display: flex; align-items: center; gap: 20px;">
-        <div class="status-banner" style="margin-bottom: 0; padding: 6px 12px; background: transparent; border: 1px solid var(--panel-border);">
-            <div class="pulsing-dot" id="sync-dot"></div>
-            <span id="sync-status-text">正在等待系統音樂播放...</span>
-        </div>
-    </div>
-
-</div>
-
 <!-- Toast Notification -->
 <div id="toast" class="toast hidden">
     <i id="toast-icon" class="fa-solid fa-circle-info"></i>
@@ -36,9 +26,15 @@
     </div>
 </div>
 
+<!-- 歌詞時間軸微調 (每首歌獨立記憶):定位在 .main-content 右下角 -->
+<div class="offset-panel" id="offset-panel">
+    <button onclick="adjustSyncOffset(-0.1)" title="歌詞慢了"><i class="fa-solid fa-minus"></i></button>
+    <span id="offset-display" onclick="resetSyncOffset()" title="點擊歸零">0 ms</span>
+    <button onclick="adjustSyncOffset(0.1)" title="歌詞快了"><i class="fa-solid fa-plus"></i></button>
+</div>
+
 <!-- Modals -->
 <%- include('modals/lyrics-options') %>
-<%- include('modals/ruby-edit') %>
 
-<script src="/js/app.js?v=24"></script>
+<script src="/js/app.js?v=25"></script>
 <%- include('footer') %>

@@ -379,6 +379,29 @@ function injectFurigana(artist, title, lyrics) {
   });
 }
 
+// 網易雲 / 酷狗:歌詞與日文讀音提示在同一次請求裡拿到,提示由 Python 端直接寫進 DB
+function fetchCnLyrics({ title, artist, searchTitle, searchArtist, source = 'auto' }) {
+  return new Promise((resolve) => {
+    const pyProcess = spawnPy(['cnlyrics']);
+    pyProcess.stdin.write(JSON.stringify({ title, artist, searchTitle, searchArtist, source }));
+    pyProcess.stdin.end();
+
+    let output = '';
+    pyProcess.stdout.on('data', (data) => { output += data.toString('utf-8'); });
+
+    pyProcess.on('close', () => {
+      try {
+        const parsed = JSON.parse(output);
+        if (!parsed.success) return resolve(null);
+        if (source === 'all') return resolve(parsed.results || []);
+        resolve(parsed.lyrics ? { lyrics: parsed.lyrics, source: parsed.source } : null);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  });
+}
+
 function fetchFallback(title, artist, fetchAll = false) {
   return new Promise((resolve) => {
     const args = ['fallback', title, artist];
@@ -405,52 +428,28 @@ function fetchFallback(title, artist, fetchAll = false) {
   });
 }
 
-// 1.4 Get Furigana Candidates
-app.get('/api/furigana/candidates', async (req, res) => {
-  const { word } = req.query;
-  if (!word) return res.json({ candidates: [] });
-  try {
-    const resp = await fetch('https://jisho.org/api/v1/search/words?keyword=' + encodeURIComponent(word));
-    if (!resp.ok) return res.json({ candidates: [] });
-    const data = await resp.json();
-    let c = new Set();
-    if (data && data.data) {
-      data.data.forEach(item => {
-        if (item.japanese) {
-          item.japanese.forEach(j => {
-            if (j.word === word && j.reading) c.add(j.reading);
-          });
-        }
-      });
-    }
-    
-    // Add pykakasi default reading
-    const pyProcess = spawnPy(['kana', word]);
-    let out = '';
-    pyProcess.stdout.on('data', d => out += d.toString('utf-8'));
-    pyProcess.on('close', () => {
-      const kksRes = out.trim();
-      let arr = [...c];
-      if (kksRes && kksRes !== word) {
-        if (arr.includes(kksRes)) arr = arr.filter(x => x !== kksRes);
-        arr.unshift(kksRes);
+// 修正發音後,若正在播這首歌就立刻重新注音並推播
+function rebroadcastLyrics(artist, title) {
+  if (!currentMediaState || currentMediaState.title !== title || currentMediaState.artist !== artist) return;
+  db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
+    if (!err && row && row.lyrics) {
+      const injected = await injectFurigana(artist, title, row.lyrics);
+      if (global.broadcast) {
+        global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
       }
-      res.json({ candidates: arr });
-    });
-  } catch(e) {
-    res.json({ candidates: [] });
-  }
-});
+    }
+  });
+}
 
-// 1.5 Update Furigana Correction
+// 1.4 Update Furigana Correction
 app.post('/api/furigana/correct', (req, res) => {
   const { artist, title, orig, hira } = req.body;
   if (!artist || !title || !orig) return res.status(400).json({ error: 'Missing parameters' });
-  
+
   let finalHira = hira || '';
   if (finalHira) {
     const pyProcess = spawnPy(['romaji', finalHira]);
-    
+
     let out = '';
     pyProcess.stdout.on('data', (d) => out += d.toString());
     pyProcess.on('close', () => {
@@ -468,21 +467,26 @@ app.post('/api/furigana/correct', (req, res) => {
       (err) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true, hira: finalHira });
-        
-        // Re-inject and broadcast immediately if the current song is playing
-        if (currentMediaState && currentMediaState.title === title && currentMediaState.artist === artist) {
-          db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
-            if (!err && row && row.lyrics) {
-              const injected = await injectFurigana(artist, title, row.lyrics);
-              if (global.broadcast) {
-                global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
-              }
-            }
-          });
-        }
+        rebroadcastLyrics(artist, title);
       }
     );
   }
+});
+
+// 1.5 Reset Furigana Correction — 刪掉自訂讀音,回到自動判讀的結果
+app.post('/api/furigana/reset', (req, res) => {
+  const { artist, title, orig } = req.body;
+  if (!artist || !title || !orig) return res.status(400).json({ error: 'Missing parameters' });
+
+  db.run(
+    'DELETE FROM word_corrections WHERE artist = ? AND title = ? AND word = ?',
+    [artist, title, orig],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, removed: this.changes });
+      rebroadcastLyrics(artist, title);
+    }
+  );
 });
 
 // 2. Fetch lyrics (checks DB, if missing fetches from lrclib)
@@ -519,7 +523,7 @@ app.post('/api/seek', express.json(), (req, res) => {
 
 app.post('/api/media-control', express.json(), (req, res) => {
   const { action } = req.body;
-  if (!['play', 'pause', 'playpause', 'next', 'prev'].includes(action)) {
+  if (!['play', 'pause', 'playpause', 'next', 'prev', 'shuffle', 'repeat'].includes(action)) {
     return res.status(400).json({ error: 'Invalid action' });
   }
   spawnPy(['media-action', action]);
@@ -546,7 +550,7 @@ app.get('/api/lyrics/fetch', async (req, res) => {
         }
       } catch (e) {}
       
-      let preferredSource = 'Lrclib';
+      let preferredSource = 'NetEase';
       try {
         if (fs.existsSync(SETTINGS_FILE)) {
           const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
@@ -559,8 +563,24 @@ app.get('/api/lyrics/fetch', async (req, res) => {
       let plainBackup = "";
       let fallbackSearched = false;
       let finalSource = "";
-      
-      if (preferredSource !== 'Lrclib') {
+
+      // 網易/酷狗:歌詞與日文讀音提示一次抓回,注音時就不用再打一次網路
+      if (preferredSource === 'NetEase' || preferredSource === 'Kugou') {
+        const cnData = await fetchCnLyrics({
+          title, artist, searchTitle: cleanTitle, searchArtist: trueArtist, source: preferredSource
+        });
+        if (cnData && cnData.lyrics) {
+          if (/\[\d{2}:\d{2}/.test(cnData.lyrics)) {
+            bestLyric = cnData.lyrics;
+            finalSource = cnData.source;
+          } else if (!plainBackup) {
+            plainBackup = cnData.lyrics;
+            finalSource = cnData.source;
+          }
+        }
+      }
+
+      if (!bestLyric && preferredSource !== 'Lrclib') {
           const fbData = await fetchFallback(cleanTitle, qArtist);
           fallbackSearched = true;
           if (fbData && fbData.lyrics) {
@@ -683,7 +703,28 @@ app.get('/api/lyrics/options', async (req, res) => {
     const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' ' + trueArtist)}`;
     
     let valid_lyrics = [];
-    
+
+    // 網易 / 酷狗 (自家 client,不經過 syncedlyrics)
+    try {
+      const cnResults = await fetchCnLyrics({
+        title, artist, searchTitle: cleanTitle, searchArtist: trueArtist, source: 'all'
+      });
+      if (Array.isArray(cnResults)) {
+        for (const cn of cnResults) {
+          valid_lyrics.push({
+            title: qTitle,
+            artist: qArtist,
+            album: '',
+            duration: 0,
+            lyrics: autoMarkTitleLines(`[source:${cn.source}]\n${cn.lyrics}`),
+            isSynced: /\[\d{2}:\d{2}/.test(cn.lyrics),
+            provider: cn.source,
+            score: 1500
+          });
+        }
+      }
+    } catch(e) {}
+
     // Fetch from all fallback options
     try {
       const fbResults = await fetchFallback(qTitle, qArtist, true);

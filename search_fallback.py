@@ -132,9 +132,11 @@ def main():
     except:
         pass
 
-    providers = [preferred_source]
-    for p in ["NetEase", "Lrclib", "Musixmatch", "Megalobiz"]:
-        if p != preferred_source and p not in providers:
+    # syncedlyrics 只認得這幾家;Kugou / QQMusic 由我們自己的 client 處理,別塞進來白跑一輪
+    supported = ["NetEase", "Lrclib", "Musixmatch", "Megalobiz"]
+    providers = [preferred_source] if preferred_source in supported else []
+    for p in supported:
+        if p not in providers:
             providers.append(p)
     
     if return_all:

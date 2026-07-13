@@ -10,6 +10,7 @@ import asyncio
 import base64
 import argparse
 import urllib.request
+import winrt.windows.media  # 讓 MediaPlaybackAutoRepeatMode enum 可被解析
 from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
 from winrt.windows.storage.streams import DataReader
 
@@ -88,13 +89,19 @@ async def poll_media():
                 # 插值計算時間軸
                 interpolated_pos = real_pos + time_elapsed if is_playing else real_pos
                 
+                # 隨機播放 / 循環模式 (Spotify 有回報，其他播放器可能為 None)
+                shuffle = bool(playback_info.is_shuffle_active) if playback_info and playback_info.is_shuffle_active is not None else False
+                repeat_mode = int(playback_info.auto_repeat_mode) if playback_info and playback_info.auto_repeat_mode is not None else 0
+
                 state = {
                     "title": title,
                     "artist": artist,
                     "album": album,
                     "position": interpolated_pos,
                     "duration": duration_sec,
-                    "is_playing": is_playing
+                    "is_playing": is_playing,
+                    "shuffle": shuffle,
+                    "repeat": repeat_mode
                 }
                 
                 # 節省傳輸大小，只有換歌時傳送一次 Thumbnail

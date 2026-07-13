@@ -81,16 +81,48 @@
                         <span class="menu-label">優先搜尋來源</span>
                         <select id="setting-preferred-source" class="menu-select" onchange="localStorage.setItem('preferred_source', this.value); saveSettingsToServer('preferred_source', this.value)">
                             <option value="NetEase">NetEase (網易雲)</option>
+                            <option value="Kugou">Kugou (酷狗)</option>
                             <option value="Lrclib">Lrclib</option>
                             <option value="Musixmatch">Musixmatch</option>
                             <option value="QQMusic">QQ 音樂</option>
                         </select>
                     </div>
+                    <div class="menu-row">
+                        <span class="menu-label">自動搜尋備選歌詞</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-auto-lyrics-options" onchange="updateAutoLyricsOptions(this.checked)">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
                     <div class="menu-divider"></div>
-                    <button class="menu-row menu-action" onclick="openHotkeysModal()">
-                        <span class="menu-label">自訂快捷鍵…</span>
-                        <i class="fa-solid fa-chevron-right"></i>
+                    <div class="menu-sub">
+                    <button class="menu-row menu-action" id="hotkeys-toggle" onclick="toggleHotkeysSection(event)">
+                        <span class="menu-label">自訂快捷鍵</span>
+                        <i class="fa-solid fa-chevron-right hotkeys-chevron"></i>
                     </button>
+                    <div class="menu-hotkeys" id="hotkeys-section">
+                        <div class="hk-row">
+                            <span class="hk-label">歌詞快了</span>
+                            <input type="text" id="hk-advance" class="hk-input" readonly onclick="recordHotkey(this, 'hk-advance')">
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">歌詞慢了</span>
+                            <input type="text" id="hk-delay" class="hk-input" readonly onclick="recordHotkey(this, 'hk-delay')">
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">純文字上一句</span>
+                            <input type="text" id="hk-plain-prev" class="hk-input" readonly onclick="recordHotkey(this, 'hk-plain-prev')">
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">純文字下一句</span>
+                            <input type="text" id="hk-plain-next" class="hk-input" readonly onclick="recordHotkey(this, 'hk-plain-next')">
+                        </div>
+                        <div class="hk-footer">
+                            <span>點輸入框後按鍵綁定，ESC 取消</span>
+                            <button class="hk-reset" onclick="resetHotkeys()">恢復預設</button>
+                        </div>
+                    </div>
+                    </div>
                     <button class="menu-row menu-action" onclick="startTour()">
                         <span class="menu-label">使用說明</span>
                         <i class="fa-solid fa-chevron-right"></i>
