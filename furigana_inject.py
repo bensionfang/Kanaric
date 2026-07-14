@@ -36,6 +36,29 @@ def kata2hira(text):
     if not text: return ""
     return "".join(chr(ord(c) - 0x60) if 0x30a1 <= ord(c) <= 0x30f6 else c for c in text)
 
+_KANA_HEAD = re.compile(r'^[ぁ-ゟァ-ヿー]+')
+_KANA_TAIL = re.compile(r'[ぁ-ゟァ-ヿー]+$')
+
+def _keeps_okurigana(orig, candidate):
+    """
+    候選讀音必須含有原詞外露的送り仮名,否則就是對齊歪掉了,不能信。
+
+    hint 是整行羅馬字轉回來的假名,跟 fugashi 的預測做 difflib 對齊。來源只要有一個字
+    不一樣 (例如 そんな 被機器寫成 そんあ),切出來的區間就會偏移一格 ——
+    疑う 的 うたがう 會被切成 うたが。少了尾巴的 う 之後,送り仮名剝不掉,
+    split_internal_kana 反而拿詞內的 う 去切,產生空的 <rt>,漢字就完全沒有假名。
+    """
+    for pat in (_KANA_HEAD, _KANA_TAIL):
+        m = pat.search(orig)
+        if not m:
+            continue
+        okuri = kata2hira(m.group()).translate(_KANA_EQ)
+        cand = candidate.translate(_KANA_EQ)
+        ok = cand.startswith(okuri) if pat is _KANA_HEAD else cand.endswith(okuri)
+        if not ok:
+            return False
+    return True
+
 def apply_hint(words, hint):
     """
     用羅馬字來源的整行假名 (hint) 校正 fugashi 的分詞讀音。
@@ -79,6 +102,8 @@ def apply_hint(words, hint):
             continue
         if candidate.translate(_KANA_EQ) == w['hira'].translate(_KANA_EQ):
             continue  # 只是羅馬字轉換的等價差異,不動
+        if not _keeps_okurigana(w['orig'], candidate):
+            continue  # 對齊歪掉了,見 _keeps_okurigana
 
         w['hira'] = candidate
 

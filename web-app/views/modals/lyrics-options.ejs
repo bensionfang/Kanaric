@@ -1,23 +1,17 @@
-<div id="lyrics-options-modal" class="modal-overlay hidden">
-    <div class="modal-content" style="padding: 20px; position: relative;">
-        <button onclick="closeLyricsModal()" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer; transition: color 0.3s;"><i class="fa-solid fa-xmark"></i></button>
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
-            <h3 style="margin: 0;"><i class="fa-solid fa-list"></i> 取得備選歌詞</h3>
-            <button onclick="searchLyricsOptions(true)" class="nav-btn" style="padding: 4px 8px; font-size: 12px;"><i class="fa-solid fa-rotate-right"></i> 重新抓取備選歌詞</button>
-        </div>
-        <div class="modal-actions" style="display:flex; flex-direction:column; gap: 15px; margin-top: 15px;">
-            <div style="padding-top: 5px;">
-                
-                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;">
-                    <div style="display: flex; gap: 8px;">
-                        <input type="text" id="manual-title" placeholder="自訂搜尋歌名..." style="flex: 1; min-width: 0; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 6px; border-radius: 4px; font-family: inherit; font-size: 13px;">
-                        <input type="text" id="manual-artist" placeholder="自訂搜尋歌手..." style="flex: 1; min-width: 0; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 6px; border-radius: 4px; font-family: inherit; font-size: 13px;">
-                    </div>
-                    <button onclick="manualSearchLyrics()" class="nav-btn" style="width: 100%; justify-content: center; padding: 8px; font-size: 13px;"><i class="fa-solid fa-search"></i> 以自訂關鍵字搜尋</button>
-                </div>
-
-                <div id="lyrics-options-list" style="margin-top: 10px; max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;"></div>
-            </div>
-        </div>
+<!-- 備選歌詞:從播放列的按鈕往上展開的浮層 (錨點是 .lyrics-opt-wrap),不是全螢幕 modal -->
+<div id="lyrics-options-modal" class="lyrics-opt-panel">
+    <div class="lyrics-opt-head">
+        <span><i class="fa-solid fa-list"></i> 備選歌詞</span>
+        <button class="lyrics-opt-refresh" onclick="searchLyricsOptions(true)" title="重新抓取備選歌詞">
+            <i class="fa-solid fa-rotate-right"></i>
+        </button>
     </div>
+    <div class="lyrics-opt-search">
+        <input type="text" id="manual-title" placeholder="自訂歌名…">
+        <input type="text" id="manual-artist" placeholder="自訂歌手…">
+    </div>
+    <button class="lyrics-opt-search-btn" onclick="manualSearchLyrics()">
+        <i class="fa-solid fa-search"></i> 以自訂關鍵字搜尋
+    </button>
+    <div id="lyrics-options-list"></div>
 </div>

@@ -1,5 +1,5 @@
 {
-    "font_size": 32,
+    "font_size": 48,
     "font_family": "Noto Sans JP",
     "custom_css_path": "",
     "mini_mode": false,
@@ -14,5 +14,11 @@
     "hk-plain-prev": "ArrowUp",
     "hk-plain-next": "ArrowDown",
     "dynamic_island": false,
-    "island_lines": 2
+    "island_lines": 2,
+    "hk-lyrics-opt": "L",
+    "hk-ab-loop": "A",
+    "hk-reload": "R",
+    "hk-island": "D",
+    "hk-fullscreen": "F",
+    "hk-ruby-edit": "E"
 }

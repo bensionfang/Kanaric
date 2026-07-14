@@ -246,6 +246,29 @@ function startMediaMonitor() {
 
 startMediaMonitor();
 
+// 每次換頁都是整頁重載,播放列若等前端輪詢才填值就會閃一下 (--、0:00、預設封面)。
+// 直接把目前播放狀態渲染進 HTML,畫面一出來就是對的。
+app.use((req, res, next) => {
+  const m = currentMediaState || {};
+  res.locals.media = {
+    title: m.title || '',
+    artist: m.artist || '',
+    position: m.position || 0,
+    duration: m.duration || 0,
+    is_playing: !!m.is_playing,
+    thumbnail: m.thumbnail || '',
+    shuffle: !!m.shuffle,
+    repeat: m.repeat || 0
+  };
+  // 備選歌詞按鈕的狀態也一起渲染,否則會先畫成未搜尋、等前端問完 server 才變綠 (閃一下)
+  const job = optionJobs.get(jobKey(m.artist, m.title));
+  res.locals.optState = {
+    status: job ? job.status : 'idle',
+    count: job && job.status === 'done' ? job.options.length : 0
+  };
+  next();
+});
+
 // Pages
 app.get('/', (req, res) => {
   res.render('index', { activePage: 'home' });
@@ -408,52 +431,67 @@ function currentDuration(title, artist) {
 }
 
 // 網易雲 / 酷狗:歌詞與日文讀音提示在同一次請求裡拿到,提示由 Python 端直接寫進 DB
-function fetchCnLyrics({ title, artist, searchTitle, searchArtist, source = 'auto' }) {
+// python 端被外部網路卡住時 (syncedlyrics 的來源很常這樣),'close' 永遠不會來,
+// 這個 Promise 就永遠不 resolve。給每個子進程一個上限,超時就砍掉當作沒找到。
+const PY_TIMEOUT_MS = 30000;
+
+function spawnPyJson(args, { stdin = null, timeoutMs = PY_TIMEOUT_MS, onJson }) {
   return new Promise((resolve) => {
-    const pyProcess = spawnPy(['cnlyrics']);
-    const duration = currentDuration(title, artist);
-    pyProcess.stdin.write(JSON.stringify({ title, artist, searchTitle, searchArtist, source, duration }));
-    pyProcess.stdin.end();
+    const pyProcess = spawnPy(args);
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      try { pyProcess.kill(); } catch (e) {}
+      console.warn(`pytools ${args[0]} 逾時 (${timeoutMs}ms),已中止`);
+      finish(null);
+    }, timeoutMs);
+
+    if (stdin !== null) {
+      pyProcess.stdin.write(stdin);
+      pyProcess.stdin.end();
+    }
 
     let output = '';
     pyProcess.stdout.on('data', (data) => { output += data.toString('utf-8'); });
-
+    pyProcess.on('error', () => finish(null));
     pyProcess.on('close', () => {
       try {
-        const parsed = JSON.parse(output);
-        if (!parsed.success) return resolve(null);
-        if (source === 'all') return resolve(parsed.results || []);
-        resolve(parsed.lyrics ? { lyrics: parsed.lyrics, source: parsed.source } : null);
+        finish(onJson(JSON.parse(output)));
       } catch (e) {
-        resolve(null);
+        finish(null);
       }
     });
   });
 }
 
+function fetchCnLyrics({ title, artist, searchTitle, searchArtist, source = 'auto' }) {
+  const duration = currentDuration(title, artist);
+  return spawnPyJson(['cnlyrics'], {
+    stdin: JSON.stringify({ title, artist, searchTitle, searchArtist, source, duration }),
+    onJson: (parsed) => {
+      if (!parsed.success) return null;
+      if (source === 'all') return parsed.results || [];
+      return parsed.lyrics ? { lyrics: parsed.lyrics, source: parsed.source } : null;
+    }
+  });
+}
+
 function fetchFallback(title, artist, fetchAll = false) {
-  return new Promise((resolve) => {
-    const args = ['fallback', title, artist];
-    if (fetchAll) args.push('--all');
-    const pyProcess = spawnPy(args);
-    
-    let output = '';
-    pyProcess.stdout.on('data', (data) => { output += data.toString('utf-8'); });
-    
-    pyProcess.on('close', () => {
-      try {
-        const parsed = JSON.parse(output);
-        if (fetchAll && parsed.success && parsed.results) {
-            resolve(parsed.results);
-        } else if (!fetchAll && parsed.success && parsed.lyrics) {
-          resolve({ lyrics: parsed.lyrics, source: parsed.source || 'Fallback' });
-        } else {
-          resolve(null);
-        }
-      } catch (e) {
-        resolve(null);
+  const args = ['fallback', title, artist];
+  if (fetchAll) args.push('--all');
+  return spawnPyJson(args, {
+    onJson: (parsed) => {
+      if (fetchAll && parsed.success && parsed.results) return parsed.results;
+      if (!fetchAll && parsed.success && parsed.lyrics) {
+        return { lyrics: parsed.lyrics, source: parsed.source || 'Fallback' };
       }
-    });
+      return null;
+    }
   });
 }
 
@@ -710,11 +748,71 @@ app.get('/api/lyrics/fetch', async (req, res) => {
   });
 });
 
+// 備選歌詞的搜尋放在 server 端當背景工作,網頁換頁 (JS 被殺掉) 也不會中斷。
+// key = artist|||title;客戶端用 /api/lyrics/options/state 查進度,任何頁面都能接回結果。
+const optionJobs = new Map();
+const jobKey = (artist, title) => `${artist}|||${title}`;
+
+function startOptionsJob(q) {
+  const key = jobKey(q.artist, q.title);
+  const existing = optionJobs.get(key);
+  if (existing && existing.status === 'searching') return existing;   // 同一首正在搜就別重複打
+
+  const job = { status: 'searching', options: [], startedAt: Date.now() };
+  optionJobs.set(key, job);
+  if (global.broadcast) global.broadcast({ type: 'lyrics_options_searching', title: q.title, artist: q.artist });
+
+  // 外部來源 (lrclib / 網易 / 酷狗 / Python fallback) 偶爾會沒有回應,
+  // 沒有逾時的話這個工作會永遠卡在 searching,按鈕就一直轉圈
+  const OPTIONS_TIMEOUT_MS = 60000;
+  const withTimeout = Promise.race([
+    searchOptions(q),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('搜尋逾時')), OPTIONS_TIMEOUT_MS))
+  ]);
+
+  job.promise = withTimeout.then((options) => {
+    job.status = 'done';
+    job.options = options;
+    if (global.broadcast) {
+      global.broadcast({ type: 'lyrics_options_ready', title: q.title, artist: q.artist, count: options.length });
+    }
+    return options;
+  }).catch((e) => {
+    job.status = 'done';
+    job.options = [];
+    job.error = e.message;
+    if (global.broadcast) {
+      global.broadcast({ type: 'lyrics_options_ready', title: q.title, artist: q.artist, count: 0 });
+    }
+    return [];
+  });
+  return job;
+}
+
+// 查目前這首歌的搜尋狀態 (換頁後靠這支把按鈕狀態接回來)
+app.get('/api/lyrics/options/state', (req, res) => {
+  const { title, artist } = req.query;
+  const job = optionJobs.get(jobKey(artist, title));
+  if (!job) return res.json({ status: 'idle', options: [] });
+  res.json({ status: job.status, options: job.status === 'done' ? job.options : [] });
+});
+
 app.get('/api/lyrics/options', async (req, res) => {
-  const { title, artist, searchTitle, searchArtist } = req.query;
+  const { title, artist, searchTitle, searchArtist, force } = req.query;
   if (!title || !artist) return res.status(400).json({ error: 'Title and artist are required' });
-  
+
+  if (force) optionJobs.delete(jobKey(artist, title));
+  const job = startOptionsJob({ title, artist, searchTitle, searchArtist });
   try {
+    const options = await job.promise;
+    res.json({ options });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+async function searchOptions({ title, artist, searchTitle, searchArtist }) {
+  {
     const qTitle = searchTitle || title;
     const qArtist = searchArtist || artist;
     
@@ -773,11 +871,13 @@ app.get('/api/lyrics/options', async (req, res) => {
       }
     } catch(e) {}
     
-    const resp = await fetch(searchUrl);
-    if (!resp.ok) return res.json({ options: [] });
-    
-    const data = await resp.json();
-    
+    // Lrclib 掛掉/沒回應時,別把前面幾個來源已經找到的結果一起賠掉
+    let data = [];
+    try {
+      const resp = await fetch(searchUrl, { signal: AbortSignal.timeout(15000) });
+      if (resp.ok) data = await resp.json();
+    } catch (e) {}
+
     for (const t of data) {
       const best = t.syncedLyrics || t.plainLyrics;
       if (best) {
@@ -793,8 +893,22 @@ app.get('/api/lyrics/options', async (req, res) => {
       }
     }
     
+    return finalizeOptions(valid_lyrics, cleanTitle, artist, title);
+  }
+}
+
+// 現場版標記:歌名或專輯名出現這些字就當作 Live 版
+const LIVE_KEYWORDS = ['live', 'ライブ', 'ライヴ', '演唱会', '演唱會', '現場', '现场', 'concert', 'unplugged'];
+const isLiveText = (text) => LIVE_KEYWORDS.some(kw => (text || '').toLowerCase().includes(kw));
+
+// 排序 + 取前 5 筆 (原本內嵌在 route 裡)
+// originalTitle = 播放中那首歌的原始歌名 —— cleanTitle 已經把 "- Live..." 洗掉了,判斷不出現場版
+function finalizeOptions(valid_lyrics, cleanTitle, artist, originalTitle = '') {
+  {
     // Scoring logic (matching python fetcher.py)
     const penalty_keywords = ['translated', 'translation', 'romanized', '翻譯', '中文版', 'english version'];
+    // 播的是錄音室版,現場版就往後排 (Live 歌詞常多出喊話/安可,時間軸也對不上)
+    const wantLive = isLiveText(originalTitle);
     valid_lyrics.forEach(item => {
       let score = 0;
       const iTitle = item.title.toLowerCase();
@@ -812,7 +926,10 @@ app.get('/api/lyrics/options', async (req, res) => {
       
       if (penalty_keywords.some(kw => iTitle.includes(kw))) score -= 800;
       if (penalty_keywords.some(kw => item.album.toLowerCase().includes(kw))) score -= 500;
-      
+
+      // 原曲不是 Live 版,候選卻是 → 降權
+      if (!wantLive && (isLiveText(item.title) || isLiveText(item.album))) score -= 600;
+
       const lowerLyrics = item.lyrics.toLowerCase();
       if (lowerLyrics.includes('english translation') || lowerLyrics.includes('romanized') || lowerLyrics.includes('translation by')) score -= 800;
       
@@ -823,7 +940,7 @@ app.get('/api/lyrics/options', async (req, res) => {
       if (a.isSynced !== b.isSynced) return b.isSynced ? 1 : -1;
       return b.score - a.score;
     });
-    const top5 = valid_lyrics.slice(0, 5).map(x => ({
+    return valid_lyrics.slice(0, 5).map(x => ({
       title: x.title,
       artist: x.artist,
       album: x.album,
@@ -833,12 +950,8 @@ app.get('/api/lyrics/options', async (req, res) => {
       provider: x.provider,
       isSynced: x.isSynced
     }));
-    
-    res.json({ options: top5 });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
   }
-});
+}
 
 // --- Alias Management APIs ---
 app.get('/api/aliases', (req, res) => {

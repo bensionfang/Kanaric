@@ -36,6 +36,8 @@ if (app.isPackaged) {
       hotkeys_enable: false, autoscroll: true, auto_lyrics_options: false,
       'hk-advance': 'ArrowLeft', 'hk-delay': 'ArrowRight',
       'hk-plain-prev': 'ArrowUp', 'hk-plain-next': 'ArrowDown',
+      'hk-ab-loop': 'A', 'hk-ruby-edit': 'E', 'hk-lyrics-opt': 'L', 'hk-reload': 'R',
+      'hk-island': 'D', 'hk-fullscreen': 'F',
       dynamic_island: false, island_lines: 2
     }, null, 4), 'utf8');
   }
@@ -56,7 +58,10 @@ function createWindow() {
     width: 1280,
     height: 840,
     autoHideMenuBar: true,
-    icon: TRAY_ICON
+    icon: TRAY_ICON,
+    // 無標題列,系統按鈕直接疊在頁面上 (height 要跟 CSS .win-drag 一致)
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#00000000', symbolColor: '#ffffff', height: 36 }
   });
   mainWindow.loadURL(`http://localhost:${PORT}`);
 

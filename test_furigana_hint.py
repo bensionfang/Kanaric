@@ -1,0 +1,36 @@
+"""apply_hint 的最小自檢:python test_furigana_hint.py"""
+from furigana_inject import apply_hint
+
+def hira_of(words, orig):
+    return next(w['hira'] for w in words if w['orig'] == orig)
+
+# 1. 對齊歪掉時不能吃掉送り仮名 (花人局:hint 把 そんな 寫成 そんあ,整行偏移一格)
+words = [
+    {'orig': '美人局', 'hira': 'つつもたせ', 'is_space': False},
+    {'orig': 'を', 'hira': 'を', 'is_space': False},
+    {'orig': '疑う', 'hira': 'うたがう', 'is_space': False},
+    {'orig': '、', 'hira': '、', 'is_space': False},
+    {'orig': 'そんな', 'hira': 'そんな', 'is_space': False},
+    {'orig': '気', 'hira': 'き', 'is_space': False},
+]
+apply_hint(words, 'つつもたせをうたがうそんあき')
+assert hira_of(words, '疑う') == 'うたがう', hira_of(words, '疑う')  # 不是 うたが
+assert hira_of(words, '気') == 'き'
+
+# 2. hint 仍然要能修正 fugashi 挑錯的讀音 (君 くん → きみ)
+words = [
+    {'orig': '君', 'hira': 'くん', 'is_space': False},
+    {'orig': 'の', 'hira': 'の', 'is_space': False},
+    {'orig': '声', 'hira': 'こえ', 'is_space': False},
+]
+apply_hint(words, 'きみのこえ')
+assert hira_of(words, '君') == 'きみ'
+
+# 3. 帶送り仮名的詞,hint 對得上時照樣可以覆蓋
+words = [
+    {'orig': '行く', 'hira': 'ゆく', 'is_space': False},
+]
+apply_hint(words, 'いく')
+assert hira_of(words, '行く') == 'いく'
+
+print('OK')

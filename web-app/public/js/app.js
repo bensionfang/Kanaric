@@ -10,10 +10,27 @@ let currentInterpolatedPosition = 0;
 let lastServerPosition = -1;
 let lastFrameTime = performance.now();
 let isCurrentlyPlaying = false;
+let pendingSeekTarget = null;   // 剛送出 seek,等系統跳到位前先無視回報的位置
+let pendingSeekUntil = 0;
 let syncOffset = 0;
 let isUserScrolling = false;
 
+// 段落循環 (練唱):存 parsedLyrics 的 index,不是秒 —— 歌詞重畫後才有辦法把標記畫回去
+let isLoopMode = false;
+let loopA = null;
+let loopB = null;
+
 document.addEventListener('DOMContentLoaded', () => {
+    // 用 server 渲染的播放狀態開場 (footer.ejs 的 window.__initialMedia),
+    // 否則第一幀會用 0 秒 + 預設時長畫一次,換頁時看起來就是閃一下。
+    // 注意:不要在這裡設 lastMediaTitle —— 它是「換歌」的判斷依據,設了就不會去抓歌詞。
+    const m0 = window.__initialMedia;
+    if (m0 && m0.title) {
+        currentInterpolatedPosition = m0.position || 0;
+        window.currentMediaDuration = m0.duration || 0;
+        isCurrentlyPlaying = !!m0.is_playing;
+    }
+
     // Start polling the system media every 100ms for smooth updates
     setInterval(pollSystemMedia, 100);
     
@@ -23,25 +40,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const dt = (now - lastFrameTime) / 1000;
         lastFrameTime = now;
         
-        if (isCurrentlyPlaying && parsedLyrics.length > 0) {
+        // 只有播放中才推進時間，但畫面永遠要照著目前位置重繪 ——
+        // 否則暫停時進度條停在 0 (剛載入首頁)，暫停中點歌詞 seek 也不會跟著跳。
+        if (isCurrentlyPlaying) {
             currentInterpolatedPosition += dt;
-            // 隱藏的預設提前量，讓網頁版歌詞提早顯示 (補償視覺延遲，但不影響右下角調整值)
-            const WEB_APP_LYRICS_ADVANCE = 0.25; 
-            syncLyricsToTime(currentInterpolatedPosition - syncOffset + WEB_APP_LYRICS_ADVANCE);
-            updatePlaybackProgress(currentInterpolatedPosition);
         }
+        if (parsedLyrics.length > 0) {
+            // 隱藏的預設提前量，讓網頁版歌詞提早顯示 (補償視覺延遲，但不影響右下角調整值)
+            const WEB_APP_LYRICS_ADVANCE = 0.25;
+            syncLyricsToTime(currentInterpolatedPosition - syncOffset + WEB_APP_LYRICS_ADVANCE);
+        }
+        // 段落循環:唱完 B 句就跳回 A 句。pendingSeekTarget 還沒清掉代表上一次跳轉還沒到位,
+        // 這時再送一次 seek 會變成每幀狂送。
+        if (loopB !== null && isCurrentlyPlaying && pendingSeekTarget === null &&
+            currentInterpolatedPosition >= loopEndTime()) {
+            seekTo(parsedLyrics[loopA].time);
+        }
+        updatePlaybackProgress(currentInterpolatedPosition);
         requestAnimationFrame(syncLoop);
     }
     requestAnimationFrame(syncLoop);
-    
-    // Initial load and auto refresh of sidebar leaderboard
-    loadSidebarLeaderboard();
-    setInterval(loadSidebarLeaderboard, 15000);
 
     // Initialize zoom mode if persisted
     if (localStorage.getItem('zoomModeActive') === 'true') {
         document.body.classList.add('window-maximized');
     }
+
+    // 段落循環 / 編輯假名:換頁後把模式接回來 (選好的段落在 renderLyrics 時還原)
+    if (localStorage.getItem('loopMode') === 'true') toggleLoopMode();
+    else if (localStorage.getItem('rubyEditMode') === 'true') toggleRubyEditMode();
 
     // Initialize alignment if persisted
     const alignMode = localStorage.getItem('lyricsAlignMode');
@@ -54,191 +81,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-function showToast(message, iconClass = 'fa-solid fa-circle-info', duration = 3500) {
-    const toast = document.getElementById('toast');
-    const icon = document.getElementById('toast-icon');
-    const msg = document.getElementById('toast-message');
-    icon.className = iconClass;
-    msg.textContent = message;
-    toast.classList.remove('hidden');
-    setTimeout(() => toast.classList.add('hidden'), duration);
-}
-
-function reloadCurrentLyrics() {
-    if (lastMediaTitle) {
-        showToast(`重新載入: ${lastMediaTitle}`, 'fa-solid fa-rotate', 2000);
-        fetchAndParseLyrics(lastMediaTitle, lastMediaArtist);
-    } else {
-        showToast('目前沒有播放任何歌曲', 'fa-solid fa-circle-exclamation', 2000);
-    }
-}
-
-// -------------------------------------------------------------
-// Advanced Lyrics Modal
-// -------------------------------------------------------------
-// 按鈕還原成原本的清單圖示
-function resetLyricsOptBtn() {
-    const btn = document.getElementById('lyrics-opt-btn');
-    if (!btn) return;
-    btn.innerHTML = '<i class="fa-solid fa-list"></i>';
-    btn.classList.remove('active');
-    delete btn.dataset.ready;
-    btn.title = '搜尋備選歌詞';
-}
-
-// 直接在背景搜尋，完成後按鈕變綠色打勾 + 泡泡提醒；再按一次進備選歌詞視窗
-async function searchLyricsOptions(force = false, manual = false) {
-    const btn = document.getElementById('lyrics-opt-btn');
-    const bubble = document.getElementById('lyrics-opt-bubble');
-    if (btn.dataset.loading) return;
-    if (btn.dataset.ready && !force) {
-        openLyricsModal();
-        return;
-    }
-    if (!lastMediaTitle) {
-        showToast('目前沒有播放任何歌曲', 'fa-solid fa-circle-exclamation', 2000);
-        return;
-    }
-
-    bubble.classList.remove('show');
-    window._lyricsOptions = [];
-    btn.dataset.loading = '1';
-    btn.classList.add('active');
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-    try {
-        await performGetOptions(manual);
-    } finally {
-        delete btn.dataset.loading;
-    }
-
-    const count = (window._lyricsOptions || []).length;
-    if (count) {
-        btn.innerHTML = '<i class="fa-solid fa-check"></i>';
-        btn.dataset.ready = '1';
-        btn.title = '查看備選歌詞';
-    } else {
-        resetLyricsOptBtn();
-    }
-    bubble.textContent = count ? `找到 ${count} 筆備選歌詞，點此查看` : '找不到備選歌詞';
-    bubble.classList.add('show');
-    clearTimeout(window._lyricsBubbleTimer);
-    window._lyricsBubbleTimer = setTimeout(() => bubble.classList.remove('show'), 8000);
-}
-
-function openLyricsModal() {
-    const bubble = document.getElementById('lyrics-opt-bubble');
-    if (bubble) bubble.classList.remove('show');
-
-    const modal = document.getElementById('lyrics-options-modal');
-    modal.classList.remove('hidden');
-    modal.classList.add('show');
-    // Pre-fill manual search fields with current song
-    if (lastMediaTitle) {
-        const titleInput = document.getElementById('manual-title');
-        const artistInput = document.getElementById('manual-artist');
-        if (titleInput && !titleInput.value) titleInput.value = lastMediaTitle;
-        if (artistInput && !artistInput.value) artistInput.value = lastMediaArtist;
-    }
-    
-    // Only fetch if options are empty
-    if (!window._lyricsOptions || window._lyricsOptions.length === 0) {
-        performGetOptions();
-    }
-}
-
-function closeLyricsModal() {
-    const modal = document.getElementById('lyrics-options-modal');
-    modal.classList.remove('show');
-    setTimeout(() => modal.classList.add('hidden'), 300);
-}
-
-function manualSearchLyrics() {
-    searchLyricsOptions(true, true);
-}
-
-async function performGetOptions(forceManual = false) {
-    if (!lastMediaTitle) {
-        showToast('目前沒有播放任何歌曲', 'fa-solid fa-circle-exclamation', 2000);
-        return;
-    }
-    
-    let searchTitle = lastMediaTitle;
-    let searchArtist = lastMediaArtist;
-    
-    const titleInput = document.getElementById('manual-title');
-    const artistInput = document.getElementById('manual-artist');
-    if (titleInput && artistInput) {
-        if (forceManual || titleInput.value.trim() !== lastMediaTitle) searchTitle = titleInput.value.trim() || lastMediaTitle;
-        if (forceManual || artistInput.value.trim() !== lastMediaArtist) searchArtist = artistInput.value.trim() || lastMediaArtist;
-        
-        // Ensure inputs reflect what's being searched
-        titleInput.value = searchTitle;
-        artistInput.value = searchArtist;
-    }
-
-    const listEl = document.getElementById('lyrics-options-list');
-    listEl.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-spinner fa-spin"></i> 搜尋中...</div>`;
-    try {
-        const queryParams = new URLSearchParams({
-            title: lastMediaTitle,
-            artist: lastMediaArtist,
-            searchTitle: searchTitle,
-            searchArtist: searchArtist
-        });
-        const resp = await fetch(`/api/lyrics/options?${queryParams.toString()}`);
-        const data = await resp.json();
-        if (!data.options || data.options.length === 0) {
-            listEl.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-face-frown"></i> 找不到備選歌詞</div>`;
-            return;
-        }
-        listEl.innerHTML = data.options.map((opt, i) => `
-            <div style="background: var(--bg-main); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px 12px; cursor: pointer; transition: border-color 0.2s; display: flex; justify-content: space-between; align-items: center;"
-                 onmouseenter="this.style.borderColor='var(--accent-main)'" onmouseleave="this.style.borderColor='var(--panel-border)'"
-                 onclick="applyLyricsOption(${i})">
-                <div style="display: flex; width: 100%; justify-content: space-between; align-items: center;">
-                    <div style="flex: 1; min-width: 0; text-align: left;">
-                        <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.title}</div>
-                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.artist}${opt.album ? ' [' + opt.album + ']' : ''}</div>
-                    </div>
-                    <div style="display:flex; flex-direction:column; align-items:flex-end; flex-shrink: 0; margin-left: 10px;">
-                        <div style="padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${opt.isSynced ? 'background: rgba(76, 175, 80, 0.15); color: #4caf50;' : 'background: rgba(158, 158, 158, 0.15); color: #9e9e9e;'}">
-                            ${opt.isSynced ? 'LRC' : 'TXT'}
-                        </div>
-                        <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; opacity: 0.8;">${opt.provider || 'Unknown'}</div>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-        // Store options for later use
-        window._lyricsOptions = data.options;
-    } catch (e) {
-        listEl.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-triangle-exclamation"></i> 載入失敗</div>`;
-    }
-}
-
-async function applyLyricsOption(index) {
-    const opt = window._lyricsOptions && window._lyricsOptions[index];
-    if (!opt) return;
-    closeLyricsModal();
-    showToast(`套用: ${opt.title}`, 'fa-solid fa-check', 2000);
-    // Save as custom lyrics for current song
-    try {
-        const resp = await fetch('/api/lyrics/custom', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: lastMediaTitle, artist: lastMediaArtist, lyrics: opt.lyrics })
-        });
-        const data = await resp.json();
-        if (data.lyrics) {
-            parseLrcLyrics(data.lyrics);
-        } else {
-            parseLrcLyrics(opt.lyrics);
-        }
-        renderLyrics();
-    } catch (e) {
-        showToast('套用失敗', 'fa-solid fa-xmark', 2000);
-    }
-}
 
 
 
@@ -295,7 +137,6 @@ async function pollSystemMedia() {
             const mode = data.repeat || 0;
             repeatBtn.classList.toggle('active', mode !== 0);
             repeatBtn.dataset.mode = mode;
-            repeatBtn.title = mode === 1 ? '單曲循環' : (mode === 2 ? '清單循環' : '循環播放');
         }
 
         // Update interpolation state from server
@@ -303,7 +144,11 @@ async function pollSystemMedia() {
         if (data.duration !== undefined) {
             window.currentMediaDuration = data.duration;
         }
-        if (data.title) {
+        if (pendingSeekTarget !== null &&
+            (Math.abs(data.position - pendingSeekTarget) < 1.5 || performance.now() > pendingSeekUntil)) {
+            pendingSeekTarget = null;   // 系統跳到位了 (或等太久),恢復正常同步
+        }
+        if (data.title && pendingSeekTarget === null) {
             if (data.position !== lastServerPosition) {
                 const diff = data.position - currentInterpolatedPosition;
                 if (Math.abs(diff) > 1.5 || data.title !== lastMediaTitle) {
@@ -317,12 +162,19 @@ async function pollSystemMedia() {
             }
         }
         if (data.title && (data.title !== lastMediaTitle || data.artist !== lastMediaArtist)) {
+            const prevTitle = lastMediaTitle;
             lastMediaTitle = data.title;
             lastMediaArtist = data.artist;
+            // 共用工具 (lyrics-tools.js) 從這裡讀「現在在播什麼」
+            window.currentSongInfo = { title: lastMediaTitle, artist: lastMediaArtist };
 
             // 換歌 = 備選歌詞失效，按鈕回到搜尋狀態
             window._lyricsOptions = [];
             resetLyricsOptBtn();
+            restoreOptionsState();   // 這首歌若已在 server 上搜過/搜尋中,把按鈕狀態接回來
+            // 真的換歌才作廢循環段落 (行號對不上新歌詞了)。
+            // lastMediaTitle 是空的代表這是剛載入頁面的第一次回報,那份段落要留給 restoreLoopRange
+            if (prevTitle) clearLoop();
             // 清掉上一首殘留的手動捲動狀態，讓新歌恢復自動捲動
             resumeSync();
 
@@ -383,7 +235,6 @@ async function pollSystemMedia() {
                 }).catch(e => { syncOffset = 0; updateOffsetDisplay(); });
             
             fetchAndParseLyrics(data.title, data.artist);
-            loadSidebarLeaderboard();
             window._lyricsOptions = [];
             const listEl = document.getElementById('lyrics-options-list');
             if (listEl) listEl.innerHTML = '';
@@ -401,13 +252,13 @@ async function pollSystemMedia() {
             // Stopped completely
             lastMediaTitle = "";
             lastMediaArtist = "";
+            window.currentSongInfo = { title: '', artist: '' };
             window._lyricsOptions = [];
             resetLyricsOptBtn();
             setMarqueeText(document.getElementById('current-title'), "--");
             setMarqueeText(document.getElementById('current-artist'), "--");
             parsedLyrics = [];
             renderLyrics();
-            loadSidebarLeaderboard();
         }
         
         // Progress is now handled by the rAF interpolation loop
@@ -552,6 +403,8 @@ function renderLyrics() {
     
     pane.innerHTML = html;
     activeLyricIndex = -1;
+    restoreLoopRange();   // 換頁回來時把上次選好的段落接回來
+    paintLoopRange();
 }
 
 function updatePlaybackProgress(position) {
@@ -660,6 +513,16 @@ let activeHotkeys = {
     plainNext: 'ArrowDown'
 };
 
+// 右下角工具列按鈕的快捷鍵:設定 id → 按下要做的事 (預設鍵與 footer.ejs 的 defaultHkMap 一致)
+const TOOLBAR_HOTKEYS = {
+    'hk-ab-loop':    { def: 'A', run: () => toggleLoopMode() },
+    'hk-ruby-edit':  { def: 'E', run: () => toggleRubyEditMode() },
+    'hk-lyrics-opt': { def: 'L', run: () => searchLyricsOptions() },
+    'hk-reload':     { def: 'R', run: () => reloadCurrentLyrics() },
+    'hk-island':     { def: 'D', run: () => launchPyQt6() },
+    'hk-fullscreen': { def: 'F', run: () => toggleFullscreen() },
+};
+
 window.updateActiveHotkeys = function() {
     activeHotkeys.advance = localStorage.getItem('hk-advance') || 'ArrowLeft';
     activeHotkeys.delay = localStorage.getItem('hk-delay') || 'ArrowRight';
@@ -715,6 +578,14 @@ document.addEventListener('keydown', (e) => {
             if (currentLine && pane) {
                 const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
                 pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: 'smooth' });
+            }
+        }
+    } else {
+        for (const [id, hk] of Object.entries(TOOLBAR_HOTKEYS)) {
+            if (fullKey === (localStorage.getItem(id) || hk.def)) {
+                e.preventDefault();
+                hk.run();
+                break;
             }
         }
     }
@@ -784,91 +655,6 @@ function escapeHtml(text) {
     return text.replace(/[&<>"']/g, function(m) { return map[m]; });
 }
 
-// -------------------------------------------------------------
-// Sidebar Leaderboard Logic
-// -------------------------------------------------------------
-let sidebarType = 'tracks';
-let sidebarRange = 'all';
-
-async function loadSidebarLeaderboard() {
-    const listContainer = document.getElementById('sidebar-leaderboard-list');
-    if (!listContainer) return;
-
-    try {
-        const resp = await fetch(`/api/leaderboard?type=${sidebarType}&range=${sidebarRange}`);
-        if (resp.ok) {
-            const data = await resp.json();
-            if (data.length === 0) {
-                listContainer.innerHTML = `<div class="song-item-empty">此區間暫無播放紀錄</div>`;
-                return;
-            }
-
-            listContainer.innerHTML = data.map((item, index) => {
-                let displayTitle = '';
-                let displaySub = '';
-
-                if (sidebarType === 'tracks') {
-                    displayTitle = item.title;
-                    displaySub = item.artist;
-                } else if (sidebarType === 'artists') {
-                    displayTitle = item.artist;
-                    displaySub = '不重複藝人';
-                } else if (sidebarType === 'albums') {
-                    displayTitle = item.album;
-                    displaySub = item.artist;
-                }
-
-                // Make active playing song stand out on the leaderboard!
-                const isActive = sidebarType === 'tracks' && 
-                                 displayTitle === lastMediaTitle && 
-                                 displaySub === lastMediaArtist;
-
-                return `
-                    <div class="song-item ${isActive ? 'active' : ''}">
-                        <div class="song-icon">
-                            ${index + 1}
-                        </div>
-                        <div class="song-meta-text">
-                            <span class="song-item-title">${escapeHtml(displayTitle)}</span>
-                            <span class="song-item-artist">${escapeHtml(displaySub)}</span>
-                        </div>
-                        <div style="font-size: 11px; font-weight: 500; color: var(--accent-main); text-align: right; min-width: 45px;">
-                            ${item.count}次
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-    } catch (e) {
-        listContainer.innerHTML = `<div class="song-item-empty" style="color: #f87171;">載入排行失敗</div>`;
-    }
-}
-
-function changeSidebarType(type) {
-    sidebarType = type;
-    const tabs = document.querySelectorAll('#sidebar-type-tabs .mode-tab');
-    tabs.forEach(tab => {
-        if (tab.getAttribute('data-type') === type) {
-            tab.classList.add('active');
-        } else {
-            tab.classList.remove('active');
-        }
-    });
-    loadSidebarLeaderboard();
-}
-
-function changeSidebarRange(range) {
-    sidebarRange = range;
-    const tabs = document.querySelectorAll('#sidebar-range-tabs .mode-tab');
-    tabs.forEach(tab => {
-        if (tab.getAttribute('data-range') === range) {
-            tab.classList.add('active');
-        } else {
-            tab.classList.remove('active');
-        }
-    });
-    loadSidebarLeaderboard();
-}
 
 let currentEditingRuby = null;
 let isRubyEditMode = false;
@@ -878,7 +664,104 @@ window.toggleRubyEditMode = function() {
     const btn = document.getElementById('toggle-ruby-mode-btn');
     if (btn) btn.classList.toggle('active', isRubyEditMode);
     document.body.classList.toggle('ruby-edit-mode', isRubyEditMode);
+    localStorage.setItem('rubyEditMode', isRubyEditMode ? 'true' : 'false');   // 換頁後接回
+    // 跟段落循環互斥 (兩者都要吃歌詞的點擊)
+    if (isRubyEditMode && isLoopMode) toggleLoopMode();
 };
+
+// -------------------------------------------------------------
+// 段落循環 (練唱):選 A、B 兩句,唱完 B 就跳回 A
+// -------------------------------------------------------------
+window.toggleLoopMode = function() {
+    isLoopMode = !isLoopMode;
+    const btn = document.getElementById('loop-mode-btn');
+    if (btn) btn.classList.toggle('active', isLoopMode);
+    document.body.classList.toggle('loop-mode', isLoopMode);
+    localStorage.setItem('loopMode', isLoopMode ? 'true' : 'false');   // 換頁後接回
+    if (isLoopMode) {
+        // 循環模式跟編輯假名模式互斥 (兩者都要吃歌詞的點擊)
+        if (isRubyEditMode) toggleRubyEditMode();
+    } else {
+        clearLoop();
+    }
+};
+
+function clearLoop() {
+    loopA = null;
+    loopB = null;
+    localStorage.removeItem('loopRange');
+    document.querySelectorAll('.lyrics-line.loop-range').forEach(el => el.classList.remove('loop-range'));
+}
+
+// 選好的段落也要跨頁保留。存歌名一起比對 —— 行號只對得上同一首歌的同一份歌詞
+function saveLoopRange() {
+    if (loopA === null) return;
+    localStorage.setItem('loopRange', JSON.stringify({
+        title: lastMediaTitle, artist: lastMediaArtist, a: loopA, b: loopB
+    }));
+}
+
+function restoreLoopRange() {
+    if (loopA !== null || !lastMediaTitle) return;
+    try {
+        const saved = JSON.parse(localStorage.getItem('loopRange') || 'null');
+        if (!saved || saved.title !== lastMediaTitle || saved.artist !== lastMediaArtist) return;
+        if (saved.a >= parsedLyrics.length || saved.b >= parsedLyrics.length) return;
+        loopA = saved.a;
+        loopB = saved.b;
+    } catch (e) {}
+}
+
+// 循環到哪裡:B 唱完 = 下一句開頭;B 已是最後一句就唱到歌曲結束
+function loopEndTime() {
+    const next = parsedLyrics[loopB + 1];
+    if (next) return next.time;
+    return window.currentMediaDuration > 0 ? window.currentMediaDuration : songDurationSeconds;
+}
+
+function pickLoopLine(line) {
+    const index = parseInt(line.id.replace('lyric-line-', ''), 10);
+    if (isNaN(index)) return;
+
+    if (loopA === null || loopB !== null) {
+        // 第一次點,或已經選好一組要重選
+        clearLoop();
+        loopA = index;
+    } else {
+        loopB = index;   // 再點同一句 = 單句循環
+        if (loopB < loopA) [loopA, loopB] = [loopB, loopA];   // 由下往上點也算數
+        saveLoopRange();
+        seekTo(parsedLyrics[loopA].time);
+        showToast(loopA === loopB
+            ? `循環第 ${loopA + 1} 句`
+            : `循環第 ${loopA + 1} – ${loopB + 1} 句`, 'fa-solid fa-bookmark');
+    }
+    paintLoopRange();
+}
+
+// 歌詞重畫 (換假名、重新載入) 後 DOM 是全新的,標記要重上
+function paintLoopRange() {
+    if (loopA === null) return;
+    const end = loopB === null ? loopA : loopB;
+    for (let i = loopA; i <= end; i++) {
+        const el = document.getElementById('lyric-line-' + i);
+        if (el) el.classList.add('loop-range');
+    }
+}
+
+// 跳到指定秒數:先在本地跳好,不等系統回報 —— 暫停時系統回報位置很慢甚至不回報
+function seekTo(sec) {
+    currentInterpolatedPosition = sec;
+    updatePlaybackProgress(sec);
+    // 在系統真的跳到位之前,別讓 pollSystemMedia 用舊位置把我們拉回去
+    pendingSeekTarget = sec;
+    pendingSeekUntil = performance.now() + 3000;
+    fetch('/api/seek', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position: sec })
+    });
+}
 
 document.getElementById('lyrics-scroll').addEventListener('click', (e) => {
     if (isRubyEditMode) {
@@ -887,18 +770,17 @@ document.getElementById('lyrics-scroll').addEventListener('click', (e) => {
         return;
     }
 
-    // Seek mode
     const line = e.target.closest('.lyrics-line');
-    if (line) {
-        const timeSec = line.getAttribute('data-time');
-        if (timeSec) {
-            fetch('/api/seek', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ position: parseFloat(timeSec) })
-            });
-        }
+    if (!line) return;
+
+    if (isLoopMode) {
+        pickLoopLine(line);
+        return;   // 循環模式下點歌詞是選 A/B,不是 seek
     }
+
+    // Seek mode
+    const timeSec = line.getAttribute('data-time');
+    if (timeSec) seekTo(parseFloat(timeSec));
 });
 
 // 就地編輯假名:直接把 <rt> 變成可編輯,不開視窗

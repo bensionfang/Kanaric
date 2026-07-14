@@ -1,37 +1,56 @@
             </div>
         </main>
 
+        <%
+            // 播放列的初始值由 server 直接渲染 (res.locals.media),換頁時才不會先閃一下 --/0:00
+            const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+            const pct = media.duration > 0 ? Math.min(100, media.position / media.duration * 100) : 0;
+        %>
         <footer class="player-bar" id="player-bar">
             <div class="player-left">
-                <img src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=300&auto=format&fit=crop" id="album-cover" alt="Cover" class="player-cover">
+                <img src="<%= media.thumbnail ? 'data:image/jpeg;base64,' + media.thumbnail : '/img/cover-placeholder.svg' %>" id="album-cover" alt="Cover" class="player-cover">
                 <div class="player-info">
-                    <div class="current-title" id="current-title">--</div>
-                    <div class="current-artist" id="current-artist">--</div>
+                    <div class="current-title" id="current-title"><%= media.title || '--' %></div>
+                    <div class="current-artist" id="current-artist"><%= media.title ? (media.artist || 'Unknown Artist') : '--' %></div>
                 </div>
             </div>
             <div class="player-center">
                 <div class="player-controls">
-                    <button class="media-btn toggle-btn" id="shuffle-btn" onclick="mediaAction('shuffle')" title="隨機播放"><i class="fa-solid fa-shuffle"></i></button>
+                    <button class="media-btn toggle-btn <%= media.shuffle ? 'active' : '' %>" id="shuffle-btn" onclick="mediaAction('shuffle')"><i class="fa-solid fa-shuffle"></i></button>
                     <button class="media-btn" onclick="mediaAction('prev')"><i class="fa-solid fa-backward-step"></i></button>
-                    <button class="media-btn play-pause-btn" onclick="mediaAction('playpause')"><i class="fa-solid fa-play" id="play-pause-icon"></i></button>
+                    <button class="media-btn play-pause-btn" onclick="mediaAction('playpause')"><i class="fa-solid <%= media.is_playing ? 'fa-pause' : 'fa-play' %>" id="play-pause-icon"></i></button>
                     <button class="media-btn" onclick="mediaAction('next')"><i class="fa-solid fa-forward-step"></i></button>
-                    <button class="media-btn toggle-btn" id="repeat-btn" onclick="mediaAction('repeat')" title="循環播放"><i class="fa-solid fa-repeat" id="repeat-icon"></i></button>
+                    <button class="media-btn toggle-btn <%= media.repeat ? 'active' : '' %>" id="repeat-btn" data-mode="<%= media.repeat %>" onclick="mediaAction('repeat')"><i class="fa-solid fa-repeat" id="repeat-icon"></i></button>
                 </div>
                 <div class="progress-container">
-                    <span class="time-label" id="current-time">0:00</span>
+                    <span class="time-label" id="current-time"><%= fmt(media.position) %></span>
                     <div class="slider-wrapper">
-                        <input type="range" id="progress-slider" min="0" max="100" value="0">
-                        <div class="progress-bar-fill" id="progress-fill"></div>
+                        <input type="range" id="progress-slider" min="0" max="100" value="<%= pct %>">
+                        <div class="progress-bar-fill" id="progress-fill" style="width: <%= pct %>%"></div>
                         <div class="seek-tooltip" id="seek-tooltip"></div>
                     </div>
-                    <span class="time-label" id="total-time">0:00</span>
+                    <span class="time-label" id="total-time"><%= fmt(media.duration) %></span>
                 </div>
             </div>
             <div class="player-right">
+                <button id="loop-mode-btn" class="ctrl-btn" onclick="toggleLoopMode()" title="段落循環"><i class="fa-solid fa-bookmark"></i></button>
                 <button id="toggle-ruby-mode-btn" class="ctrl-btn" onclick="toggleRubyEditMode()" title="編輯假名模式"><i class="fa-solid fa-pen"></i></button>
                 <div class="lyrics-opt-wrap">
-                    <button id="lyrics-opt-btn" class="ctrl-btn" onclick="searchLyricsOptions()" title="搜尋備選歌詞"><i class="fa-solid fa-list"></i></button>
+                    <%
+                        // 備選歌詞鈕的初始樣子也由 server 決定 (搜尋中 = 轉圈,已搜到 = 綠色打勾),不然會閃一下
+                        const optSearching = optState.status === 'searching';
+                        const optReady = optState.status === 'done' && optState.count > 0;
+                    %>
+                    <button id="lyrics-opt-btn"
+                            class="ctrl-btn <%= (optSearching || optReady) ? 'active' : '' %>"
+                            <%= optSearching ? 'data-loading="1"' : '' %>
+                            <%= optReady ? 'data-ready="1"' : '' %>
+                            onclick="searchLyricsOptions()"
+                            title="<%= optReady ? '查看備選歌詞' : '搜尋備選歌詞' %>">
+                        <i class="fa-solid <%= optSearching ? 'fa-spinner fa-spin' : (optReady ? 'fa-check' : 'fa-list') %>"></i>
+                    </button>
                     <div id="lyrics-opt-bubble" class="lyrics-opt-bubble" onclick="openLyricsModal()"></div>
+                    <%- include('modals/lyrics-options') %>
                 </div>
                 <button class="ctrl-btn" onclick="reloadCurrentLyrics()" title="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
                 <button id="desktop-toggle-btn" class="ctrl-btn" onclick="launchPyQt6()" title="桌面靈動島">
@@ -45,17 +64,42 @@
         </footer>
     </div>
 
+    <!-- 吐司:每頁都要有 (工具列在每頁都能用;備選歌詞浮層掛在播放列的按鈕上) -->
+    <div id="toast" class="toast hidden">
+        <i id="toast-icon" class="fa-solid fa-circle-info"></i>
+        <span id="toast-message"></span>
+    </div>
+
     <script>
+        // server 渲染的播放狀態:給 app.js 當起始值 (不然它會先用 0 秒/預設 3:00 畫一次,換頁就閃)
+        window.__initialMedia = <%- JSON.stringify(media) %>;
+        window.currentSongInfo = { title: window.__initialMedia.title, artist: window.__initialMedia.artist };
+
         function toggleSettingsMenu(e) {
             if (e) e.stopPropagation();
             const menu = document.getElementById('settings-menu');
-            if (menu) menu.classList.toggle('show');
+            if (!menu) return;
+            if (menu.classList.contains('show')) {
+                closeSettingsMenu();
+            } else {
+                menu.classList.add('show');
+            }
+        }
+
+        // 收設定選單時,飛出去的快捷鍵子選單也要一起收,否則下次打開它還開著
+        function closeSettingsMenu() {
+            const menu = document.getElementById('settings-menu');
+            if (menu) menu.classList.remove('show');
+            const sec = document.getElementById('hotkeys-section');
+            if (sec) sec.classList.remove('show');
+            const btn = document.getElementById('hotkeys-toggle');
+            if (btn) btn.classList.remove('open');
         }
 
         document.addEventListener('click', (e) => {
             const menu = document.getElementById('settings-menu');
             if (menu && menu.classList.contains('show') && !menu.contains(e.target)) {
-                menu.classList.remove('show');
+                closeSettingsMenu();
             }
         });
 
@@ -72,10 +116,11 @@
         // ── 使用說明:引導式導覽 ──
         const tourSteps = [
             { page: '/',       el: '.nav-menu',      title: '側欄導覽',   text: '這裡可以切換頁面：懸浮歌詞、統計數據、排行榜、歌詞編輯器。滑鼠移到圖示上會顯示名稱。' },
-            { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '所有設定都在這裡：主題外觀、日文假名、文字大小、歌詞對齊、快捷鍵等。' },
+            { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '所有設定都在這裡：日文假名、文字大小、歌詞對齊、優先搜尋來源、快捷鍵等。' },
             { page: '/',       el: '#lyrics-scroll', title: '歌詞區',     text: '歌詞會隨播放自動同步捲動，漢字上方標示假名注音。點任一句歌詞可以直接跳轉到該時間點。' },
             { page: '/',       el: '.player-center', title: '播放控制',   text: '控制播放/暫停、上下一首，拖曳進度條可跳轉。' },
-            { page: '/',       el: '.player-right',  title: '工具列',     text: '由左至右：編輯假名、取得備選歌詞、重新載入歌詞、桌面靈動島、放大模式。接下來三個按鈕值得細講。' },
+            { page: '/',       el: '.player-right',  title: '工具列',     text: '由左至右：段落循環、編輯假名、取得備選歌詞、重新載入歌詞、桌面靈動島、放大模式。每顆都可以在設定選單裡自訂快捷鍵。接下來幾顆值得細講。' },
+            { page: '/',       el: '#loop-mode-btn', title: '段落循環', text: '想反覆練唱某一段就按這顆書籤。進入循環模式後，點歌詞選出起點那一句，再點一句當終點，就會立刻跳到起點開始無限循環——唱完終點那一句會自動跳回起點。同一句連點兩次就是單句循環。選好的範圍會用綠色底標示出來。再按一次書籤（或快捷鍵，預設 A）結束循環。' },
             { page: '/',       el: '#toggle-ruby-mode-btn', title: '編輯假名', text: '假名偶爾會標錯（人名、罕見讀音）。按下這顆筆進入編輯模式，點任一個漢字，它的假名就地變成可打字的欄位——打羅馬拼音會自動轉成假名。Enter 儲存、Esc 取消、雙擊該字則回復成自動判讀的讀音。修改只套用在這首歌。' },
             { page: '/',       el: '#lyrics-opt-btn', title: '備選歌詞',  text: '歌詞抓錯或時間軸不對時按這裡。它會直接在背景搜尋各個來源（按鈕轉圈中），找到後變成綠色打勾並跳出提醒，點打勾即可挑選要套用的版本。想讓它每次換歌都自動搜，到設定選單打開「自動搜尋備選歌詞」。' },
             { page: '/',       el: '#desktop-toggle-btn', title: '桌面靈動島', text: '開啟一個永遠置頂的懸浮歌詞條，離開瀏覽器也看得到歌詞，適合一邊工作一邊聽歌。再按一次關閉。顯示行數可以在設定選單調整。' },
@@ -93,8 +138,7 @@
         let tourNoSongs = false; // 資料庫沒有任何快取歌曲時,編輯器的步驟要換一套說法
 
         function startTour() {
-            const menu = document.getElementById('settings-menu');
-            if (menu) menu.classList.remove('show');
+            closeSettingsMenu();
             if (!document.getElementById('lyrics-scroll')) {
                 location.href = '/?tour=1';
                 return;
@@ -312,30 +356,6 @@
             saveSettingsToServer('font_size', num);
         }
 
-        function changeTheme(themeValue, btn) {
-            localStorage.setItem('theme', themeValue);
-            applyTheme(themeValue);
-            
-            if (btn) {
-                const group = btn.parentElement;
-                group.querySelectorAll('.segment-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-            } else {
-                document.querySelectorAll('#theme-segmented .segment-btn').forEach(b => {
-                    if (b.dataset.theme === themeValue) b.classList.add('active');
-                    else b.classList.remove('active');
-                });
-            }
-        }
-
-        function applyTheme(theme) {
-            if (theme === 'light' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches)) {
-                document.documentElement.classList.add('light-mode');
-            } else {
-                document.documentElement.classList.remove('light-mode');
-            }
-        }
-        
         function changeTextAlign(alignValue, btn) {
             localStorage.setItem('lyricsAlignMode', alignValue);
             const pane = document.getElementById('lyrics-scroll');
@@ -351,15 +371,14 @@
             }
         }
         
-        window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', e => {
-            const currentTheme = localStorage.getItem('theme') || 'system';
-            if (currentTheme === 'system') {
-                applyTheme('system');
-            }
-        });
-        
         // Hotkey logic
-        const defaultHkMap = { 'hk-advance': 'ArrowLeft', 'hk-delay': 'ArrowRight', 'hk-plain-prev': 'ArrowUp', 'hk-plain-next': 'ArrowDown' };
+        const defaultHkMap = {
+            'hk-advance': 'ArrowLeft', 'hk-delay': 'ArrowRight',
+            'hk-plain-prev': 'ArrowUp', 'hk-plain-next': 'ArrowDown',
+            // 右下角工具列 (預設鍵與 app.js 的 TOOLBAR_HOTKEYS 一致)
+            'hk-ab-loop': 'A', 'hk-ruby-edit': 'E', 'hk-lyrics-opt': 'L', 'hk-reload': 'R',
+            'hk-island': 'D', 'hk-fullscreen': 'F'
+        };
         let activeHotkeyInput = null;
 
         function resetHotkeys() {
@@ -370,6 +389,12 @@
                 saveSettingsToServer(id, defaultHkMap[id]);
             });
             if (window.updateActiveHotkeys) window.updateActiveHotkeys();
+            hkToast('快捷鍵已恢復預設');
+        }
+
+        // showToast 只定義在首頁的 app.js,其他頁沒有
+        function hkToast(msg) {
+            if (typeof showToast === 'function') showToast(msg, 'fa-solid fa-keyboard');
         }
 
         function recordHotkey(inputEl, settingKey) {
@@ -398,6 +423,8 @@
                     inputEl.value = prefix + keyName;
                     localStorage.setItem(settingKey, inputEl.value);
                     saveSettingsToServer(settingKey, inputEl.value);
+                    const label = inputEl.closest('.hk-row')?.querySelector('.hk-label')?.textContent || '快捷鍵';
+                    hkToast(`${label} 已設為 ${inputEl.value}`);
                 }
                 activeHotkeyInput = null;
                 window.removeEventListener('keydown', handler, true);
@@ -417,12 +444,6 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            const savedTheme = localStorage.getItem('theme') || 'system';
-            document.querySelectorAll('#theme-segmented .segment-btn').forEach(b => {
-                if (b.dataset.theme === savedTheme) b.classList.add('active');
-                else b.classList.remove('active');
-            });
-            
             const savedAlign = localStorage.getItem('lyricsAlignMode') || 'center';
             document.querySelectorAll('#align-segmented .segment-btn').forEach(b => {
                 if (b.dataset.align === savedAlign) b.classList.add('active');
@@ -524,11 +545,24 @@
                 } catch (e) {}
                 setTimeout(() => { if (toggle) toggle.disabled = false; }, 1000);
             };
-            // 首頁專屬功能:點了帶回首頁使用
-            window.toggleRubyEditMode = window.openLyricsModal = window.searchLyricsOptions = window.reloadCurrentLyrics = window.toggleFullscreen = () => { location.href = '/'; };
+            // 需要歌詞面板才有意義的功能:點了帶回首頁
+            // (備選歌詞、重新載入歌詞、吐司來自 lyrics-tools.js,每頁都能直接用)
+            window.toggleRubyEditMode = window.toggleLoopMode = () => { location.href = '/'; };
+
+            // 這兩個模式是跨頁保留的 (app.js 存在 localStorage),按鈕在其他頁也要亮著
+            const modeBtns = [['loopMode', 'loop-mode-btn'], ['rubyEditMode', 'toggle-ruby-mode-btn']];
+            modeBtns.forEach(([key, id]) => {
+                const btn = document.getElementById(id);
+                if (btn) btn.classList.toggle('active', localStorage.getItem(key) === 'true');
+            });
+            // 放大模式:回首頁時直接進入 (app.js 載入時會讀這個旗標)
+            window.toggleFullscreen = () => {
+                localStorage.setItem('zoomModeActive', 'true');
+                location.href = '/';
+            };
 
             const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-            let barTitle = null;
+            let barTitle = window.__initialMedia.title || '';   // server 已經渲染好了,別再重寫一次同樣的內容
             async function syncPlayerBar() {
                 try {
                     const r = await fetch('/api/current-media', { cache: 'no-store' });
@@ -536,11 +570,28 @@
                     const d = await r.json();
                     const ppIcon = document.getElementById('play-pause-icon');
                     if (ppIcon) ppIcon.className = 'fa-solid ' + (d.is_playing ? 'fa-pause' : 'fa-play');
+
+                    // 隨機播放 / 清單循環的亮燈 (首頁由 app.js 處理,其他頁靠這裡)
+                    const shuffleBtn = document.getElementById('shuffle-btn');
+                    if (shuffleBtn) shuffleBtn.classList.toggle('active', !!d.shuffle);
+                    const repeatBtn = document.getElementById('repeat-btn');
+                    if (repeatBtn) {
+                        const mode = d.repeat || 0;
+                        repeatBtn.classList.toggle('active', mode !== 0);
+                        repeatBtn.dataset.mode = mode;
+                    }
+
+                    // lyrics-tools.js (備選歌詞 / 重新載入) 從這裡讀現在在播什麼
+                    window.currentSongInfo = { title: d.title || '', artist: d.artist || '' };
                     if (d.title !== barTitle) {
                         barTitle = d.title || '';
                         setMarqueeText(document.getElementById('current-title'), d.title || '--');
                         setMarqueeText(document.getElementById('current-artist'), d.title ? (d.artist || 'Unknown Artist') : '--');
                         if (d.thumbnail) document.getElementById('album-cover').src = 'data:image/jpeg;base64,' + d.thumbnail;
+                        // 換歌 = 上一首的備選歌詞失效;新歌若在 server 上搜過/搜尋中,把狀態接回來
+                        window._lyricsOptions = [];
+                        resetLyricsOptBtn();
+                        restoreOptionsState();
                     }
                     if (d.title && d.duration > 0) {
                         const pct = Math.min(100, d.position / d.duration * 100);
@@ -553,6 +604,10 @@
             }
             syncPlayerBar();
             setInterval(syncPlayerBar, 1000);
+            // 播放列的歌名由 server 渲染,上面的「換歌」分支不會在載入時觸發,
+            // 所以備選歌詞的按鈕狀態 (綠色打勾/搜尋中) 要自己接回來。
+            // lyrics-tools.js 是 defer 載入的,這支行內 script 跑的時候它還不存在 → 等 DOMContentLoaded
+            document.addEventListener('DOMContentLoaded', () => restoreOptionsState());
             fetch('/api/desktop-status').then(r => r.json()).then(d => {
                 const t = document.getElementById('desktop-toggle-btn');
                 if (t) t.classList.toggle('active', d.isRunning);

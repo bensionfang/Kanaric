@@ -1,11 +1,5 @@
 <%- include('header') %>
 
-<!-- Toast Notification -->
-<div id="toast" class="toast hidden">
-    <i id="toast-icon" class="fa-solid fa-circle-info"></i>
-    <span id="toast-message"></span>
-</div>
-
 <!-- ================= 網頁版即時監控 ================= -->
 <div id="web-mode-sec" class="mode-section animate-fade-in" style="display: flex; flex-direction: column; flex: 1; height: 100%; min-height: 0;">
     <!-- 滾動歌詞面板 -->
@@ -33,8 +27,5 @@
     <button onclick="adjustSyncOffset(0.1)" title="歌詞快了"><i class="fa-solid fa-plus"></i></button>
 </div>
 
-<!-- Modals -->
-<%- include('modals/lyrics-options') %>
-
-<script src="/js/app.js?v=25"></script>
+<script src="/js/app.js?v=38"></script>
 <%- include('footer') %>

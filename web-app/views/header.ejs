@@ -11,15 +11,13 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Style -->
-    <link rel="stylesheet" href="/css/style.css?v=31">
+    <link rel="stylesheet" href="/css/style.css?v=55">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 各頁共用:吐司 + 備選歌詞 + 重新載入歌詞 -->
+    <script src="/js/lyrics-tools.js?v=8" defer></script>
     <script>
         (function() {
-            const theme = localStorage.getItem('theme') || 'system';
-            if (theme === 'light' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches)) {
-                document.documentElement.classList.add('light-mode');
-            }
             const fs = localStorage.getItem('fontsize');
             if (fs) {
                 document.documentElement.style.setProperty('--lyrics-fs', fs + 'px');
@@ -31,6 +29,8 @@
     </script>
 </head>
 <body>
+    <!-- 無邊框視窗的拖曳區 -->
+    <div class="win-drag"></div>
     <div class="app-container">
         <!-- Sidebar Navigation -->
         <aside class="sidebar collapsed" id="app-sidebar">
@@ -41,17 +41,16 @@
                 <!-- Settings Dropdown Menu -->
                 <div id="settings-menu" class="settings-menu">
                     <div class="menu-row">
-                        <span class="menu-label">整體外觀</span>
-                        <div class="segmented-control" id="theme-segmented">
-                            <button class="segment-btn active" data-theme="system" onclick="changeTheme('system', this)">系統</button>
-                            <button class="segment-btn" data-theme="light" onclick="changeTheme('light', this)">淺色</button>
-                            <button class="segment-btn" data-theme="dark" onclick="changeTheme('dark', this)">深色</button>
-                        </div>
-                    </div>
-                    <div class="menu-row">
                         <span class="menu-label">顯示日文假名</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="setting-furigana" onchange="updateFuriganaSetting(this.checked)" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="menu-row">
+                        <span class="menu-label">自動搜尋備選歌詞</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-auto-lyrics-options" onchange="updateAutoLyricsOptions(this.checked)">
                             <span class="slider round"></span>
                         </label>
                     </div>
@@ -87,13 +86,6 @@
                             <option value="QQMusic">QQ 音樂</option>
                         </select>
                     </div>
-                    <div class="menu-row">
-                        <span class="menu-label">自動搜尋備選歌詞</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="setting-auto-lyrics-options" onchange="updateAutoLyricsOptions(this.checked)">
-                            <span class="slider round"></span>
-                        </label>
-                    </div>
                     <div class="menu-divider"></div>
                     <div class="menu-sub">
                     <button class="menu-row menu-action" id="hotkeys-toggle" onclick="toggleHotkeysSection(event)">
@@ -117,6 +109,30 @@
                             <span class="hk-label">純文字下一句</span>
                             <input type="text" id="hk-plain-next" class="hk-input" readonly onclick="recordHotkey(this, 'hk-plain-next')">
                         </div>
+                        <div class="hk-row">
+                            <span class="hk-label">段落循環</span>
+                            <input type="text" id="hk-ab-loop" class="hk-input" readonly onclick="recordHotkey(this, 'hk-ab-loop')">
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">編輯假名模式</span>
+                            <input type="text" id="hk-ruby-edit" class="hk-input" readonly onclick="recordHotkey(this, 'hk-ruby-edit')">
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">搜尋備選歌詞</span>
+                            <input type="text" id="hk-lyrics-opt" class="hk-input" readonly onclick="recordHotkey(this, 'hk-lyrics-opt')">
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">重新載入歌詞</span>
+                            <input type="text" id="hk-reload" class="hk-input" readonly onclick="recordHotkey(this, 'hk-reload')">
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">桌面靈動島</span>
+                            <input type="text" id="hk-island" class="hk-input" readonly onclick="recordHotkey(this, 'hk-island')">
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">放大模式</span>
+                            <input type="text" id="hk-fullscreen" class="hk-input" readonly onclick="recordHotkey(this, 'hk-fullscreen')">
+                        </div>
                         <div class="hk-footer">
                             <span>點輸入框後按鍵綁定，ESC 取消</span>
                             <button class="hk-reset" onclick="resetHotkeys()">恢復預設</button>
@@ -133,7 +149,7 @@
             <nav class="nav-menu">
                 <a href="/" class="nav-item <%= activePage === 'home' ? 'active' : '' %>">
                     <i class="fa-solid fa-music"></i>
-                    <span>懸浮歌詞</span>
+                    <span>歌詞</span>
                 </a>
                 <a href="/stats" class="nav-item <%= activePage === 'stats' ? 'active' : '' %>">
                     <i class="fa-solid fa-chart-simple"></i>
