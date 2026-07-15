@@ -8,14 +8,32 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const net = require('net');
 const { spawn } = require('child_process');
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
-const PORT = process.env.PORT || 3000;
+let PORT = Number(process.env.PORT) || 3000;
 const DEV_ROOT = path.join(__dirname, '..');
+
+// 找可用 port:優先用偏好值 (3000),被占用就讓 OS 指派一個空閒的,
+// 這樣別人電腦上就算 3000 被別的程式占著也能正常開起來。
+function findFreePort(preferred) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once('error', () => {
+      // ponytail: close→listen 之間有極小 TOCTOU 窗口,單機桌面 app 可忽略
+      const s2 = net.createServer();
+      s2.listen(0, '127.0.0.1', () => {
+        const p = s2.address().port;
+        s2.close(() => resolve(p));
+      });
+    });
+    srv.listen(preferred, '127.0.0.1', () => srv.close(() => resolve(preferred)));
+  });
+}
 
 // --- 路徑注入 (必須在 require('./server.js') 之前) ---
 if (app.isPackaged) {
@@ -86,7 +104,8 @@ function launchIsland() {
     console.warn('DynamicIslandUI.exe not found, skip:', exe);
     return;
   }
-  islandProc = spawn(exe, [], { cwd: path.dirname(exe), stdio: 'ignore' });
+  // 把實際使用的 port 傳給靈動島 (它用來連 WebSocket 與呼叫 API)
+  islandProc = spawn(exe, [String(PORT)], { cwd: path.dirname(exe), stdio: 'ignore' });
   // 寫入 app.pid,讓網頁上的「啟動/關閉靈動島」按鈕能感知並控制這個進程
   try {
     fs.writeFileSync(path.join(process.env.DATA_DIR || DEV_ROOT, 'app.pid'), String(islandProc.pid));
@@ -101,7 +120,10 @@ function showWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // 先確定實際 port,再帶起 server (server.js 讀 process.env.PORT)
+  PORT = await findFreePort(PORT);
+  process.env.PORT = String(PORT);
   require('./server.js'); // 帶起 Express + WebSocket + media monitor
 
   tray = new Tray(TRAY_ICON);

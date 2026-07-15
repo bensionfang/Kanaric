@@ -39,6 +39,15 @@ namespace DynamicIslandUI
         private double _syncOffset = 0;
         private CancellationTokenSource _pauseCts;
 
+        // 伺服器 port 由 Electron 啟動時以第一個命令列參數傳入 (3000 被占用時會換);獨立執行則預設 3000
+        private static readonly int ServerPort = ParseServerPort();
+        private static int ParseServerPort()
+        {
+            var args = Environment.GetCommandLineArgs();
+            if (args.Length > 1 && int.TryParse(args[1], out int p) && p > 0 && p < 65536) return p;
+            return 3000;
+        }
+
         private class MediaStateUpdate
         {
             public bool IsPlaying;
@@ -223,7 +232,7 @@ namespace DynamicIslandUI
                     _webSocket = new ClientWebSocket();
                     Application.Current.Dispatcher.Invoke(() => SetFuriganaText(LyricLine1, "連線伺服器中...", 14, Brushes.White));
                     
-                    await _webSocket.ConnectAsync(new Uri("ws://localhost:3000"), CancellationToken.None);
+                    await _webSocket.ConnectAsync(new Uri($"ws://localhost:{ServerPort}"), CancellationToken.None);
                     Application.Current.Dispatcher.Invoke(() => SetFuriganaText(LyricLine1, "已連線", 14, Brushes.White));
 
                     var buffer = new byte[1024 * 32];
@@ -351,7 +360,7 @@ namespace DynamicIslandUI
             try
             {
                 using HttpClient client = new HttpClient();
-                string url = $"http://localhost:3000/api/lyrics/offset?title={Uri.EscapeDataString(title)}&artist={Uri.EscapeDataString(artist)}";
+                string url = $"http://localhost:{ServerPort}/api/lyrics/offset?title={Uri.EscapeDataString(title)}&artist={Uri.EscapeDataString(artist)}";
                 string response = await client.GetStringAsync(url);
                 using JsonDocument doc = JsonDocument.Parse(response);
                 if (doc.RootElement.TryGetProperty("offset", out var offsetElem))
@@ -371,7 +380,7 @@ namespace DynamicIslandUI
         {
             try
             {
-                string url = $"http://localhost:3000/api/lyrics/raw?title={Uri.EscapeDataString(title)}&artist={Uri.EscapeDataString(artist)}";
+                string url = $"http://localhost:{ServerPort}/api/lyrics/raw?title={Uri.EscapeDataString(title)}&artist={Uri.EscapeDataString(artist)}";
                 string response = await client.GetStringAsync(url);
                 using JsonDocument doc = JsonDocument.Parse(response);
                 if (doc.RootElement.TryGetProperty("lyrics", out JsonElement lyricsElement))
