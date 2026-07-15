@@ -169,8 +169,9 @@ async function pollSystemMedia() {
             window.currentSongInfo = { title: lastMediaTitle, artist: lastMediaArtist };
 
             // 換歌 = 備選歌詞失效，按鈕回到搜尋狀態
+            // 但首次載入 (prevTitle 空) 不重置:SSR 已給正確狀態,重置會閃一下綠勾
             window._lyricsOptions = [];
-            resetLyricsOptBtn();
+            if (prevTitle) resetLyricsOptBtn();
             restoreOptionsState();   // 這首歌若已在 server 上搜過/搜尋中,把按鈕狀態接回來
             // 真的換歌才作廢循環段落 (行號對不上新歌詞了)。
             // lastMediaTitle 是空的代表這是剛載入頁面的第一次回報,那份段落要留給 restoreLoopRange

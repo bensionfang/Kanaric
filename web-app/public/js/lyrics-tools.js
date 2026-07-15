@@ -187,19 +187,41 @@ function openLyricsModal() {
     }
 }
 
-// 清單列的歌名太長會被「…」截掉,滑鼠移上去就來回滾動,把全名看完。
-// 作法跟播放列的 setMarqueeText 一樣:量溢出量 → 設 CSS 變數 → 加 class 跑動畫。
+// 滑鼠進到某組備選歌詞的外框 (.opt-row) 內,該列過長的歌名/歌手就捲一輪
+// (跟播放列同款:複製一份接尾巴、尾接頭無縫、不來回,移開也捲完才停回頭)。清單重畫不自動捲。
 document.addEventListener('mouseover', (e) => {
-    const el = e.target.closest('.opt-scroll');
-    if (!el || el.dataset.marqueeChecked) return;
-    el.dataset.marqueeChecked = '1';
-    const span = el.firstElementChild;
-    if (!span) return;
-    const overflow = span.scrollWidth - el.clientWidth;
-    if (overflow <= 2) return;
-    el.style.setProperty('--marquee-shift', `-${overflow}px`);
-    el.style.setProperty('--marquee-duration', `${Math.max(2, overflow / 30)}s`);
-    el.classList.add('opt-marquee');
+    const row = e.target.closest('.opt-row');
+    if (!row || row.dataset.marqueeChecked) return;
+    row.dataset.marqueeChecked = '1';
+    const els = [];
+    row.querySelectorAll('.opt-scroll').forEach(el => {
+        const span = el.firstElementChild;
+        if (!span || span.scrollWidth - el.clientWidth <= 2) return;
+        const gap = parseFloat(getComputedStyle(el).fontSize) * 1.5;  // 尾與頭之間的間距:1.5em,隨字級縮放
+        const shift = span.scrollWidth + gap;
+        const clone = span.cloneNode(true);
+        clone.setAttribute('aria-hidden', 'true');
+        clone.style.paddingLeft = gap + 'px';
+        el.appendChild(clone);                            // 第二份緊接在後,捲一整份就無縫接回
+        const durSec = Math.max(4, shift / 24);
+        el.style.setProperty('--marquee-shift', `-${shift}px`);
+        el.style.setProperty('--marquee-duration', `${durSec}s`);
+        el.classList.add('opt-marquee');
+        el._durSec = durSec;
+        els.push(el);
+    });
+    if (!els.length) return;
+    // 捲一輪就停回頭,捲動中不重來
+    const playOnce = () => els.forEach(el => {
+        if (el._marqueeTimer) return;
+        el.classList.add('play-once');
+        el._marqueeTimer = setTimeout(() => {
+            el.classList.remove('play-once');
+            el._marqueeTimer = null;
+        }, el._durSec * 1000);
+    });
+    row.onmouseenter = playOnce;
+    playOnce();                                           // 掛好當下這次 hover 已錯過 mouseenter,直接捲
 });
 
 // 把備選歌詞畫進視窗的清單

@@ -318,10 +318,14 @@
             saveSettingsToServer('auto_lyrics_options', checked);
         }
 
-        // 播放列的曲名/歌手太長就來回滾動,不然後半段會被裁掉看不到
-        window.setMarqueeText = function(el, text) {
+        // 播放列的曲名/歌手太長:複製一份接尾巴,連續捲、無縫接回頭 (不來回)。
+        // 平常停在歌名頭。游標移入捲一輪:立刻開始,移開也捲完才停回頭。
+        // autoScroll=true (換歌) 時等 1 秒自動捲一次再停回頭;換頁只是重掛 (autoScroll=false),不捲。
+        window.setMarqueeText = function(el, text, autoScroll = true) {
             if (!el) return;
-            el.classList.remove('marquee');
+            if (el._marqueeTimer) { clearTimeout(el._marqueeTimer); el._marqueeTimer = null; }
+            el.classList.remove('marquee', 'play-once', 'delayed');
+            el.onmouseenter = null;                       // 沒溢出的歌名不留上一首的 hover 捲動
             el.style.removeProperty('--marquee-shift');
             el.style.removeProperty('--marquee-duration');
 
@@ -330,12 +334,31 @@
             el.replaceChildren(span);
 
             requestAnimationFrame(() => {
-                const overflow = span.scrollWidth - el.clientWidth;
-                if (overflow <= 2) return;
-                el.style.setProperty('--marquee-shift', `-${overflow}px`);
-                // 一律用同樣的速度捲,長的名字就捲久一點
-                el.style.setProperty('--marquee-duration', `${Math.max(3, overflow / 30)}s`);
+                if (span.scrollWidth - el.clientWidth <= 2) return;   // 沒溢出就不捲
+                const gap = parseFloat(getComputedStyle(el).fontSize) * 1.5;  // 尾與頭之間的間距:1.5em,隨字級縮放
+                const shift = span.scrollWidth + gap;
+                const clone = span.cloneNode(true);
+                clone.setAttribute('aria-hidden', 'true');
+                clone.style.paddingLeft = gap + 'px';
+                el.appendChild(clone);                                // 第二份緊接在後,捲一整份就無縫接回
+                const durSec = Math.max(4, shift / 24);               // 慢一點:約 24px/s
+                el.style.setProperty('--marquee-shift', `-${shift}px`);
+                el.style.setProperty('--marquee-duration', `${durSec}s`);
                 el.classList.add('marquee');
+                // 捲一輪就停回頭。換歌 (delayed) 先等 1 秒;hover 立刻捲。捲動中不重來。
+                const playOnce = (delayMs) => {
+                    if (el._marqueeTimer) return;
+                    el.classList.toggle('delayed', delayMs > 0);
+                    el.classList.add('play-once');
+                    el._marqueeTimer = setTimeout(() => {             // 捲完拿掉,停回歌名頭
+                        el.classList.remove('play-once', 'delayed');
+                        el._marqueeTimer = null;
+                    }, durSec * 1000 + delayMs);
+                };
+                el.onmouseenter = () => playOnce(0);                  // 游標移入捲一次,移開也捲完
+                if (autoScroll) {
+                    playOnce(1000);
+                }
             });
         };
 
@@ -602,6 +625,9 @@
                     }
                 } catch (e) {}
             }
+            // 換頁載入:把 server 渲染的曲名/歌手包成 span 並開啟 hover 捲動 (不自動捲,換頁不算換歌)
+            setMarqueeText(document.getElementById('current-title'), (window.__initialMedia.title || '--'), false);
+            setMarqueeText(document.getElementById('current-artist'), (window.__initialMedia.title ? (window.__initialMedia.artist || 'Unknown Artist') : '--'), false);
             syncPlayerBar();
             setInterval(syncPlayerBar, 1000);
             // 播放列的歌名由 server 渲染,上面的「換歌」分支不會在載入時觸發,

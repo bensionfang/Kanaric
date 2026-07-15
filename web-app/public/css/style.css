@@ -1314,6 +1314,12 @@ body.window-maximized .fullscreen-btn .icon-compress { display: inline !importan
     object-fit: cover;
 }
 
+/* 曲名/歌手不能撐開左區、長過進度條左邊的時間 → 限寬 + 溢出裁掉(裁掉的靠捲動看) */
+.player-info {
+    min-width: 0;
+    overflow: hidden;
+}
+
 .current-title {
     font-size: 14px;
     font-weight: 500;
@@ -1338,19 +1344,27 @@ body.window-maximized .fullscreen-btn .icon-compress { display: inline !importan
     max-width: none;
 }
 
-.current-title.marquee > span,
-.current-artist.marquee > span {
-    animation: player-marquee var(--marquee-duration, 6s) ease-in-out 1.5s infinite alternate;
+/* 平常停在歌名頭 (無動畫)。換歌或游標移入捲一輪 (play-once,由 JS 掛上,捲完自動停回頭)。 */
+.current-title.play-once > span,
+.current-artist.play-once > span {
+    animation: player-marquee-loop var(--marquee-duration, 6s) linear 1;
 }
 
-@keyframes player-marquee {
+/* 換歌那次先停 1 秒再開始捲;游標移入那次立刻捲 (不加 delayed) */
+.current-title.play-once.delayed > span,
+.current-artist.play-once.delayed > span {
+    animation-delay: 1s;
+}
+
+/* 連續捲動:尾接頭,不來回 (捲一整份「文字+間距」剛好無縫接回) */
+@keyframes player-marquee-loop {
     from { transform: translateX(0); }
     to   { transform: translateX(var(--marquee-shift, 0)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .current-title.marquee > span,
-    .current-artist.marquee > span {
+    .current-title.play-once > span,
+    .current-artist.play-once > span {
         animation: none;
     }
 }
@@ -1675,8 +1689,14 @@ body.window-maximized .fullscreen-btn .icon-compress { display: inline !importan
     will-change: transform;
 }
 
-.opt-scroll.opt-marquee:hover > span {
-    animation: player-marquee var(--marquee-duration, 4s) ease-in-out 0.4s infinite alternate;
+/* 捲動時關掉 ellipsis:… 會干擾被 transform 的第二份文字繪製,造成接回頭前一段空白 */
+.opt-scroll.opt-marquee {
+    text-overflow: clip;
+}
+
+/* 移入捲一輪 (play-once 由 lyrics-tools.js 掛上/移除),移開也捲完才停 */
+.opt-scroll.opt-marquee.play-once > span {
+    animation: player-marquee-loop var(--marquee-duration, 4s) linear 1;
 }
 
 .opt-title {
