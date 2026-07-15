@@ -48,6 +48,20 @@ One Node.js backend, multiple thin clients, with Python scripts as helpers spawn
 
 `web-app/electron.js` is the desktop shell: it injects env vars (`DATA_DIR`, `DB_PATH`, `LYRICS_DB_PATH`, `LYRICS_SETTINGS_PATH`, `PYTOOLS_EXE`, `ISLAND_EXE`), then `require('./server.js')` in the main process, opens a BrowserWindow on localhost:3000, adds a tray icon (close = minimize to tray), and spawns the island exe (writing `app.pid` so the web UI's toggle button stays aware of it). **In packaged mode all user data lives in `%APPDATA%/FloatingLyrics/`**; in dev mode (`npm run app`) no paths are overridden, so the repo-root DB/settings are used. Cloud/Render deployment was removed (the old `/api/sync-state` endpoint is gone); the sqlite3/Node version pins for Render GLIBC no longer apply.
 
+### 待做:改名與 App Icon (未實作,等使用者提供名稱與圖檔)
+
+打算把專案改名並換掉 app icon,重新產出 setup 安裝檔。動工前需使用者給:**新顯示名稱**、選填 **appId** (反向網域,不給就照新名生)、**icon 圖檔** (Windows 打包用 `.ico` 256×256 多尺寸;只有 png 就先轉 ico)。
+
+`productName` 是主動因:改它會連帶換掉 setup 檔名 (`<productName> Setup <version>.exe`)、安裝的 exe、安裝資料夾、桌面/開始選單捷徑名,以及 `app.getPath('userData')` 指向的 `%APPDATA%/<productName>/` 資料夾。icon 目前**完全沒設** (electron-builder 用預設 Electron 圖示),要在 build 設定補 `win.icon`。
+
+要動的檔案:
+- `web-app/package.json` — `productName`、`appId`、`name`,並在 `build.win` 加 `"icon": "<路徑>.ico"` (此圖預設也會套到 setup 檔本身的圖示;要細調再於 `build.nsis` 加 `installerIcon`/`uninstallerIcon`/`installerHeaderIcon`)
+- `web-app/electron.js` — 系統匣 `setToolTip` 文字;`TRAY_ICON` (寫死的 base64 PNG,同時是視窗與匣圖示) 換成新圖
+- 頁面顯示文字 — `web-app/views/header.ejs`、`wrapped.ejs`、`stats.ejs` 的 `<title>`/標題字串
+- 選改:`server.js:669` User-Agent、README、註解 (純文字,不影響功能)
+
+改完重跑 `npm run dist`,新 setup 出在 `web-app/release/`。安裝檔未簽章 (SmartScreen 會擋,屬預期)。
+
 ### Data flow (the key sequence)
 
 1. `media_monitor.py` (or an edge agent) reports a track change → `handleMediaUpdate` → WebSocket broadcast to all clients.
@@ -76,7 +90,34 @@ Reading errors are **not** a tokenizer problem, and swapping dictionaries is a d
 | ipadic | 26/48 |
 | Sudachi (core, mode C) | 26/48 |
 
-Don't re-run this. The errors that remain are mostly single-kanji on'yomi/kun'yomi coin-flips (談 はなし/だん, 角 かど/かく, 相 あい/そう) that no dictionary can settle without context. The two levers that *do* work are **better source data** (adding QQ's romaji track fixed 私, which fugashi and Kugou both got wrong) and, if ever needed, an **LLM pass for homograph disambiguation** cached per song in `romaji_hints` (two of the reference projects do this with DeepSeek).
+Don't re-run this. The errors that remain are mostly single-kanji on'yomi/kun'yomi coin-flips (談 はなし/だん, 角 かど/かく, 相 あい/そう) that no dictionary can settle without context. The two levers that *do* work are **better source data** (adding QQ's romaji track fixed 私, which fugashi and Kugou both got wrong) and, if ever needed, an **LLM pass for homograph disambiguation** — designed below, not yet implemented.
+
+### Planned: LLM 同形詞消歧 (BYOK, 未實作)
+
+設計已與使用者討論定案 (2026-07),動工前照此實作;改設計要先跟使用者確認。
+
+**資料流**
+- 掛在 `furigana_inject.py get_hints()`,羅馬字 hint 解析完之後。模式 `llm_furigana`: `off` (預設) / `fallback` (羅馬字 hint 全空才自動觸發,另有介面手動按鈕) / `always` (每首都跑,當第四層蓋在羅馬字 hint 之後)。
+- 一首歌一次請求:送 歌名+歌手+全部歌詞行 (去時間標籤),要求回傳每行完整平假名讀音 (JSON、temperature 0,提示詞點名同形詞要看語境)。回傳轉成 `{normalize_line(行): 假名}` —— 與羅馬字 hint 同格式,直接走現成 `apply_hint()` 及其安全 guard,下游零改動;`_COMMON_READING` 與 `word_corrections` 仍在其上。
+- API 用 **OpenAI 相容格式** (可設定 base URL + model + key),一條路徑通吃 DeepSeek/OpenAI/Ollama (本機零隱私)/Anthropic 相容端點。HTTP 用既有 requests,timeout 30s,失敗記 stderr、視同無 hint。
+- 快取:**新表 `llm_hints` (artist, title, data)**,不塞 `romaji_hints` (保住其負快取 `{}` 語意)。只快取成功結果,錯誤不進快取。手動按鈕強制重跑並覆寫快取,完成走 `rebroadcastLyrics()`。
+
+**Key 安全 (BYOK,實作時不可省)**
+- key **絕不放 `settings.json`** —— `GET /api/settings` 會整份吐回。獨立存 `DATA_DIR/secrets.json`,打包版用 Electron `safeStorage` (DPAPI) 加密,dev 模式明文 + stderr 警告。
+- key 端點只寫不讀:`POST /api/llm-key` 設定/清除,GET 只回 `{set, last4}`;UI 用 password 欄位。
+- key 不進 log、不進 URL query,只走 Authorization header;傳給 Python 走 `spawnPy` 環境變數 (`LLM_API_KEY` 等)。`llm_base_url`/`llm_model`/`llm_furigana` 不敏感,照常放 `settings.json`。
+- 功能預設關,設定開關旁註明「啟用後會將歌名與歌詞送至你設定的 LLM 服務」。
+
+**成本與模型選擇** (估算 2026-07)
+- 一首歌一次請求 ≈ 2k in / 2k out tokens。DeepSeek V4 Flash ($0.14/$0.28 per M) ≈ $0.0008/首;Claude Haiku 4.5 ($1/$5) ≈ $0.012/首。加 per-song 快取後成本可忽略 (重度使用一年 < US$1)。
+- 免費路線:Gemini free tier 有 OpenAI 相容端點,直接吃 BYOK 設計;Ollama 本機零成本零隱私,但 8B 級日文讀音品質要實測 (定位為隱私優先選項)。
+- flash 級雲端模型準確率足夠:參考專案用 DeepSeek 做同一件事;輸出過 `apply_hint()` 既有 guard,爛輸出退回 fugashi 不會更糟;`word_corrections` 永遠最上層。推薦文案:DeepSeek 或 Gemini 免費端點,Ollama 為本機選項。
+
+**UI (與使用者定案 2026-07)**
+- 設定入口:⋯ 設定選單新增「AI 讀音校正」可折疊小節,套自訂快捷鍵同款 pattern (`menu-sub` + chevron,header.ejs)。內容:模式 [關閉(預設)/自動(=fallback)/總是]、Base URL、Model (存 settings.json)、API Key password 欄 (只寫不讀,顯示「已設定 •••後四碼」),底部一行隱私揭露。
+- 手動觸發:播放列魔杖 ✨ 按鈕,與編輯假名筆按鈕並排。已設定 key 才顯示;狀態 平常可按 → 執行中轉圈 → 完成亮起;完成後再按 = 強制重跑 (覆寫 `llm_hints`)。同時是 fallback 模式的手動入口;不做歌詞區 inline 提示句。
+
+**驗證 (實作時)**:Ollama 本機端點跑通全流程;拿 `word_corrections` 48 條當 ground truth 量測 (基準 unidic-lite 28/48);確認 `GET /api/settings` 永不含 key、`llm_hints` 命中後第二次載入零 API 呼叫。
 
 ### Credit / title lines
 

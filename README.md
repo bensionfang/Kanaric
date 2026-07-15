@@ -1,415 +1,138 @@
-# Floating-Lyrics: 跨平台動態歌詞與聽歌分析系統
+# Floating Lyrics — 桌面浮動歌詞與聽歌統計
 
-本專案是一個具備日文假名標註、多來源歌詞抓取與全域快捷鍵的動態歌詞系統。
-專案經歷了從「單體架構 (Monolithic)」到「微服務架構 (Microservices)」的演進，目前整合了 **Python 系統監聽**、**Node.js 核心大腦**、**C# WPF 桌面白月光靈動島** 與 **Web 網頁數據中心**，達成高度的模組化與關注點分離。
+自動偵測 Spotify / Apple Music 正在播放的歌曲，線上抓取同步歌詞（LRC），日文歌詞自動標註假名（振り仮名），並以「靈動島」桌面懸浮視窗 + 網頁儀表板兩種形式顯示。同時記錄你的聽歌歷史，提供排行榜、統計圖表與年度回顧。
 
-## 🌟 專案主要功能統整
-
-1.  **C# 桌面靈動島歌詞**：在桌面上以極致流暢的 C# WPF 動畫顯示同步歌詞與專輯封面，不干擾其他工作。
-2.  **自動偵測系統音樂**：透過 Python 攔截 Windows 原生 API，免金鑰自動監聽並同步 Spotify、Apple Music 等播放器的歌曲資訊。
-3.  **日文漢字注音 (Furigana)**：內建日文分詞與拼音轉換系統，能自動為日文漢字加上平假名/羅馬音標註。
-4.  **多重歌詞來源抓取**：Node.js 後端整合多種歌詞服務平台 (包含 QQMusic 等備用方案)，自動搜尋並下載準確的動態歌詞。
-5.  **全域快捷鍵支援**：支援透過鍵盤熱鍵快速微調歌詞的時間軸 (提早/延遲)，並即時廣播至所有介面。
-6.  **本地資料快取與修正**：使用 SQLite 快取下載過的歌詞與歷史播放紀錄，大幅減少網路請求並提升效能。
-7.  **網頁管理與數據後台**：透過 Node.js 建置的 Web 儀表板，提供瀏覽器介面來校正漢字發音、設定歌手別名、編輯歌詞時間軸，並可查看個人的聽歌統計與動態排行榜。
+> 完整功能僅支援 Windows（媒體偵測依賴 Windows Media API）。
 
 ---
 
-## 🏛️ 1. 系統架構總覽 (專案核心亮點)
+## 功能與特色
 
-本專案最大的亮點在於**「架構重構」**：從早期的 Python 巨石陣 (Monolithic) 演進至現代化的一後端、多前端微服務架構 (Microservices)。
+- **自動偵測播放中的歌曲** — 不用手動搜尋，切歌即換詞。支援 Spotify、Apple Music 等任何會上報 Windows 媒體資訊的播放器。
+- **多來源同步歌詞** — 網易雲、QQ 音樂、Kugou、Musixmatch、Lrclib 等，可設定偏好來源；找不到時自動走備援搜尋（含 iTunes 日文原名還原，解決 Spotify 自動翻譯日文歌名的問題）。
+- **日文假名標註（Furigana）** — 以 fugashi/unidic 斷詞注音，再用音樂平台的逐字羅馬音軌修正讀音；仍不對的字**點一下就能改**，修正永久記住。
+- **靈動島懸浮歌詞** — C# WPF 無邊框懸浮窗，置頂顯示當前歌詞，可拖曳、平滑展開收合。
+- **聽歌統計** — 累積播放 30 秒才算一次有效聆聽（防切歌灌水），提供歷史記錄、歌手/歌曲排行榜、時段分析與 Spotify Wrapped 風格年度回顧。
+- **歌詞編輯器** — 歌詞或時間軸不準時可手動修正，逐首儲存時間偏移。
+- **一鍵安裝** — 打包成單一 NSIS 安裝檔，對方電腦**不需要安裝 Python / Node.js / .NET**，首次啟動自動初始化。
 
-*   **❌ 第一代架構 (Python 巨石陣)**：早期的 `main.py` 包辦了系統監聽、資料庫讀寫、網路爬蟲與 PyQt6 視窗繪製。高度耦合導致無法輕易加入網頁端或新功能，效能也受限於單一執行緒。
-*   **✅ 第二代架構 (微服務)**：將系統拆解成「關注點分離」的四大模組。Python 退居幕後成為感測器；Node.js 成為核心大腦；而展示層則拆分為追求視覺極致的 C# 靈動島，以及提供強大管理分析功能的 Web 網頁端。
+---
 
-```mermaid
-flowchart TD
-    classDef python fill:#3776ab,stroke:#fff,stroke-width:2px,color:#fff
-    classDef node fill:#339933,stroke:#fff,stroke-width:2px,color:#fff
-    classDef csharp fill:#178600,stroke:#fff,stroke-width:2px,color:#fff
-    classDef web fill:#e34f26,stroke:#fff,stroke-width:2px,color:#fff
-    classDef db fill:#003b57,stroke:#fff,stroke-width:2px,color:#fff
+## 安裝
 
-    subgraph "感測層 (Sensor)"
-        PY["1. Python 媒體監聽器<br>(media_monitor.py)"]:::python
-    end
+### 一般使用者（推薦）
 
-    subgraph "核心業務與數據層 (Backend & DB)"
-        NODE["2. Node.js 核心大腦<br>(server.js)"]:::node
-        SQL[("SQLite 資料庫<br>(lyrics_data.db)")]:::db
-        NODE <-->|"WAL 並行讀寫"| SQL
-    end
+1. 取得 `FloatingLyrics Setup x.x.x.exe` 安裝檔。
+2. 雙擊執行 — 一鍵安裝，無需系統管理員權限，裝完自動啟動並建立桌面/開始選單捷徑。
+   - 安裝檔未簽章，Windows SmartScreen 可能攔截：點「其他資訊」→「仍要執行」。
+3. 所有個人資料（歌詞快取、聽歌記錄、設定）存在 `%APPDATA%/FloatingLyrics/`，解除安裝不會刪除。
 
-    subgraph "展示層 (Clients)"
-        direction LR
-        CS["3. C# 桌面靈動島<br>(觀賞用前端)"]:::csharp
-        WEB["4. 網頁版儀表板<br>(管理與數據前端)"]:::web
-    end
+### 開發者（從原始碼執行）
 
-    PY -- "stdout (JSON)" --> NODE
-    NODE <-->|"WebSocket (推播) & REST API (請求)"| CS
-    NODE <-->|"RESTful API (雙向互動)"| WEB
+需求：Node.js、Python 3.10+、.NET 8 SDK（只有要編譯靈動島才需要）。
+
+```bash
+# Python 依賴（建議 venv,server 會自動偵測 repo 根目錄的 venv/）
+pip install -r requirements.txt
+
+# Node 依賴與啟動（一切從 web-app/ 出發）
+cd web-app
+npm install
+npm start        # 只跑網頁後台 http://localhost:3000
+npm run app      # Electron 桌面殼:後台 + 儀表板視窗 + 系統匣 + 靈動島,一鍵全開
+
+# 打包安裝檔（產出在 web-app/release/）
+npm run dist
 ```
 
 ---
 
-## 🌊 2. 系統流程圖與資料流 (System Flowcharts)
+## 使用說明
 
-### 流程一：背景音樂自動追蹤與寫入流程 (自動化資料收集)
-展示系統如何默默在背景運作，把使用者的聽歌行為轉化為資料庫紀錄。
+### 開始使用
 
-```mermaid
-flowchart TD
-    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
-    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef display fill:#e76f51,stroke:#fff,stroke-width:2px,color:#fff
-    classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
+1. 開啟 Floating Lyrics（桌面捷徑）。
+2. 用 Spotify 或 Apple Music 播放任何歌曲。
+3. 儀表板自動顯示歌曲資訊與同步歌詞；日文歌自動標註假名。
+4. 關閉視窗 = 縮到系統匣（不會結束程式）。系統匣圖示：雙擊叫回視窗，右鍵可開啟儀表板、重啟靈動島或結束。
 
-    subgraph OS ["系統層"]
-        direction TB
-        Start["作業系統播放新歌<br>Spotify / Apple Music"]:::frontend
-    end
+### 主播放頁
 
-    subgraph Backend ["後端層 Node.js / Python"]
-        direction TB
-        Py["Python 攔截系統狀態並由 stdout 輸出"]:::backend
-        Node["Node.js 接收並解析歌曲資訊"]:::backend
-        CacheCheck{"檢查 SQLite<br>是否有歌詞快取?"}:::condition
-        Fetch["向外部 API (Lrclib) 抓取歌詞<br>並寫入資料庫"]:::backend
-        CacheHit["直接使用資料庫快取<br>(0 延遲直出)"]:::backend
-    end
+- 歌詞隨播放進度自動捲動、高亮當前行；點任一行可跳播（seek）。
+- 播放列有播放控制、歌詞來源切換（歌詞選項）、靈動島開關、假名編輯等按鈕。
 
-    subgraph DB ["資料庫層 SQLite"]
-        direction TB
-        InsertSQL[("執行 SQL INSERT<br>寫入 listening_history")]:::database
-    end
+### 修正假名讀音
 
-    subgraph UI ["介面顯示層 (多前端)"]
-        direction TB
-        Island["C# 桌面靈動島<br>接收 WebSocket 推播並顯示"]:::display
-        WebApp["Web 網頁端<br>接收推播並主動發起請求"]:::display
-    end
+1. 點播放列的**筆型按鈕**進入編輯模式。
+2. 點任何一個注音字 → 直接輸入羅馬拼音（即時轉假名），Enter 儲存、Esc 取消。
+3. 雙擊該字 = 還原成自動讀音。
+4. 修正以「歌手 + 歌名 + 單字」為單位永久儲存，重播同曲自動套用，靈動島同步更新。
 
-    Start --> Py
-    Py --> Node
-    
-    Node -- "第一路：記錄聽歌歷史" --> InsertSQL
-    
-    Node == "第二路：WebSocket 廣播新狀態" ==> Island
-    Node == "第二路：WebSocket 廣播新狀態" ==> WebApp
-    
-    WebApp -- "主動呼叫 /api/lyrics/fetch" --> CacheCheck
-    
-    CacheCheck -- "否 (查無資料)" --> Fetch
-    CacheCheck -- "是 (快取命中)" --> CacheHit
-    
-    Fetch -. "抓取完成後觸發 WebSocket 廣播" .-> Island
-    Fetch -. "抓取完成後觸發 WebSocket 廣播" .-> WebApp
-    
-    CacheHit -. "瞬間觸發 WebSocket 廣播" .-> Island
-    CacheHit -. "瞬間觸發 WebSocket 廣播" .-> WebApp
-```
+### 快捷鍵（預設關閉，設定選單開啟）
 
-**🗣️ 邏輯解釋與導讀台詞：**
-1. **(破題開場)**：「大家現在看到的這張圖，是我系統的『大腦神經網路』。當我們在 Spotify 播下一首歌的瞬間，整個全自動化的資料收集流程就開始了。」
-2. **(解釋後端攔截)**：「首先，底層的 Python 監聽腳本會瞬間攔截到系統的媒體變化，把『歌名與歌手』等 metadata 打包成 JSON，發送給 Node.js 伺服器。」
-3. **(解釋資料庫寫入)**：「Node.js 收到資料後會兵分兩路。其中一路，就是立刻執行 SQL 的 `INSERT` 語法，把這首新歌的播放紀錄寫進 SQLite 資料庫的 `listening_history` 表裡面。這是我們後續做數據分析的基石。」
-4. **(解釋前端呈現)**：「另一路則是透過 WebSocket 廣播給所有前端。桌面的 C# 靈動島接收到推播後，會立刻得知換歌了；而 Web 網頁端則是透過每 100 毫秒的 HTTP Polling 隨時保持狀態同步。」
-5. **(解釋歌詞按需載入)**：「最後一個非常關鍵的細節：Node.js 並不會無腦抓歌詞！因為我們是以 Web 網頁端作為控制中心，當『Web 網頁端監聽到新歌曲播放時，才會主動發起 API 請求』。這時 Node.js 才會去檢查快取或向外部 API 抓取歌詞，抓取完成後再推播給靈動島。這種『由前端按需載入 (Lazy Loading)』的設計大幅節省了伺服器頻寬與無謂的爬蟲請求！」
+| 鍵 | 功能 |
+|---|---|
+| ← / → | 歌詞時間軸提前 / 延後 |
+| ↑ / ↓ | 上一行 / 下一行純文字歌詞 |
+| A | A-B 循環 |
+| E | 假名編輯模式 |
+| L | 歌詞選項 |
+| R | 重新載入歌詞 |
+| D | 靈動島開關 |
+| F | 全螢幕 |
 
-### 流程二：前端使用者手動編輯與修正流程 (互動資料流)
-展示網頁版歌詞編輯器如何透過 API 與資料庫進行互動，達成即時的發音校正與歌詞儲存。
+### 頁面
 
-```mermaid
-flowchart TD
-    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
-    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
+- **首頁** — 播放器與同步歌詞。
+- **統計** — 聽歌時數、活躍時段等圖表。
+- **排行榜** — 歌曲/歌手播放次數排名。
+- **編輯器** — 手動貼上或修改歌詞、調整時間軸。
+- **Wrapped**（`/wrapped`）— 年度聽歌回顧。
 
-    subgraph Frontend ["前端層 (Web App & 靈動島)"]
-        direction TB
-        User["使用者單擊漢字喚起修改框"]:::frontend
-        Input["輸入羅馬拼音<br>(前端即時轉譯為平假名)"]:::frontend
-        Send["點擊確認，發送 HTTP POST<br>/api/furigana/correct"]:::frontend
-        Update["網頁端收到 HTTP 成功後<br>主動重新抓取歌詞"]:::frontend
-        Island["靈動島接收推播並<br>即時更新顯示修正後歌詞"]:::frontend
-    end
+### 設定（右上 ⋯ 選單）
 
-    subgraph Backend ["後端層 Node.js Server"]
-        direction TB
-        Recv["API 接收 JSON 參數<br>artist, title, 原始字, 新注音"]:::backend
-        Cond{"後端雙重驗證<br>(參數防呆與二次轉譯)"}:::condition
-        SQL["執行 SQL: INSERT OR REPLACE"]:::backend
-        Broadcast["若屬當前播放歌曲，重新產生假名<br>並透過 WebSocket 廣播更新"]:::backend
-        Res["回傳 HTTP 200 成功狀態碼"]:::backend
-        Err["回傳 HTTP 400 錯誤狀態碼"]:::backend
-    end
-
-    subgraph DB ["資料庫層 SQLite"]
-        direction TB
-        DB_Write[("成功存入 word_corrections 資料表")]:::database
-    end
-
-    User --> Input
-    Input --> Send
-    Send -- "傳輸資料" --> Recv
-    Recv --> Cond
-    Cond -- "是" --> SQL
-    Cond -- "否 (缺少參數)" --> Err
-    SQL --> DB_Write
-    DB_Write -. "寫入完成" .-> Res
-    DB_Write -. "檢查目前播放狀態" .-> Broadcast
-    Broadcast -- "WebSocket 推播" --> Island
-    Res -- "回傳確認" --> Update
-    Err -- "前端報錯提示" --> User
-```
-
-### 流程三：數據讀取與排行榜呈現流程 (資料庫讀取應用)
-展現系統如何把大量的聽歌紀錄，轉化為有價值的排行榜與統計資料。
-
-```mermaid
-flowchart TD
-    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
-    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
-
-    subgraph Frontend ["前端層 Web App"]
-        direction TB
-        Click["使用者進入「排行榜」<br>或切換時間區間 (如: 近 30 天)"]:::frontend
-        Req["發送 GET 請求到 /api/leaderboard"]:::frontend
-        View["前端收到 JSON 資料<br>動態產生 HTML 條列與排行動畫"]:::frontend
-    end
-
-    subgraph Backend ["後端層 Node.js Server"]
-        direction TB
-        Route["接收請求與參數<br>如: type=tracks, range=1m"]:::backend
-        Query["組合並執行 SQL 查詢<br>使用 SELECT, GROUP BY 與 LIMIT 50"]:::backend
-        Render["將查詢結果打包成 JSON 格式回傳"]:::backend
-    end
-
-    subgraph DB ["資料庫層 SQLite"]
-        direction TB
-        DB_Read[("篩選並統計 listening_history 表")]:::database
-    end
-
-    Click --> Req
-    Req --> Route
-    Route --> Query
-    Query --> DB_Read
-    DB_Read -. "撈出前 50 筆紀錄" .-> Render
-    Render -- "回傳 JSON 格式的排行陣列" --> View
-```
-
-### 流程四：歌手別名攔截與歌詞抓取流程 (解決髒資料問題)
-展示系統如何優雅地解決外部 API (Spotify) 給的名稱與歌詞庫名稱不一致的實務痛點。
-
-```mermaid
-flowchart TD
-    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
-    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
-    classDef external fill:#e76f51,stroke:#fff,stroke-width:2px,color:#fff
-
-    subgraph Backend ["後端邏輯層 Node.js / Python"]
-        direction TB
-        Start["準備去網路抓取歌詞<br>(拿到 Spotify 歌手名：魚韻)"]:::backend
-        QueryDB["查詢 artist_aliases 表"]:::database
-        Cond{"是否有設定別名?"}:::condition
-        Replace["將名稱替換為真名<br>(サカナクション)"]:::backend
-        Keep["保持原名"]:::backend
-        Fetch["拿著最終名稱<br>去外部 API 搜尋"]:::backend
-    end
-
-    subgraph ExternalAPI ["外部歌詞庫"]
-        direction TB
-        Lrclib["Lrclib / 網易雲等 API"]:::external
-    end
-
-    Start --> QueryDB
-    QueryDB --> Cond
-    Cond -- "是 (有找到)" --> Replace
-    Cond -- "否 (沒找到)" --> Keep
-    Replace --> Fetch
-    Keep --> Fetch
-    Fetch -- "發送 HTTP 請求" --> Lrclib
-    Lrclib -- "回傳精準歌詞" --> Fetch
-```
-
-### 流程五：Apple iTunes 全域歌名攔截與還原流程 (Spotify 翻譯對策)
-展示系統如何利用背景攔截機制，將被 Spotify 自動翻譯成英文的日本歌曲（例如將「夜に駆ける」變成「Racing into the Night」），透過 iTunes API 全自動無縫還原回日文原名，確保系統能精準抓取歌詞並合併聽歌紀錄。
-
-```mermaid
-flowchart TD
-    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
-    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
-    classDef external fill:#e76f51,stroke:#fff,stroke-width:2px,color:#fff
-
-    subgraph Monitor ["系統偵測層"]
-        direction TB
-        Play["Spotify 播放新歌<br>(Racing into the Night - YOASOBI)"]:::frontend
-    end
-
-    subgraph Interceptor ["Node.js 跨區還原攔截器"]
-        direction TB
-        Intercept["攔截播放狀態<br>將原曲名送入非同步還原佇列"]:::backend
-        APIQuery["向 Apple iTunes API 發送請求<br>(強制指定 country=JP 日本區)"]:::backend
-        Cache{"iTunes 查有結果?"}:::condition
-        SaveCache["將回傳的日文真名存入內部快取<br>(夜に駆ける)"]:::backend
-        Fallback["沿用原始英文歌名"]:::backend
-        
-        Intercept --> APIQuery
-        APIQuery --> Cache
-        Cache -- "是 (找到日文原名)" --> SaveCache
-        Cache -- "否 (查無資料)" --> Fallback
-    end
-
-    subgraph Execution ["系統執行層"]
-        direction TB
-        StateBroadcast["1 秒後將最新的真名<br>推播至網頁與靈動島"]:::backend
-        FetchLyrics["使用日文真名去抓取同步歌詞"]:::backend
-        LogHistory["聽滿 30 秒後，將日文真名<br>寫入聽歌歷史"]:::database
-    end
-
-    Play --> Intercept
-    SaveCache --> StateBroadcast
-    Fallback --> StateBroadcast
-    StateBroadcast --> FetchLyrics
-    StateBroadcast --> LogHistory
-```
-
-### 流程六：聽歌歷史碼表累積機制 (30 秒防呆狀態機)
-展示系統如何像精密的碼表一樣，在使用者播放、暫停、切歌之間切換狀態，並累積真正的「有效聆聽時間」，避免產生大量的「一秒切歌」垃圾歷史紀錄。
-
-```mermaid
-flowchart TD
-    classDef frontend fill:#3a7ca5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef backend fill:#f4a261,stroke:#fff,stroke-width:2px,color:#fff
-    classDef database fill:#9b5de5,stroke:#fff,stroke-width:2px,color:#fff
-    classDef condition fill:#2a9d8f,stroke:#fff,stroke-width:2px,color:#fff
-
-    subgraph UserAction ["使用者行為"]
-        direction TB
-        Play["開始播放新歌"]:::frontend
-        Pause["中途暫停"]:::frontend
-        Resume["繼續播放同一首"]:::frontend
-        Skip["未滿 30 秒即切歌"]:::frontend
-    end
-
-    subgraph StateMachine ["Node.js 碼表狀態機"]
-        direction TB
-        Init["歸零累積時間 (accumulatedMs = 0)<br>啟動 30 秒倒數計時器"]:::backend
-        TimerCancel["取消計時器<br>並把剛才聽的秒數加進 accumulatedMs"]:::backend
-        TimerRestart["扣除已經聽過的 accumulatedMs<br>重新啟動剩餘時間的倒數計時器"]:::backend
-        TimerDrop["直接丟棄當前狀態<br>不寫入資料庫"]:::backend
-    end
-
-    subgraph DB ["資料庫寫入層"]
-        direction TB
-        LogHistory[("計時器順利跑完<br>寫入 listening_history")]:::database
-    end
-
-    Play --> Init
-    Pause --> TimerCancel
-    Resume --> TimerRestart
-    Skip --> TimerDrop
-
-    Init -. "連續聽滿 30 秒" .-> LogHistory
-    TimerRestart -. "累積聽滿 30 秒" .-> LogHistory
-```
+字體大小、假名顯示開關、偏好歌詞來源、靈動島行數、自訂快捷鍵等。歌手名稱被平台翻譯錯誤時（如 サカナクション 顯示成「魚韻」），可設定歌手別名對應。
 
 ---
 
-## 💡 3. 資料庫與資料表設計理念 (Database Schema)
+## 專案結構
 
-本專案使用 SQLite 作為資料庫，包含 5 張核心資料表：
-
-**1. cache 表 (歌詞快取字典)**
-*   **設計理念**：去網路上爬蟲抓歌詞是最耗時且最容易失敗的動作。這張表的作用是「把抓過的歌詞存起來」，避免同一首歌每次聽都要重新發送網路請求，扮演系統的樞紐角色。
-*   **複合主鍵**：`artist` & `title`。
-
-**2. listening_history 表 (聽歌歷史日誌)**
-*   **設計理念**：記錄使用者每一次的聽歌行為，是「排行榜」與「年度回顧」的資料來源。與 `cache` 表是一對多的關聯。
-*   **核心欄位**：`duration` (播放秒數), `played_at` (播放時間戳記)。
-
-**3. sync_offsets 表 (時間軸微調設定)**
-*   **設計理念**：記住使用者對每一首歌的歌詞時間軸微調喜好 (提早或延後多少秒)。與 `cache` 表是一對一或一對零的關聯。
-
-**4. word_corrections 表 (發音修正檔)**
-*   **設計理念**：日文漢字會有一字多音的狀況，這張表允許使用者客製化並覆蓋系統原本的注音標示。與 `cache` 表是一對多的關聯。
-*   **複合主鍵**：`artist` & `title` & `word`。
-
-**5. artist_aliases 表 (歌手別名翻譯字典)**
-*   **設計理念**：為了解決 Spotify 強制將日文歌手名轉換為中文或羅馬音（如「魚韻」、「natori」），導致在日文歌詞資料庫搜尋不到的痛點。這是一張標準的對照表 (Lookup Table)。
-
----
-
-## 🚀 4. 環境要求與安裝指南 (Prerequisites & Dependencies)
-
-本專案採**微服務架構**，需分別啟動後端與前端：
-
-### 1. 後端：Node.js 與 Python 感測器
-*   **作業系統**：Windows 10/11（依賴 Windows 原生 Media API）。
-*   **環境需求**：Node.js (建議 v18+) 以及 Python 3.9+。
-*   **安裝步驟**：
-    1. 安裝 Python 依賴：`pip install -r requirements.txt`
-    2. 安裝 Node.js 依賴：在 `web-app` 目錄下執行 `npm install`
-*   **啟動指令**：在 `web-app` 目錄下執行 `npm start` (這會同時帶起 Node.js 伺服器與背景的 Python 監聽腳本)。
-
-### 2. 展示端 A：C# 桌面靈動島
-*   **環境需求**：.NET 8.0 執行環境。
-*   **啟動指令**：確保 Node.js 後端已運行，接著執行 `DynamicIslandUI/bin/Release/net8.0-windows/DynamicIslandUI.exe`。
-
-### 3. 展示端 B：網頁管理後台
-*   **啟動指令**：開啟瀏覽器前往 `http://localhost:3000` 即可使用。
-
----
-
-## 📖 5. 使用說明與操作指南
-
-1. **全域快捷鍵**：在任何視窗下，按下 `Ctrl + Alt + ]` 可讓歌詞提早 0.5 秒；`Ctrl + Alt + [` 可讓歌詞延遲 0.5 秒。此調整會即時同步至靈動島，並永久存入資料庫。
-2. **日文漢字校正**：若發現歌詞的平假名標註錯誤，請前往 Web 網頁端的「歌詞編輯器」，雙擊對應的漢字，即可輸入正確的平假名並覆蓋。
-3. **歌手別名設定**：若遇到 Spotify 名稱導致抓不到歌詞（如：魚韻），請前往 Web 網頁端編輯器的「歌手別名管理」，新增 `魚韻 -> サカナクション` 的對照，系統即可正確抓取歌詞。
-
----
-
-## 📁 6. 核心檔案結構說明
-
-隨著系統架構演進，本專案已將微服務明確拆分，根目錄保持清爽：
-
-*   **`web-app/` (Node.js 核心與網頁前端)**：
-    *   `server.js`：Node.js 後端伺服器，包含 API 路由、WebSocket 廣播與歌詞處理邏輯。
-    *   `views/`：EJS 網頁前端樣板（包含編輯器、排行榜等介面）。
-*   **`DynamicIslandUI/` (C# 展示端)**：
-    *   C# WPF 靈動島前端專案，負責接收 WebSocket 即時動畫渲染。
-*   **底層微服務 (Python)**：
-    *   `media_monitor.py`：媒體監聽器，透過 `winrt` 攔截 Windows 播放狀態並吐出 JSON。
-    *   `furigana_inject.py`：結合 `pykakasi` 與字典進行日文假名注音注入。
-    *   `search_fallback.py`：針對特殊歌詞平台 (如 QQMusic) 的備用爬蟲腳本。
-*   **資料庫**：
-    *   `lyrics_data.db`：系統共用的 SQLite 資料庫本體。
-
----
-
-## 🎤 7. 面試問答準備 (模擬 Q&A)
-
-### Q1: 為什麼要用微服務架構取代單體架構？
-> 「因為我的系統除了要在桌面顯示外，我還想加入『網頁版歌詞編輯器』跟『排行榜』。如果全部寫在 C# 或 Python 的單體程式裡，擴充性非常差。所以我把後端與資料庫抽出來變成 Node.js 伺服器，讓 C# 專心做炫酷的動畫顯示，讓 Web 專心做資料管理，達成完美的關注點分離！」
-
-### Q2: 寫出一段你專案真正用到的 SQL，並解釋為什麼要這樣寫？
-```sql
-SELECT artist, title, COUNT(*) AS play_count, SUM(duration) AS total_duration
-FROM listening_history
-GROUP BY artist, title
-ORDER BY play_count DESC
-LIMIT 50;
 ```
-> 「這段 SQL 是用在我的『排行榜網頁』上。因為我的 `listening_history` 存了使用者每一次播放的時間點，所以我想算出『最常聽的歌』時，我使用了 `GROUP BY artist, title` 將同一首歌群組起來，並用 `COUNT(*)` 計算播放次數。最後再透過 `ORDER BY play_count DESC` 取前 50 名！」
+Floating-Lyrics/
+├── web-app/                  # Node.js 後端 + 網頁前端 + Electron 桌面殼（一切從這裡啟動）
+│   ├── server.js             # 核心後端:Express + WebSocket,歌詞抓取/快取、聽歌記錄、API
+│   ├── electron.js           # Electron 殼:視窗、系統匣、路徑注入、靈動島啟動、port 自動遞補
+│   ├── package.json          # 指令與 electron-builder 打包設定
+│   ├── views/                # EJS 頁面模板（首頁/統計/排行榜/編輯器/Wrapped）
+│   └── public/               # 前端靜態資源
+│       ├── js/app.js         # 主頁邏輯:歌詞同步捲動、假名編輯、快捷鍵、WebSocket 接收
+│       ├── js/lyrics-tools.js# 歌詞工具（選項彈窗等）
+│       └── css/style.css     # 全站樣式
+├── DynamicIslandUI/          # C# WPF 靈動島懸浮窗（純顯示端,經 WebSocket 收歌詞推播）
+├── pytools.py                # Python 工具統一入口,server.js 以子進程呼叫各子指令
+├── media_monitor.py          # 常駐:輪詢 Windows Media API,回報播放狀態
+├── furigana_inject.py        # 假名標註:斷詞注音 + 羅馬音修正 + 使用者修正覆蓋
+├── cn_music.py               # 網易雲 / QQ / Kugou 歌詞客戶端（含逐字羅馬音軌）
+├── qrc_decrypt.py            # QQ QRC 歌詞解密（特製 3DES,勿用標準函式庫取代）
+├── search_fallback.py        # 備援歌詞搜尋（syncedlyrics 多來源 + iTunes 日文原名重試）
+├── db.py / config.py         # Python 端 SQLite 存取與路徑設定
+├── utils.py                  # 共用字串工具（羅馬拼音 ↔ 假名轉換等）
+├── lyrics_data.db            # SQLite 資料庫（歌詞快取、聽歌歷史、假名修正…,不進版控）
+├── settings.json             # 介面設定（開發模式用;打包版在 %APPDATA%）
+└── requirements.txt          # Python 依賴
+```
 
-### Q3: 打開你的資料庫，給我看 3 筆真實資料，並說明來源。
-> (打開 SQLite 工具，點開 `word_corrections` 或 `listening_history` 表)
-> 「這些資料都是『真實系統互動』產生的。例如這筆 `listening_history` 是本機播放時背景攔截並 `INSERT` 進來的。這筆 `word_corrections` 則是前端手動送出表單後寫入的。」
+### 架構一句話
+
+一個 Node.js 後端（`server.js`）持有全部業務邏輯；Python 腳本是它按需喚起的無狀態工人；網頁前端與 C# 靈動島都只是吃 WebSocket 推播的顯示端。
+
+### 資料庫主要資料表
+
+| 資料表 | 用途 |
+|---|---|
+| `cache` | 歌詞快取（歌手 + 歌名為鍵） |
+| `listening_history` | 聽歌歷史（累積播放 30 秒才寫入） |
+| `word_corrections` | 使用者的假名讀音修正 |
+| `sync_offsets` | 逐首歌的時間軸偏移 |
+| `artist_aliases` | 歌手別名對應（還原平台翻譯） |
+| `romaji_hints` | 各平台逐字羅馬音的讀音提示快取 |
