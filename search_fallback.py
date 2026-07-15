@@ -8,47 +8,8 @@ import json
 import logging
 import syncedlyrics
 import requests
-import base64
 
-def fetch_qqmusic(title, artist):
-    """
-    透過 QQMusic API 搜尋並抓取歌詞
-    回傳: (歌詞字串, 來源名稱) 或 (None, None)
-    """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Referer": "https://y.qq.com/"
-    }
-    # 搜尋歌曲 API
-    search_url = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
-    params = {"p": 1, "n": 3, "w": f"{title} {artist}", "format": "json"}
-    try:
-        resp = requests.get(search_url, params=params, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            songs = data.get("data", {}).get("song", {}).get("list", [])
-            if not songs: return None, None
-            
-            # 取第一首 (最相關) 歌曲的 songmid
-            best_song = songs[0]
-            songmid = best_song.get("songmid")
-            if not songmid: return None, None
-            
-            # 透過 songmid 取得歌詞 API
-            lyric_url = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
-            l_params = {"songmid": songmid, "format": "json", "nobase64": 0}
-            l_resp = requests.get(lyric_url, params=l_params, headers=headers, timeout=5)
-            
-            if l_resp.status_code == 200:
-                l_data = l_resp.json()
-                lyric_b64 = l_data.get("lyric", "")
-                if lyric_b64:
-                    # QQMusic 返回的歌詞是 Base64 編碼，需要解碼
-                    lyric_text = base64.b64decode(lyric_b64).decode("utf-8", errors="ignore")
-                    return lyric_text, "QQMusic"
-    except Exception as e:
-        pass
-    return None, None
+# QQ 音樂歌詞由 cn_music.py 的 musicu.fcg 端點處理,這裡不再自行抓 QQ。
 
 def fetch_single_provider(query, provider):
     """透過 syncedlyrics 套件向單一供應商請求歌詞"""
@@ -142,10 +103,6 @@ def main():
     if return_all:
         # 獲取所有可能的備用歌詞列表
         results = []
-        qq_lyric, _ = fetch_qqmusic(title, artist)
-        if qq_lyric:
-            results.append({"lyrics": qq_lyric, "source": "QQMusic"})
-            
         queries = generate_queries(title, artist)
         for p in providers:
             for q_title, q_artist in queries:
@@ -180,18 +137,16 @@ def main():
         print(json.dumps({"success": True, "results": results}))
         return
 
-    # 預設行為：先嘗試 QQMusic，失敗再嘗試 syncedlyrics 預設的平台
+    # 預設行為：透過 syncedlyrics 支援的平台搜尋 (QQ 由 cn_music.py 處理)
     try:
-        lyric, source = fetch_qqmusic(title, artist)
-        
-        if not lyric:
-            queries = generate_queries(title, artist)
-            for q_title, q_artist in queries:
-                query = f"{q_title} {q_artist}"
-                lyric = syncedlyrics.search(query, providers=providers)
-                if lyric:
-                    source = "NetEase"
-                    break
+        lyric, source = None, None
+        queries = generate_queries(title, artist)
+        for q_title, q_artist in queries:
+            query = f"{q_title} {q_artist}"
+            lyric = syncedlyrics.search(query, providers=providers)
+            if lyric:
+                source = "NetEase"
+                break
         if not lyric:
             try:
                 itunes_url = "https://itunes.apple.com/search"

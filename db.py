@@ -4,7 +4,6 @@ SQLite 資料庫管理模組
 """
 import sqlite3
 import json
-import logging
 from typing import Optional
 from config import DB_FILE
 
@@ -114,15 +113,6 @@ class DatabaseManager:
         """儲存特定歌曲獨立的時間軸偏移量"""
         self.cursor.execute("INSERT OR REPLACE INTO sync_offsets VALUES (?, ?, ?)", (artist, title, offset))
         self.conn.commit()
-
-    def add_listening_history(self, artist: str, title: str, album: str, duration: int = 180) -> None:
-        """新增一筆聽歌歷史紀錄"""
-        try:
-            self.cursor.execute("INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)", 
-                                (artist, title, album, duration))
-            self.conn.commit()
-        except Exception as e:
-            logging.error(f"儲存播放歷史失敗: {e}")
 
 # 建立全域 db 實例供其他模組匯入使用
 db = DatabaseManager()
