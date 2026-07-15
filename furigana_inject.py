@@ -32,6 +32,12 @@ _COMMON_READING = {
     '私': 'わたし',   # 兩邊來源預設都是 わたくし
 }
 
+# 親族呼稱 + 敬稱:兄/姉/父/母 後面接 さん/ちゃん/さま 時讀 にい/ねえ/とう/かあ。
+# unidic-lite 這裡固定給字典音 あに/あね/ちち/はは —— 只有「接敬稱」這個語境要改,
+# 單獨或別的複合 (兄弟=きょうだい) 不動,所以是有界規則而非通用跨詞比對。
+_KINSHIP_READING = {'兄': 'にい', '姉': 'ねえ', '父': 'とう', '母': 'かあ'}
+_HONORIFIC = {'さん', 'ちゃん', 'さま'}
+
 def kata2hira(text):
     if not text: return ""
     return "".join(chr(ord(c) - 0x60) if 0x30a1 <= ord(c) <= 0x30f6 else c for c in text)
@@ -107,28 +113,52 @@ def apply_hint(words, hint):
 
         w['hira'] = candidate
 
-def split_internal_kana(orig_chunk, hira_chunk, full_orig, full_hira, h_off=0):
-    """
-    遞迴處理漢字與平假名混合的詞彙 (如 送り仮名)。
-    例如：「食べて」中「食」是漢字，「べて」是平假名，此函式負責將它們正確拆分。
-    h_off 是 hira_chunk 在 full_hira 中的起始位置。一個斷詞可能被拆成多個 ruby
-    (如 噛み締め → 噛(か) + 締(し))，前端得靠 data-hs/data-hlen 知道自己編輯的是
-    整詞讀音的哪一段，存回資料庫時才拼得回整詞。
-    """
-    match = re.search(r'([\u3040-\u30ff]+)', orig_chunk) # 找出原始文字中的平假/片假名
-    if match:
-        kana = match.group(1)
-        if kana in hira_chunk:
-            # 根據找到的假名將字詞切分為左右兩半
-            parts_orig = orig_chunk.split(kana, 1)
-            parts_hira = hira_chunk.split(kana, 1)
-            right_off = h_off + len(parts_hira[0]) + len(kana)
-            left = split_internal_kana(parts_orig[0], parts_hira[0], full_orig, full_hira, h_off) if parts_orig[0] else ''
-            right = split_internal_kana(parts_orig[1], parts_hira[1], full_orig, full_hira, right_off) if parts_orig[1] else ''
-            return f"{left}{kana}{right}"
-    # 若無內部假名可拆分，則直接包裝成 ruby 標籤
+_KANA_SEG = re.compile(r'[぀-ヿ]+|[^぀-ヿ]+')
+_IS_KANA_SEG = re.compile(r'^[぀-ヿ]+$')
+
+def _norm_kana(s):
+    """等長正規化,只用於對齊比較 (づ/ず、は/わ 等羅馬字損失視為相同)。"""
+    return kata2hira(s).translate(_KANA_EQ)
+
+def _ruby(orig_chunk, hira_chunk, full_orig, full_hira, h_off):
     return (f"<ruby class='editable-ruby' data-orig='{full_orig}' data-hira='{full_hira}' "
             f"data-hs='{h_off}' data-hlen='{len(hira_chunk)}'>{orig_chunk}<rt>{hira_chunk}</rt></ruby>")
+
+def split_internal_kana(orig_chunk, hira_chunk, full_orig, full_hira, h_off=0):
+    """
+    處理漢字與平假名混合的詞彙 (如 送り仮名),把讀音正確分配到每個漢字段。
+    例如「食べて」→ 食(た) + べて。一個斷詞可能被拆成多個 ruby
+    (如 噛み締め → 噛(か) + 締(し)),前端得靠 data-hs/data-hlen 知道自己編輯的是
+    整詞讀音的哪一段,存回資料庫時才拼得回整詞。
+
+    做法:把 orig 切成 假名段/漢字段 交錯序列,組一條 regex —— 假名段是字面文字,
+    漢字段是非貪婪的 (.+?) —— 用 fullmatch 去對整詞讀音,每個漢字段吃到的區間就是它的
+    讀音。這樣「言い訳(いいわけ)」的詞內「い」會對到讀音第二個い (言=い、訳=わけ),
+    不會像逐字 split 那樣切在第一個い上、害「言」拿到空讀音。
+    對不上時整詞包成一個 ruby,寧可整詞標音也不要出現空 <rt>。
+    _norm_kana 等長,regex 的 span 位置可直接切回未正規化的 hira_chunk。
+    """
+    segs = _KANA_SEG.findall(orig_chunk)
+
+    pattern = ''
+    for seg in segs:
+        pattern += re.escape(_norm_kana(seg)) if _IS_KANA_SEG.match(seg) else '(.+?)'
+
+    m = re.fullmatch(pattern, _norm_kana(hira_chunk)) if '(' in pattern else None
+    if m is None:
+        # 純漢字 (無詞內假名) 或對不上:整段一個 ruby
+        return _ruby(orig_chunk, hira_chunk, full_orig, full_hira, h_off)
+
+    out = []
+    gi = 0
+    for seg in segs:
+        if _IS_KANA_SEG.match(seg):
+            out.append(seg)
+        else:
+            gi += 1
+            s, e = m.span(gi)
+            out.append(_ruby(seg, hira_chunk[s:e], full_orig, full_hira, h_off + s))
+    return ''.join(out)
 
 def build_ruby_html(text, artist, title, hint=None):
     """
@@ -165,6 +195,12 @@ def build_ruby_html(text, artist, title, hint=None):
     for w in words:
         if not w.get('is_space') and w['orig'] in _COMMON_READING:
             w['hira'] = _COMMON_READING[w['orig']]
+
+    # 親族呼稱接敬稱時改用暱稱讀音 (兄さん = にいさん,而非字典的 あにさん)
+    non_space = [w for w in words if not w.get('is_space')]
+    for a, b in zip(non_space, non_space[1:]):
+        if a['orig'] in _KINSHIP_READING and b['orig'] in _HONORIFIC:
+            a['hira'] = _KINSHIP_READING[a['orig']]
 
     html_parts = []
     
