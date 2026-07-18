@@ -33,8 +33,7 @@
                 </div>
             </div>
             <div class="player-right">
-                <button id="loop-mode-btn" class="ctrl-btn" onclick="toggleLoopMode()" title="段落循環"><i class="fa-solid fa-bookmark"></i></button>
-                <button id="toggle-ruby-mode-btn" class="ctrl-btn" onclick="toggleRubyEditMode()" title="編輯假名模式"><i class="fa-solid fa-pen"></i></button>
+                <!-- 備選歌詞放工具列最左:浮層以按鈕為中心展開,離視窗右緣越遠能開得越寬 -->
                 <div class="lyrics-opt-wrap">
                     <%
                         // 備選歌詞鈕的初始樣子也由 server 決定 (搜尋中 = 轉圈,已搜到 = 綠色打勾),不然會閃一下
@@ -52,6 +51,8 @@
                     <div id="lyrics-opt-bubble" class="lyrics-opt-bubble" onclick="openLyricsModal()"></div>
                     <%- include('modals/lyrics-options') %>
                 </div>
+                <button id="loop-mode-btn" class="ctrl-btn" onclick="toggleLoopMode()" title="段落循環"><i class="fa-solid fa-bookmark"></i></button>
+                <button id="toggle-ruby-mode-btn" class="ctrl-btn" onclick="toggleRubyEditMode()" title="編輯假名模式"><i class="fa-solid fa-pen"></i></button>
                 <button class="ctrl-btn" onclick="reloadCurrentLyrics()" title="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
                 <button id="desktop-toggle-btn" class="ctrl-btn" onclick="launchPyQt6()" title="桌面靈動島">
                     <i class="fa-solid fa-mobile-screen"></i>
@@ -90,10 +91,12 @@
         function closeSettingsMenu() {
             const menu = document.getElementById('settings-menu');
             if (menu) menu.classList.remove('show');
-            const sec = document.getElementById('hotkeys-section');
-            if (sec) sec.classList.remove('show');
-            const btn = document.getElementById('hotkeys-toggle');
-            if (btn) btn.classList.remove('open');
+            ['hotkeys', 'source'].forEach(k => {
+                const sec = document.getElementById(k + '-section');
+                if (sec) sec.classList.remove('show');
+                const btn = document.getElementById(k + '-toggle');
+                if (btn) btn.classList.remove('open');
+            });
         }
 
         document.addEventListener('click', (e) => {
@@ -113,10 +116,53 @@
             if (btn) btn.classList.toggle('open', open);
         }
 
+        // 音訊來源:每次展開才掃一次目前系統上的媒體 session,關掉的 app 不會留在清單
+        function toggleSourceSection(e) {
+            if (e) e.stopPropagation();
+            const sec = document.getElementById('source-section');
+            const btn = document.getElementById('source-toggle');
+            if (!sec) return;
+            const open = sec.classList.toggle('show');
+            if (btn) btn.classList.toggle('open', open);
+            if (open) loadMediaSources();
+        }
+
+        function loadMediaSources() {
+            const sec = document.getElementById('source-section');
+            sec.innerHTML = '<div class="hk-label">掃描中…</div>';
+            fetch('/api/media-sources')
+                .then(r => r.json())
+                .then(data => {
+                    const rows = [{ app_id: 'auto', name: '自動 (預設)' }].concat(data.sources || []);
+                    sec.innerHTML = rows.map(s => {
+                        const now = s.app_id === 'auto' ? '優先選擇音樂播放器'
+                            : [s.is_playing ? '▶' : '⏸', [s.title, s.artist].filter(Boolean).join(' - ')].join(' ').trim();
+                        const checked = (data.current || 'auto') === s.app_id ? ' checked' : '';
+                        return `<label class="src-row">
+                            <input type="radio" name="media-source" value="${escapeAttr(s.app_id)}"${checked}
+                                   onchange="selectMediaSource(this.value)">
+                            <span class="menu-label">${escapeAttr(s.name)}
+                                ${now ? `<span class="src-now">${escapeAttr(now)}</span>` : ''}
+                            </span>
+                        </label>`;
+                    }).join('');
+                })
+                .catch(() => { sec.innerHTML = '<div class="hk-label">無法取得來源清單</div>'; });
+        }
+
+        function escapeAttr(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g,
+                c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function selectMediaSource(appId) {
+            saveSettingsToServer('media_source', appId);
+        }
+
         // ── 使用說明:引導式導覽 ──
         const tourSteps = [
             { page: '/',       el: '.nav-menu',      title: '側欄導覽',   text: '這裡可以切換頁面：懸浮歌詞、統計數據、排行榜、歌詞編輯器。滑鼠移到圖示上會顯示名稱。' },
-            { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '所有設定都在這裡：日文假名、文字大小、歌詞對齊、優先搜尋來源、快捷鍵等。' },
+            { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '所有設定都在這裡：日文假名、文字大小、歌詞對齊、優先搜尋來源、音訊來源、快捷鍵等。' },
             { page: '/',       el: '#lyrics-scroll', title: '歌詞區',     text: '歌詞會隨播放自動同步捲動，漢字上方標示假名注音。點任一句歌詞可以直接跳轉到該時間點。' },
             { page: '/',       el: '.player-center', title: '播放控制',   text: '控制播放/暫停、上下一首，拖曳進度條可跳轉。' },
             { page: '/',       el: '.player-right',  title: '工具列',     text: '由左至右：段落循環、編輯假名、取得備選歌詞、重新載入歌詞、桌面靈動島、放大模式。每顆都可以在設定選單裡自訂快捷鍵。接下來幾顆值得細講。' },

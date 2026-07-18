@@ -233,8 +233,35 @@ button.menu-action {
     transition: transform 0.15s ease;
 }
 
-#hotkeys-toggle.open .hotkeys-chevron {
+#hotkeys-toggle.open .hotkeys-chevron,
+#source-toggle.open .hotkeys-chevron {
     transform: rotate(90deg);
+}
+
+/* 音訊來源:整列可點的 radio,第二行小字顯示該來源正在放什麼 */
+.src-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 4px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.src-row:hover {
+    background: var(--panel-border);
+}
+
+.src-now {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.75;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 190px;
 }
 
 /* 往右飛出的子選單,不擠壓主選單的高度。
@@ -1559,8 +1586,9 @@ body.window-maximized .fullscreen-btn .icon-compress { display: inline !importan
     bottom: calc(100% + 10px);
     left: 50%;
     transform: translateX(calc(-50% + var(--panel-nudge, 0px)));
-    /* 寬度受限於按鈕到視窗右緣的距離 (約 142px):再寬就沒辦法以按鈕為中心,會被推開 */
-    width: 264px;
+    /* 按鈕移到工具列最左後,右邊空間夠讓浮層真的以按鈕為中心展開。
+       窄視窗時 keepPanelInView() 仍會把它推回可視範圍 */
+    width: min(420px, calc(100vw - 32px));
     padding: 10px;
     background: var(--panel-hover);
     border: 1px solid var(--panel-border);
@@ -1648,7 +1676,7 @@ body.window-maximized .fullscreen-btn .icon-compress { display: inline !importan
 
 #lyrics-options-list {
     margin-top: 10px;
-    max-height: 250px;
+    max-height: min(420px, calc(100vh - 220px));
     overflow-y: auto;
     display: flex;
     flex-direction: column;

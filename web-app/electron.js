@@ -15,11 +15,11 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
-let PORT = Number(process.env.PORT) || 3000;
+let PORT = Number(process.env.PORT) || 5720;
 const DEV_ROOT = path.join(__dirname, '..');
 
-// 找可用 port:優先用偏好值 (3000),被占用就讓 OS 指派一個空閒的,
-// 這樣別人電腦上就算 3000 被別的程式占著也能正常開起來。
+// 找可用 port:優先用偏好值 (5720),被占用就讓 OS 指派一個空閒的,
+// 這樣別人電腦上就算 5720 被別的程式占著也能正常開起來。
 function findFreePort(preferred) {
   return new Promise((resolve) => {
     const srv = net.createServer();
@@ -56,7 +56,7 @@ if (app.isPackaged) {
       'hk-plain-prev': 'ArrowUp', 'hk-plain-next': 'ArrowDown',
       'hk-ab-loop': 'A', 'hk-ruby-edit': 'E', 'hk-lyrics-opt': 'L', 'hk-reload': 'R',
       'hk-island': 'D', 'hk-fullscreen': 'F',
-      dynamic_island: false, island_lines: 2
+      dynamic_island: false, island_lines: 2, media_source: 'auto'
     }, null, 4), 'utf8');
   }
 }
@@ -163,5 +163,11 @@ app.on('before-quit', () => {
   if (islandProc) {
     try { islandProc.kill(); } catch (e) {}
   }
-  try { fs.unlinkSync(path.join(process.env.DATA_DIR || DEV_ROOT, 'app.pid')); } catch (e) {}
+  // 網頁按鈕開的靈動島是 detached 進程,electron 沒有 handle,只能靠 app.pid 收掉
+  const pidFile = path.join(process.env.DATA_DIR || DEV_ROOT, 'app.pid');
+  try {
+    const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim());
+    if (pid) process.kill(pid);
+  } catch (e) {}
+  try { fs.unlinkSync(pidFile); } catch (e) {}
 });

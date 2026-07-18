@@ -34,11 +34,13 @@ async function reloadCurrentLyrics() {
     const { title, artist } = currentSong();
     if (!title) return noSongToast();
     showToast(`重新載入: ${title}`, 'fa-solid fa-rotate', 2000);
+    // 刻意走快取:這顆是「重畫 + 重新套用假名修正」,不是強制上網重抓。
+    // 真的要換一份歌詞請用「搜尋備選歌詞」。
     if (typeof fetchAndParseLyrics === 'function') {
-        fetchAndParseLyrics(title, artist);   // 首頁:重抓並重畫歌詞面板
+        fetchAndParseLyrics(title, artist);   // 首頁:重新載入並重畫歌詞面板
     } else {
-        // 其他頁:讓 server 重抓 (force),結果會廣播給首頁與靈動島
-        await fetch(`/api/lyrics/fetch?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&force=1`);
+        // 其他頁:讓 server 重跑一次,結果會廣播給首頁與靈動島
+        await fetch(`/api/lyrics/fetch?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);
     }
 }
 

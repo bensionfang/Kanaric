@@ -8,6 +8,7 @@ Node.js 後端以子命令呼叫本腳本;打包發布時由 PyInstaller 將此�
   pytools.py cnlyrics                       stdin 收 JSON、抓網易/酷狗歌詞 (順便存讀音提示)
   pytools.py romaji <text>                  羅馬拼音轉平假名 (jaconv)
   pytools.py minimize                       最小化目前前景視窗
+  pytools.py sessions                       列出目前系統上的媒體來源 (stdout JSON)
 """
 import sys
 import os
@@ -133,13 +134,10 @@ def main():
     elif cmd == "seek":
         import asyncio
         from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+        from media_monitor import pick_session, load_media_source
         async def do_seek(sec):
             sessions = await GlobalSystemMediaTransportControlsSessionManager.request_async()
-            sess = None
-            for s in sessions.get_sessions():
-                if "spotify" in (s.source_app_user_model_id or "").lower():
-                    sess = s
-                    break
+            sess = pick_session(sessions.get_sessions(), load_media_source())
             if sess:
                 try:
                     await sess.try_change_playback_position_async(int(float(sec) * 10000000))
@@ -150,13 +148,10 @@ def main():
         import asyncio
         import winrt.windows.media as wm
         from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+        from media_monitor import pick_session, load_media_source
         async def do_media_action(action):
             sessions = await GlobalSystemMediaTransportControlsSessionManager.request_async()
-            sess = None
-            for s in sessions.get_sessions():
-                if "spotify" in (s.source_app_user_model_id or "").lower():
-                    sess = s
-                    break
+            sess = pick_session(sessions.get_sessions(), load_media_source())
             if sess:
                 try:
                     if action == "play":
@@ -181,6 +176,48 @@ def main():
                 except Exception:
                     pass
         asyncio.run(do_media_action(args[0]))
+    elif cmd == "sessions":
+        import asyncio
+        import json
+        import re
+        from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+        from media_monitor import load_media_source
+
+        def friendly_name(app_id):
+            """Spotify.exe -> Spotify;AppleInc.AppleMusicWin_hash!App -> AppleMusicWin"""
+            name = app_id.split('!')[0]
+            name = re.sub(r'_[0-9a-z]{10,}$', '', name)  # UWP 套件的雜湊尾巴
+            name = name.rsplit('\\', 1)[-1].split('/')[-1]
+            name = re.sub(r'\.exe$', '', name, flags=re.I)
+            return name.rsplit('.', 1)[-1] or app_id
+
+        async def list_sessions():
+            mgr = await GlobalSystemMediaTransportControlsSessionManager.request_async()
+            found = {}
+            for s in mgr.get_sessions():
+                app_id = s.source_app_user_model_id or ""
+                if not app_id:
+                    continue
+                pb = s.get_playback_info()
+                is_playing = bool(pb and pb.playback_status == 4)
+                # 同一個 app 只列一筆,播放中的那筆優先當代表
+                if app_id in found and not (is_playing and not found[app_id]["is_playing"]):
+                    continue
+                try:
+                    info = await s.try_get_media_properties_async()
+                    title, artist = info.title or "", info.artist or ""
+                except Exception:
+                    title, artist = "", ""
+                found[app_id] = {
+                    "app_id": app_id, "name": friendly_name(app_id),
+                    "title": title, "artist": artist, "is_playing": is_playing
+                }
+            print(json.dumps({
+                "current": load_media_source(),
+                "sources": list(found.values())
+            }, ensure_ascii=False))
+
+        asyncio.run(list_sessions())
     else:
         print(f"Unknown command: {cmd!r}", file=sys.stderr)
         sys.exit(1)

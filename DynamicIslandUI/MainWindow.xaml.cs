@@ -39,13 +39,13 @@ namespace DynamicIslandUI
         private double _syncOffset = 0;
         private CancellationTokenSource _pauseCts;
 
-        // 伺服器 port 由 Electron 啟動時以第一個命令列參數傳入 (3000 被占用時會換);獨立執行則預設 3000
+        // 伺服器 port 由 Electron 啟動時以第一個命令列參數傳入 (5720 被占用時會換);獨立執行則預設 5720
         private static readonly int ServerPort = ParseServerPort();
         private static int ParseServerPort()
         {
             var args = Environment.GetCommandLineArgs();
             if (args.Length > 1 && int.TryParse(args[1], out int p) && p > 0 && p < 65536) return p;
-            return 3000;
+            return 5720;
         }
 
         private class MediaStateUpdate
@@ -67,11 +67,15 @@ namespace DynamicIslandUI
 
         public MainWindow()
         {
+            // 安裝後 cwd 是 Program Files,沒寫入權限,crash log 要落在 %APPDATA%
+            string logDir = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FloatingLyrics");
+            System.IO.Directory.CreateDirectory(logDir);
             AppDomain.CurrentDomain.UnhandledException += (s, e) => {
-                System.IO.File.WriteAllText("fatal_crash.log", e.ExceptionObject.ToString());
+                System.IO.File.WriteAllText(System.IO.Path.Combine(logDir, "fatal_crash.log"), e.ExceptionObject.ToString());
             };
             Application.Current.DispatcherUnhandledException += (s, e) => {
-                System.IO.File.WriteAllText("ui_crash.log", e.Exception.ToString());
+                System.IO.File.WriteAllText(System.IO.Path.Combine(logDir, "ui_crash.log"), e.Exception.ToString());
                 e.Handled = true;
             };
             InitializeComponent();

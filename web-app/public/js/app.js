@@ -97,19 +97,26 @@ function handleManualScroll() {
 document.getElementById('lyrics-scroll').addEventListener('wheel', handleManualScroll, { passive: true });
 document.getElementById('lyrics-scroll').addEventListener('touchmove', handleManualScroll, { passive: true });
 
+// 重畫歌詞後 DOM 是全新的、捲軸回到最頂,這時再平滑捲動會從頭滑一大段才追上正在唱的那句。
+// renderLyrics() 會立這個旗標,讓「下一次」置中直接跳過去,之後恢復平滑捲動。
+let jumpToActiveLine = false;
+
+// 把正在唱的那句捲到畫面正中 (唯一實作,五個呼叫點共用)
+function centerActiveLine() {
+    if (activeLyricIndex < 0) return;
+    const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
+    const pane = document.getElementById('lyrics-scroll');
+    if (!currentLine || !pane) return;
+    const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
+    pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: jumpToActiveLine ? 'auto' : 'smooth' });
+    jumpToActiveLine = false;
+}
+
 function resumeSync() {
     isUserScrolling = false;
     const panel = document.getElementById('sync-resume-panel');
     if (panel) panel.style.display = 'none';
-    
-    if (activeLyricIndex >= 0) {
-        const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
-        const pane = document.getElementById('lyrics-scroll');
-        if (currentLine && pane) {
-            const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
-            pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: 'smooth' });
-        }
-    }
+    centerActiveLine();
 }// -------------------------------------------------------------
 // Live Sync Logic
 // -------------------------------------------------------------
@@ -404,6 +411,7 @@ function renderLyrics() {
     
     pane.innerHTML = html;
     activeLyricIndex = -1;
+    jumpToActiveLine = true;   // 重畫後第一次置中用瞬移,不要從頂端滑下來
     restoreLoopRange();   // 換頁回來時把上次選好的段落接回來
     paintLoopRange();
 }
@@ -451,16 +459,9 @@ function syncLyricsToTime(position) {
             const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
             if (currentLine) {
                 currentLine.classList.add('active');
-                
+
                 // Only scroll if the user is not manually scrolling
-                if (!isUserScrolling) {
-                    const pane = document.getElementById('lyrics-scroll');
-                    const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
-                    pane.scrollTo({
-                        top: Math.max(0, scrollOffset),
-                        behavior: 'smooth'
-                    });
-                }
+                if (!isUserScrolling) centerActiveLine();
             }
         }
     }
@@ -558,14 +559,7 @@ document.addEventListener('keydown', (e) => {
             handleManualScroll();
             activeLyricIndex--;
             updateLyricsHighlight(activeLyricIndex);
-            
-            // Scroll to it
-            const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
-            const pane = document.getElementById('lyrics-scroll');
-            if (currentLine && pane) {
-                const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
-                pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: 'smooth' });
-            }
+            centerActiveLine();
         }
     } else if (fullKey === activeHotkeys.plainNext) {
         e.preventDefault();
@@ -573,13 +567,7 @@ document.addEventListener('keydown', (e) => {
             handleManualScroll();
             activeLyricIndex++;
             updateLyricsHighlight(activeLyricIndex);
-            
-            const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
-            const pane = document.getElementById('lyrics-scroll');
-            if (currentLine && pane) {
-                const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
-                pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: 'smooth' });
-            }
+            centerActiveLine();
         }
     } else {
         for (const [id, hk] of Object.entries(TOOLBAR_HOTKEYS)) {
@@ -995,16 +983,7 @@ function toggleFullscreen() {
     localStorage.setItem('zoomModeActive', isMaximized ? 'true' : 'false');
 
     // Re-center the lyrics after the transition
-    setTimeout(() => {
-        if (activeLyricIndex >= 0) {
-            const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
-            const pane = document.getElementById('lyrics-scroll');
-            if (currentLine && pane) {
-                const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
-                pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: 'smooth' });
-            }
-        }
-    }, 300);
+    setTimeout(centerActiveLine, 300);
 }
 
 

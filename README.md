@@ -38,7 +38,7 @@ pip install -r requirements.txt
 # Node 依賴與啟動（一切從 web-app/ 出發）
 cd web-app
 npm install
-npm start        # 只跑網頁後台 http://localhost:3000
+npm start        # 只跑網頁後台 http://localhost:5720
 npm run app      # Electron 桌面殼:後台 + 儀表板視窗 + 系統匣 + 靈動島,一鍵全開
 
 # 打包安裝檔（產出在 web-app/release/）

@@ -20,5 +20,6 @@
     "hk-reload": "R",
     "hk-island": "D",
     "hk-fullscreen": "F",
-    "hk-ruby-edit": "E"
+    "hk-ruby-edit": "E",
+    "media_source": "auto"
 }

@@ -3,6 +3,7 @@ CLI 媒體監聽腳本 (給 Node.js 網頁後台使用)
 使用標準輸出 (stdout) 以 JSON 格式持續印出目前的媒體狀態。
 Node.js 伺服器會將這個腳本當作子進程啟動並監聽。
 """
+import os
 import sys
 import json
 import time
@@ -18,6 +19,53 @@ CLOUD_URL = None
 LAST_CLOUD_SYNC_TIME = 0
 LAST_CLOUD_STATE = None
 
+# 自動模式下優先採用的音樂 app (比對 source_app_user_model_id 的小寫子字串)
+# Apple Music 的 app id 形如 AppleInc.AppleMusicWin_nzyj5cx40ttqa!App
+MUSIC_APPS = ("spotify", "applemusic", "itunes", "zunemusic")
+
+SETTINGS_PATH = os.environ.get('LYRICS_SETTINGS_PATH') or \
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'settings.json')
+
+
+def load_media_source():
+    """讀 settings.json 的 media_source;讀不到一律當 'auto'。"""
+    try:
+        with open(SETTINGS_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f).get('media_source') or 'auto'
+    except Exception:
+        return 'auto'
+
+
+def _is_playing(sess):
+    pb = sess.get_playback_info()
+    return bool(pb and pb.playback_status == 4)
+
+
+def pick_session(all_sessions, pref='auto'):
+    """挑出要顯示歌詞的 session。
+
+    pref 為 app id 時只認那個 app (同 app 多個 session 取正在播的);找不到就回 None,
+    不偷偷退回別的來源 —— 使用者明確指定過。
+    pref='auto' 時音樂 app 優先:播放中的音樂 app > 暫停中的音樂 app > 任何播放中的 session。
+    第二順位排在第三之前是刻意的:Spotify 暫停時歌詞不該被背景影片搶走。
+    """
+    def app_id(s):
+        return (s.source_app_user_model_id or "").lower()
+
+    if pref and pref != 'auto':
+        same_app = [s for s in all_sessions if app_id(s) == pref.lower()]
+        if not same_app:
+            return None
+        return next((s for s in same_app if _is_playing(s)), same_app[0])
+
+    music = [s for s in all_sessions if any(k in app_id(s) for k in MUSIC_APPS)]
+    playing_music = next((s for s in music if _is_playing(s)), None)
+    if playing_music:
+        return playing_music
+    if music:
+        return music[0]
+    return next((s for s in all_sessions if _is_playing(s)), None)
+
 async def poll_media():
     """與 media.py 邏輯類似，但輸出對象為終端機標準輸出"""
     sessions = await GlobalSystemMediaTransportControlsSessionManager.request_async()
@@ -26,28 +74,22 @@ async def poll_media():
     last_song_id = ""
     current_thumb_b64 = ""
     last_sent_thumb_id = ""
-    
+    media_source = load_media_source()
+    settings_mtime = -1.0
+
     while True:
         try:
+            # 設定改了就即時生效,不用重啟這個子進程 (stat 很便宜,只有 mtime 變才重讀)
+            try:
+                mtime = os.stat(SETTINGS_PATH).st_mtime
+            except OSError:
+                mtime = -1.0
+            if mtime != settings_mtime:
+                settings_mtime = mtime
+                media_source = load_media_source()
+
             all_sessions = sessions.get_sessions()
-            current_session = None
-            
-            # 第一階段：尋找「正在播放」的 Spotify Session
-            for sess in all_sessions:
-                app_id = (sess.source_app_user_model_id or "").lower()
-                if "spotify" in app_id:
-                    pb_info = sess.get_playback_info()
-                    if pb_info and pb_info.playback_status == 4: # playing
-                        current_session = sess
-                        break
-                        
-            # 第二階段：若 Spotify 沒有在播，尋找暫停中的 Spotify Session
-            if not current_session:
-                for sess in all_sessions:
-                    app_id = (sess.source_app_user_model_id or "").lower()
-                    if "spotify" in app_id:
-                        current_session = sess
-                        break
+            current_session = pick_session(all_sessions, media_source)
 
             if current_session:
                 info = await current_session.try_get_media_properties_async()
@@ -109,14 +151,21 @@ async def poll_media():
                     state["thumbnail"] = current_thumb_b64
                     last_sent_thumb_id = song_id
             else:
-                # 系統無音樂播放時傳送空狀態
+                # 沒有可用來源時傳送空狀態。Node 端是淺層合併 (server.js:146),
+                # 欄位漏掉就會留著上一首的值,所以這裡要把每個欄位都寫成空
                 state = {
                     "title": "",
                     "artist": "",
+                    "album": "",
                     "position": 0.0,
+                    "duration": 0.0,
                     "is_playing": False,
+                    "shuffle": False,
+                    "repeat": 0,
                     "thumbnail": ""
                 }
+                last_song_id = ""
+                last_sent_thumb_id = ""
             
             # 以 JSON 單行格式輸出，並強制 flush 確保 Node.js 能夠即時讀取到
             state_json = json.dumps(state)

@@ -19,7 +19,7 @@ const { spawn } = require('child_process');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5720;
 const DB_PATH = path.resolve(__dirname, process.env.DB_PATH || '../lyrics_data.db');
 const PARENT_DIR = path.join(__dirname, '..');
 
@@ -142,6 +142,12 @@ global.handleMediaUpdate = function(rawState) {
       }
     }
     
+    // 沒有播放來源時,上一首的 iTunes 原名也要跟著清掉 (合併是淺層的,不清就會留著)
+    if (!rawState.title) {
+      rawState.original_title = '';
+      rawState.original_artist = '';
+    }
+
     const state = rawState;
     currentMediaState = { ...currentMediaState, ...state };
     
@@ -332,6 +338,13 @@ app.post('/api/settings', (req, res) => {
   }
 });
 
+// 目前系統上有哪些媒體來源 (設定選單的「音訊來源」用)。每次打開子選單才掃一次。
+app.get('/api/media-sources', async (req, res) => {
+  if (os.platform() !== 'win32') return res.json({ current: 'auto', sources: [] });
+  const result = await spawnPyJson(['sessions'], { timeoutMs: 5000, onJson: (j) => j });
+  res.json(result || { current: 'auto', sources: [] });
+});
+
 // 製作人員/職位名。繁簡成對列出,因為中國平台的日文歌詞混用兩種寫法。
 const CREDIT_KEYWORDS = [
   "作詞", "作词", "作曲", "編曲", "编曲", "製作", "制作", "混音", "演唱", "原唱",
@@ -392,7 +405,23 @@ function autoMarkTitleLines(lrcText) {
   return newLines.join('\n');
 }
 
+// 注音一次要開一個 python 進程 (fugashi + unidic 每次重載,打包版還要解壓 exe),
+// 換頁回歌詞頁就得再等一次。同一份歌詞的結果存起來,只有歌詞本身變了才重跑。
+// 使用者改假名 (word_corrections) 時由 rebroadcastLyrics() 那條路徑清掉。
+const furiganaCache = new Map();   // key = artist|||title -> { src, out }
+const FURIGANA_CACHE_MAX = 50;
+
+function furiganaKey(artist, title) { return `${artist}|||${title}`; }
+
+function invalidateFurigana(artist, title) {
+  furiganaCache.delete(furiganaKey(artist, title));
+}
+
 function injectFurigana(artist, title, lyrics) {
+  const key = furiganaKey(artist, title);
+  const hit = furiganaCache.get(key);
+  if (hit && hit.src === lyrics) return Promise.resolve(hit.out);
+
   return new Promise((resolve) => {
     console.log("injectFurigana called for:", title, artist);
     const pyProcess = spawnPy(['furigana']);
@@ -408,6 +437,10 @@ function injectFurigana(artist, title, lyrics) {
       try {
         const parsed = JSON.parse(output);
         if (parsed.success && parsed.lyrics) {
+          if (furiganaCache.size >= FURIGANA_CACHE_MAX) {
+            furiganaCache.delete(furiganaCache.keys().next().value);   // 丟最舊的
+          }
+          furiganaCache.set(key, { src: lyrics, out: parsed.lyrics });
           resolve(parsed.lyrics);
         } else {
           console.error("Python script failed:", parsed.error);
@@ -497,6 +530,9 @@ function fetchFallback(title, artist, fetchAll = false) {
 
 // 修正發音後,若正在播這首歌就立刻重新注音並推播
 function rebroadcastLyrics(artist, title) {
+  // 讀音改了,注音快取一定要作廢 —— 這行要在下面那個「不是正在播的歌就不推播」的
+  // 提早 return 之前,否則在編輯器改別首歌會留下過期的快取
+  invalidateFurigana(artist, title);
   if (!currentMediaState || currentMediaState.title !== title || currentMediaState.artist !== artist) return;
   db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
     if (!err && row && row.lyrics) {
@@ -1273,7 +1309,8 @@ app.post('/api/launch-pyqt6', (req, res) => {
     // Minimize the active window (browser) using ctypes
     spawnPy(['minimize']);
 
-    const child = spawn(exePath, [], { detached: true, stdio: 'ignore', cwd: path.dirname(exePath) });
+    // 必須把實際 port 傳進去,否則預設 port 被占用改用別的 port 時靈動島會連不上
+    const child = spawn(exePath, [String(PORT)], { detached: true, stdio: 'ignore', cwd: path.dirname(exePath) });
     child.unref();
     fs.writeFileSync(pidFile, child.pid.toString());
     res.json({ success: true, pid: child.pid, action: 'started' });

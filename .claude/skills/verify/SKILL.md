@@ -10,10 +10,10 @@ description: How to build, launch, and drive Floating Lyrics web UI for end-to-e
 ```powershell
 cd web-app
 Start-Process node -ArgumentList "server.js" -WindowStyle Hidden
-# wait ~4s, then http://localhost:3000 (also /stats /leaderboard /editor)
+# wait ~4s, then http://localhost:5720 (also /stats /leaderboard /editor)
 ```
 
-Kill after: `Get-NetTCPConnection -LocalPort 3000 -State Listen | % { Stop-Process -Id $_.OwningProcess -Force }`
+Kill after: `Get-NetTCPConnection -LocalPort 5720 -State Listen | % { Stop-Process -Id $_.OwningProcess -Force }`
 
 ## Drive (Playwright)
 
