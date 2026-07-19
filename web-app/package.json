@@ -1,5 +1,5 @@
 {
-  "name": "floating-lyrics",
+  "name": "kanaric",
   "version": "1.0.0",
   "description": "跨平台動態歌詞與聽歌分析系統",
   "main": "electron.js",
@@ -13,7 +13,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
+  "author": "Resuaumis",
   "license": "UNLICENSED",
   "type": "commonjs",
   "dependencies": {
@@ -31,8 +31,9 @@
     "nodemon": "^3.1.14"
   },
   "build": {
-    "appId": "com.resuaumis.floatinglyrics",
-    "productName": "FloatingLyrics",
+    "appId": "com.resuaumis.kanaric",
+    "productName": "Kanaric",
+    "copyright": "Copyright © 2026 Resuaumis",
     "directories": {
       "output": "release"
     },

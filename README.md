@@ -1,4 +1,6 @@
-# Floating Lyrics — 桌面浮動歌詞與聽歌統計
+# Kanaric — 桌面浮動歌詞與聽歌統計
+
+> by **Resuaumis**
 
 自動偵測 Spotify / Apple Music 正在播放的歌曲，線上抓取同步歌詞（LRC），日文歌詞自動標註假名（振り仮名），並以「靈動島」桌面懸浮視窗 + 網頁儀表板兩種形式顯示。同時記錄你的聽歌歷史，提供排行榜、統計圖表與年度回顧。
 
@@ -22,10 +24,10 @@
 
 ### 一般使用者（推薦）
 
-1. 取得 `FloatingLyrics Setup x.x.x.exe` 安裝檔。
+1. 取得 `Kanaric Setup x.x.x.exe` 安裝檔。
 2. 雙擊執行 — 一鍵安裝，無需系統管理員權限，裝完自動啟動並建立桌面/開始選單捷徑。
    - 安裝檔未簽章，Windows SmartScreen 可能攔截：點「其他資訊」→「仍要執行」。
-3. 所有個人資料（歌詞快取、聽歌記錄、設定）存在 `%APPDATA%/FloatingLyrics/`，解除安裝不會刪除。
+3. 所有個人資料（歌詞快取、聽歌記錄、設定）存在 `%APPDATA%/Kanaric/`，解除安裝不會刪除。
 
 ### 開發者（從原始碼執行）
 
@@ -51,7 +53,7 @@ npm run dist
 
 ### 開始使用
 
-1. 開啟 Floating Lyrics（桌面捷徑）。
+1. 開啟 Kanaric（桌面捷徑）。
 2. 用 Spotify 或 Apple Music 播放任何歌曲。
 3. 儀表板自動顯示歌曲資訊與同步歌詞；日文歌自動標註假名。
 4. 關閉視窗 = 縮到系統匣（不會結束程式）。系統匣圖示：雙擊叫回視窗，右鍵可開啟儀表板、重啟靈動島或結束。
@@ -146,3 +148,7 @@ Floating-Lyrics/
 `qrc_decrypt.py` 中的 QQ QRC 解密實作移植自 Lyricify 的 `DESHelper.cs`
 （Copyright 2023 XY Wang, WXRIW，Apache License 2.0），已由 C# 改寫為 Python。
 授權全文見 [`third_party/Lyricify-LICENSE-Apache-2.0.txt`](third_party/Lyricify-LICENSE-Apache-2.0.txt)。
+
+---
+
+© 2026 Resuaumis. All rights reserved.

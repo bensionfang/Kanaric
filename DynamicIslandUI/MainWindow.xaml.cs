@@ -69,7 +69,7 @@ namespace DynamicIslandUI
         {
             // 安裝後 cwd 是 Program Files,沒寫入權限,crash log 要落在 %APPDATA%
             string logDir = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FloatingLyrics");
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Kanaric");
             System.IO.Directory.CreateDirectory(logDir);
             AppDomain.CurrentDomain.UnhandledException += (s, e) => {
                 System.IO.File.WriteAllText(System.IO.Path.Combine(logDir, "fatal_crash.log"), e.ExceptionObject.ToString());

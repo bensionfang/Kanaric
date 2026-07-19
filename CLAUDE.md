@@ -41,7 +41,7 @@ cd web-app && npm run dist   # 產物在 web-app/release/
 # 3. 打 tag、推、建 release、附安裝檔
 git tag v1.1.0                # 一定要帶 v 前綴,server.js 用 /^v/ 剝掉再跟 package.json 比對
 git push origin v1.1.0
-gh release create v1.1.0 "web-app/release/FloatingLyrics Setup 1.1.0.exe" \
+gh release create v1.1.0 "web-app/release/Kanaric Setup 1.1.0.exe" \
   --title "v1.1.0" --notes "..."
 ```
 
@@ -72,19 +72,21 @@ One Node.js backend, multiple thin clients, with Python scripts as helpers spawn
 
 ### Desktop packaging (Electron)
 
-`web-app/electron.js` is the desktop shell: it injects env vars (`DATA_DIR`, `DB_PATH`, `LYRICS_DB_PATH`, `LYRICS_SETTINGS_PATH`, `PYTOOLS_EXE`, `ISLAND_EXE`), then `require('./server.js')` in the main process, opens a BrowserWindow on localhost:3000, adds a tray icon (close = minimize to tray), and spawns the island exe (writing `app.pid` so the web UI's toggle button stays aware of it). **In packaged mode all user data lives in `%APPDATA%/FloatingLyrics/`**; in dev mode (`npm run app`) no paths are overridden, so the repo-root DB/settings are used. Cloud/Render deployment was removed (the old `/api/sync-state` endpoint is gone); the sqlite3/Node version pins for Render GLIBC no longer apply.
+`web-app/electron.js` is the desktop shell: it injects env vars (`DATA_DIR`, `DB_PATH`, `LYRICS_DB_PATH`, `LYRICS_SETTINGS_PATH`, `PYTOOLS_EXE`, `ISLAND_EXE`), then `require('./server.js')` in the main process, opens a BrowserWindow on localhost:3000, adds a tray icon (close = minimize to tray), and spawns the island exe (writing `app.pid` so the web UI's toggle button stays aware of it). **In packaged mode all user data lives in `%APPDATA%/Kanaric/`**; in dev mode (`npm run app`) no paths are overridden, so the repo-root DB/settings are used. Cloud/Render deployment was removed (the old `/api/sync-state` endpoint is gone); the sqlite3/Node version pins for Render GLIBC no longer apply.
 
-### 待做:改名與 App Icon (未實作,等使用者提供名稱與圖檔)
+### 品牌:Kanaric (kana + lyric),作者 Resuaumis
 
-打算把專案改名並換掉 app icon,重新產出 setup 安裝檔。動工前需使用者給:**新顯示名稱**、選填 **appId** (反向網域,不給就照新名生)、**icon 圖檔** (Windows 打包用 `.ico` 256×256 多尺寸;只有 png 就先轉 ico)。
+產品名 **Kanaric**、appId `com.resuaumis.kanaric`、著作權 `Copyright © 2026 Resuaumis`。
 
-`productName` 是主動因:改它會連帶換掉 setup 檔名 (`<productName> Setup <version>.exe`)、安裝的 exe、安裝資料夾、桌面/開始選單捷徑名,以及 `app.getPath('userData')` 指向的 `%APPDATA%/<productName>/` 資料夾。icon 目前**完全沒設** (electron-builder 用預設 Electron 圖示),要在 build 設定補 `win.icon`。
+`productName` 是主動因:它決定 setup 檔名 (`Kanaric Setup <version>.exe`)、安裝的 exe、安裝資料夾、桌面/開始選單捷徑名,以及 `app.getPath('userData')` 指向的 `%APPDATA%/Kanaric/`。**`DynamicIslandUI/MainWindow.xaml.cs` 的 crash log 路徑寫死同一個資料夾名**,改 `productName` 就要一起改,不然島跟 app 讀寫不同目錄。
 
-要動的檔案:
-- `web-app/package.json` — `productName`、`appId`、`name`,並在 `build.win` 加 `"icon": "<路徑>.ico"` (此圖預設也會套到 setup 檔本身的圖示;要細調再於 `build.nsis` 加 `installerIcon`/`uninstallerIcon`/`installerHeaderIcon`)
-- `web-app/electron.js` — 系統匣 `setToolTip` 文字;`TRAY_ICON` (寫死的 base64 PNG,同時是視窗與匣圖示) 換成新圖
-- 頁面顯示文字 — `web-app/views/header.ejs`、`wrapped.ejs`、`stats.ejs` 的 `<title>`/標題字串
-- 選改:`server.js:669` User-Agent、README、註解 (純文字,不影響功能)
+刻意沒跟著改的兩個:
+- `server.js` 的 `GITHUB_REPO`(仍是 `bensionfang/Floating-Lyrics`)—— 那是 repo 名不是產品名,改了 update-check 會 404。
+- `DynamicIslandUI.exe` 檔名(`AssemblyName` 沒設)—— 純內部,`electron.js` 與 `build:island` script 都寫死這個路徑,使用者看不到。
+
+**Icon 待辦**:`build.win.icon` 目前**還沒設**,electron-builder 用預設 Electron 圖示。等使用者給圖檔後:轉多尺寸 `.ico` 放 `web-app/build/icon.ico` 並在 `build.win` 補 `"icon"`;256px png 放 `web-app/public/img/icon.png`,`electron.js` 的 `TRAY_ICON` 從寫死的 base64 改 `createFromPath` 讀它(視窗圖示、系統匣、啟動畫面三處都吃這一個常數)。要細調 setup 本身的圖示再於 `build.nsis` 加 `installerIcon`/`uninstallerIcon`/`installerHeaderIcon`。
+
+**啟動畫面**:`electron.js` 的 `createSplash()` —— frameless 透明小窗,icon 脈動 + 字樣淡入,圖直接吃 `TRAY_ICON.toDataURL()`。主視窗改成 `show: false`,`did-finish-load` 時才 reveal(不是 `ready-to-show`:`did-fail-load` 重試後它不會再觸發),另壓 8 秒 timeout 保底。
 
 改完重跑 `npm run dist`,新 setup 出在 `web-app/release/`。安裝檔未簽章 (SmartScreen 會擋,屬預期)。
 

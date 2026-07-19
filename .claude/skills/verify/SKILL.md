@@ -1,9 +1,9 @@
 ---
 name: verify
-description: How to build, launch, and drive Floating Lyrics web UI for end-to-end verification
+description: How to build, launch, and drive Kanaric web UI for end-to-end verification
 ---
 
-# Verify Floating Lyrics (web dashboard)
+# Verify Kanaric (web dashboard)
 
 ## Launch
 

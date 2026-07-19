@@ -423,6 +423,19 @@ button.menu-action i {
     white-space: nowrap;
 }
 
+.author-credit {
+    display: block;
+    margin-top: 3px;
+    color: var(--text-dim);
+    text-decoration: none;
+    opacity: 0.7;
+}
+
+.author-credit:hover {
+    color: var(--accent-main);
+    opacity: 1;
+}
+
 /* Main Body */
 .main-content {
     flex-grow: 1;
