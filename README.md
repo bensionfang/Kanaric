@@ -100,7 +100,7 @@ npm run dist
 ## 專案結構
 
 ```
-Floating-Lyrics/
+Kanaric/
 ├── web-app/                  # Node.js 後端 + 網頁前端 + Electron 桌面殼（一切從這裡啟動）
 │   ├── server.js             # 核心後端:Express + WebSocket,歌詞抓取/快取、聽歌記錄、API
 │   ├── electron.js           # Electron 殼:視窗、系統匣、路徑注入、靈動島啟動、port 自動遞補

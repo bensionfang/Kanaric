@@ -445,8 +445,7 @@ app.get('/api/llm-models', async (req, res) => {
 // ponytail: 版本比較是單純字串不等於 (不是 semver),假設版號只會手動往上調;
 // 開發環境本機版號領先 tag 時會誤報有更新,無傷大雅。
 const APP_VERSION = require('./package.json').version;
-// repo 名還是舊的 (GitHub 上沒改名),不要跟著產品名一起改,不然 update-check 會 404
-const GITHUB_REPO = 'bensionfang/Floating-Lyrics';
+const GITHUB_REPO = 'bensionfang/Kanaric';
 let updateCheckCache = null;
 
 // 側欄頁尾的版號/署名要用,掛 locals 讓每個 res.render 都拿得到,不用逐條 route 傳
@@ -899,7 +898,7 @@ app.get('/api/lyrics/fetch', async (req, res) => {
       if (!bestLyric) {
           const apiUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(trueArtist)}&track_name=${encodeURIComponent(cleanTitle)}`;
           const lrclibResp = await fetch(apiUrl, {
-            headers: { "User-Agent": "Kanaric/1.0 (https://github.com/bensionfang/Floating-Lyrics)" }
+            headers: { "User-Agent": "Kanaric/1.0 (https://github.com/bensionfang/Kanaric)" }
           });
           if (lrclibResp.ok) {
             const data = await lrclibResp.json();

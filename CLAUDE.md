@@ -80,9 +80,9 @@ One Node.js backend, multiple thin clients, with Python scripts as helpers spawn
 
 `productName` 是主動因:它決定 setup 檔名 (`Kanaric Setup <version>.exe`)、安裝的 exe、安裝資料夾、桌面/開始選單捷徑名,以及 `app.getPath('userData')` 指向的 `%APPDATA%/Kanaric/`。**`DynamicIslandUI/MainWindow.xaml.cs` 的 crash log 路徑寫死同一個資料夾名**,改 `productName` 就要一起改,不然島跟 app 讀寫不同目錄。
 
-刻意沒跟著改的兩個:
-- `server.js` 的 `GITHUB_REPO`(仍是 `bensionfang/Floating-Lyrics`)—— 那是 repo 名不是產品名,改了 update-check 會 404。
-- `DynamicIslandUI.exe` 檔名(`AssemblyName` 沒設)—— 純內部,`electron.js` 與 `build:island` script 都寫死這個路徑,使用者看不到。
+GitHub repo 也已改名 `bensionfang/Kanaric`,`server.js` 的 `GITHUB_REPO` 跟著改了 —— 這個常數是 update-check 打 API 用的,跟 repo 名綁定(不是產品名),repo 再改名就要一起改,不然抓不到 release。
+
+刻意沒跟著改的:`DynamicIslandUI.exe` 檔名(`AssemblyName` 沒設)—— 純內部,`electron.js` 與 `build:island` script 都寫死這個路徑,使用者看不到。
 
 **Icon 待辦**:`build.win.icon` 目前**還沒設**,electron-builder 用預設 Electron 圖示。等使用者給圖檔後:轉多尺寸 `.ico` 放 `web-app/build/icon.ico` 並在 `build.win` 補 `"icon"`;256px png 放 `web-app/public/img/icon.png`,`electron.js` 的 `TRAY_ICON` 從寫死的 base64 改 `createFromPath` 讀它(視窗圖示、系統匣、啟動畫面三處都吃這一個常數)。要細調 setup 本身的圖示再於 `build.nsis` 加 `installerIcon`/`uninstallerIcon`/`installerHeaderIcon`。
 
