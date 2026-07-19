@@ -655,6 +655,8 @@ document.addEventListener('mousemove', (e) => {
     const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     tip.style.left = `${ratio * 100}%`;
     tip.textContent = formatTime(ratio * (window.currentSeekDuration || 0));
+    const hover = wrapper.querySelector('.progress-hover-fill');
+    if (hover) hover.style.width = `${ratio * 100}%`;
 });
 
 function formatTime(totalSeconds) {

@@ -16,16 +16,18 @@
             </div>
             <div class="player-center">
                 <div class="player-controls">
-                    <button class="media-btn toggle-btn <%= media.shuffle ? 'active' : '' %>" id="shuffle-btn" onclick="mediaAction('shuffle')"><i class="fa-solid fa-shuffle"></i></button>
-                    <button class="media-btn" onclick="mediaAction('prev')"><i class="fa-solid fa-backward-step"></i></button>
-                    <button class="media-btn play-pause-btn" onclick="mediaAction('playpause')"><i class="fa-solid <%= media.is_playing ? 'fa-pause' : 'fa-play' %>" id="play-pause-icon"></i></button>
-                    <button class="media-btn" onclick="mediaAction('next')"><i class="fa-solid fa-forward-step"></i></button>
-                    <button class="media-btn toggle-btn <%= media.repeat ? 'active' : '' %>" id="repeat-btn" data-mode="<%= media.repeat %>" onclick="mediaAction('repeat')"><i class="fa-solid fa-repeat" id="repeat-icon"></i></button>
+                    <button class="media-btn toggle-btn <%= media.shuffle ? 'active' : '' %>" id="shuffle-btn" data-tip="隨機播放" onclick="mediaAction('shuffle')"><i class="fa-solid fa-shuffle"></i></button>
+                    <button class="media-btn" data-tip="上一步" onclick="mediaAction('prev')"><i class="fa-solid fa-backward-step"></i></button>
+                    <button class="media-btn play-pause-btn" data-tip="播放" onclick="mediaAction('playpause')"><i class="fa-solid <%= media.is_playing ? 'fa-pause' : 'fa-play' %>" id="play-pause-icon"></i></button>
+                    <button class="media-btn" data-tip="下一步" onclick="mediaAction('next')"><i class="fa-solid fa-forward-step"></i></button>
+                    <button class="media-btn toggle-btn <%= media.repeat ? 'active' : '' %>" id="repeat-btn" data-mode="<%= media.repeat %>" data-tip="循環播放" onclick="mediaAction('repeat')"><i class="fa-solid fa-repeat" id="repeat-icon"></i></button>
                 </div>
                 <div class="progress-container">
                     <span class="time-label" id="current-time"><%= fmt(media.position) %></span>
                     <div class="slider-wrapper">
                         <input type="range" id="progress-slider" min="0" max="100" value="<%= pct %>">
+                        <!-- hover 預覽必須排在 fill 之前:兩者都是 positioned 且無 z-index,靠 DOM 順序讓綠色 fill 疊在上面 -->
+                        <div class="progress-hover-fill" id="progress-hover"></div>
                         <div class="progress-bar-fill" id="progress-fill" style="width: <%= pct %>%"></div>
                         <div class="seek-tooltip" id="seek-tooltip"></div>
                     </div>
@@ -45,23 +47,23 @@
                             <%= optSearching ? 'data-loading="1"' : '' %>
                             <%= optReady ? 'data-ready="1"' : '' %>
                             onclick="searchLyricsOptions()"
-                            title="<%= optReady ? '查看備選歌詞' : '搜尋備選歌詞' %>">
+                            data-tip="<%= optReady ? '查看備選歌詞' : '搜尋備選歌詞' %>">
                         <i class="fa-solid <%= optSearching ? 'fa-spinner fa-spin' : (optReady ? 'fa-check' : 'fa-list') %>"></i>
                     </button>
                     <div id="lyrics-opt-bubble" class="lyrics-opt-bubble" onclick="openLyricsModal()"></div>
                     <%- include('modals/lyrics-options') %>
                 </div>
-                <button id="loop-mode-btn" class="ctrl-btn" onclick="toggleLoopMode()" title="段落循環"><i class="fa-solid fa-bookmark"></i></button>
-                <button id="toggle-ruby-mode-btn" class="ctrl-btn" onclick="toggleRubyEditMode()" title="編輯假名模式"><i class="fa-solid fa-pen"></i></button>
+                <button id="loop-mode-btn" class="ctrl-btn" onclick="toggleLoopMode()" data-tip="段落循環"><i class="fa-solid fa-bookmark"></i></button>
+                <button id="toggle-ruby-mode-btn" class="ctrl-btn" onclick="toggleRubyEditMode()" data-tip="編輯假名模式"><i class="fa-solid fa-pen"></i></button>
                 <div class="lyrics-opt-wrap">
-                    <button id="llm-wand-btn" class="ctrl-btn" onclick="runLlmFurigana(this)" title="AI 讀音校正"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+                    <button id="llm-wand-btn" class="ctrl-btn" onclick="runLlmFurigana(this)" data-tip="AI 讀音校正"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
                     <div id="llm-wand-bubble" class="lyrics-opt-bubble"></div>
                 </div>
-                <button class="ctrl-btn" onclick="reloadCurrentLyrics()" title="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
-                <button id="desktop-toggle-btn" class="ctrl-btn" onclick="launchPyQt6()" title="桌面靈動島">
+                <button class="ctrl-btn" onclick="reloadCurrentLyrics()" data-tip="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
+                <button id="desktop-toggle-btn" class="ctrl-btn" onclick="launchPyQt6()" data-tip="桌面靈動島">
                     <i class="fa-solid fa-mobile-screen"></i>
                 </button>
-                <button class="ctrl-btn fullscreen-btn" onclick="toggleFullscreen()" title="放大模式">
+                <button class="ctrl-btn fullscreen-btn" onclick="toggleFullscreen()" data-tip="放大模式">
                     <i class="fa-solid fa-expand icon-expand"></i>
                     <i class="fa-solid fa-compress icon-compress"></i>
                 </button>
@@ -302,7 +304,9 @@
                     const rows = [{ app_id: 'auto', name: '自動 (預設)' }].concat(data.sources || []);
                     sec.innerHTML = rows.map(s => {
                         const now = s.app_id === 'auto' ? '優先選擇音樂播放器'
-                            : [s.is_playing ? '▶' : '⏸', [s.title, s.artist].filter(Boolean).join(' - ')].join(' ').trim();
+                            // ▷ / ‖ 刻意選沒有 emoji 變體的碼位 (U+25B7 / U+2016),
+                            // ▶ U+25B6 與 ⏸ U+23F8 在 Windows 會被 Segoe UI Emoji 接管變成彩色圖示
+                            : [s.is_playing ? '▷' : '‖', [s.title, s.artist].filter(Boolean).join(' - ')].join(' ').trim();
                         const checked = (data.current || 'auto') === s.app_id ? ' checked' : '';
                         return `<label class="src-row">
                             <input type="radio" name="media-source" value="${escapeAttr(s.app_id)}"${checked}
@@ -347,7 +351,7 @@
             { page: '/editor', el: '.stats-dashboard-grid > .dashboard-card:nth-child(2)', title: '編輯歌詞',
               text: '直接修改每句歌詞與時間戳。右上角可以設定歌手別名、尋找更多來源或貼上自訂歌詞，改完記得按「儲存修改」。',
               emptyText: '選了歌之後，這裡可以直接修改每句歌詞與時間戳。右上角可以設定歌手別名、尋找更多歌詞來源或貼上自訂歌詞，改完按「儲存修改」。等你聽過幾首歌再回來看看。' },
-            { page: '/editor', el: null,             title: '完成！',     text: '就是這些！開始享受你的音樂吧 🎵 想重看說明，隨時從左上角選單點「使用說明」。' }
+            { page: '/editor', el: null,             title: '完成！',     text: '就是這些！開始享受你的音樂吧。想重看說明，隨時從左上角選單點「使用說明」。' }
         ];
         // 「AI 讀音校正」問號的迷你導覽:沿用同一套 tour 機制,只換步驟內容。
         // 步驟不設 page = 不跨頁,在哪一頁點都能播。
