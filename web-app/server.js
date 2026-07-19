@@ -440,6 +440,40 @@ app.get('/api/llm-models', async (req, res) => {
   }
 });
 
+// 檢查 GitHub Releases 是否有新版:GitHub API 對匿名請求限 60 次/小時/IP,
+// 每頁載入都打會很容易超,所以結果快取 1 小時。
+// ponytail: 版本比較是單純字串不等於 (不是 semver),假設版號只會手動往上調;
+// 開發環境本機版號領先 tag 時會誤報有更新,無傷大雅。
+const APP_VERSION = require('./package.json').version;
+const GITHUB_REPO = 'bensionfang/Floating-Lyrics';
+let updateCheckCache = null;
+
+app.get('/api/update-check', async (req, res) => {
+  try {
+    if (!updateCheckCache || Date.now() - updateCheckCache.checkedAt > 3600_000) {
+      const r = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+        headers: { Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(6000)
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      updateCheckCache = {
+        checkedAt: Date.now(),
+        latest: (data.tag_name || '').replace(/^v/, ''),
+        url: data.html_url
+      };
+    }
+    res.json({
+      current: APP_VERSION,
+      latest: updateCheckCache.latest,
+      url: updateCheckCache.url,
+      hasUpdate: !!updateCheckCache.latest && updateCheckCache.latest !== APP_VERSION
+    });
+  } catch (e) {
+    res.json({ current: APP_VERSION, latest: null, url: null, hasUpdate: false });
+  }
+});
+
 app.post('/api/llm-key', async (req, res) => {
   try {
     saveLlmKey((req.body.key || '').trim());

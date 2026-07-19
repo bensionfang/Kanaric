@@ -222,6 +222,24 @@
             .catch(() => hkToast('API Key 儲存失敗'));
         }
 
+        // 新版提醒:一個 session 只查一次 (server 端本身也快取 1 小時),
+        // 同一個版號只用吐司提示一次,不然每換一次頁 (index/stats/wrapped/editor
+        // 都是整頁重載) 就跳一次會很煩。點吐司開 release 頁,交給使用者自己下載安裝。
+        function checkForUpdate() {
+            if (sessionStorage.getItem('updateChecked')) return;
+            sessionStorage.setItem('updateChecked', '1');
+            fetch('/api/update-check').then(r => r.json()).then(d => {
+                if (!d.hasUpdate || localStorage.getItem('updateSeenVersion') === d.latest) return;
+                localStorage.setItem('updateSeenVersion', d.latest);
+                showToast(`有新版 v${d.latest} 可更新,點擊前往下載`, 'fa-solid fa-circle-up', 8000);
+                const toast = document.getElementById('toast');
+                if (toast) {
+                    toast.classList.add('toast-clickable');
+                    toast.onclick = () => window.open(d.url, '_blank', 'noopener');
+                }
+            }).catch(() => {});
+        }
+
         function refreshLlmKeyStatus() {
             fetch('/api/llm-key')
                 .then(r => r.json())
@@ -796,6 +814,7 @@
             if (window.updateActiveHotkeys) window.updateActiveHotkeys();
 
             refreshLlmKeyStatus();
+            checkForUpdate();
 
             // 跨頁導覽:上一頁跳轉過來時恢復進度
             const tourResume = sessionStorage.getItem('tourResume');

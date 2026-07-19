@@ -535,6 +535,8 @@ button.menu-action i {
 
 .toast i { color: var(--accent-main); font-size: 16px; }
 
+.toast.toast-clickable { cursor: pointer; }
+
 .card-header {
     display: flex;
     align-items: center;

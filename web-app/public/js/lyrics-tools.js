@@ -22,6 +22,10 @@ function showToast(message, iconClass = 'fa-solid fa-circle-info', duration = 35
     icon.className = iconClass;
     msg.textContent = message;
     toast.classList.remove('hidden');
+    // 吐司是共用元素,上一次呼叫留下的點擊行為(例如更新提醒的「點擊前往下載」)
+    // 不能沿用到這一次,所以每次都清乾淨,呼叫方要點擊行為自己再掛
+    toast.onclick = null;
+    toast.classList.remove('toast-clickable');
     clearTimeout(window._toastTimer);
     window._toastTimer = setTimeout(() => toast.classList.add('hidden'), duration);
 }
