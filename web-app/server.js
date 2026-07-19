@@ -1570,7 +1570,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws) => {
-  console.log('🔗 WebSocket client connected (Dynamic Island)');
+  console.log('WebSocket client connected (Dynamic Island)');
   
   let currentSettings = {};
   if (fs.existsSync(SETTINGS_FILE)) {
@@ -1581,7 +1581,7 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ type: 'init', state: currentMediaState, settings: currentSettings }));
 
   ws.on('close', () => {
-    console.log('🔗 WebSocket client disconnected');
+    console.log('WebSocket client disconnected');
   });
 });
 
@@ -1594,6 +1594,10 @@ global.broadcast = function(message) {
   });
 };
 
-server.listen(PORT, () => {
-  console.log(`🚀 Web Server & WebSocket running on http://localhost:${PORT}`);
+// 只綁 127.0.0.1,不綁 0.0.0.0:API 全無認證,同網段的人若能打進來,可先用
+// /api/settings 把 llm_base_url 指向自己的伺服器,再觸發 /api/llm-models 或
+// /api/llm-furigana/run,server 就會把 API key 放進 Authorization header 送出去。
+// 靈動島與網頁前端都走 localhost,不受影響。
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`Web Server & WebSocket running on http://localhost:${PORT}`);
 });
