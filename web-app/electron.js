@@ -1,6 +1,6 @@
 /**
  * Electron 桌面殼:一鍵帶起整個系統
- * 1. 打包模式下把使用者資料 (DB/settings) 指向 %APPDATA%/FloatingLyrics,
+ * 1. 打包模式下把使用者資料 (DB/settings) 指向 %APPDATA%/Kanaric,
  *    並把 Python 工具與 C# 靈動島指向安裝目錄的 resources/。
  * 2. 在主進程內直接載入 server.js (Express + WebSocket + Python 子進程)。
  * 3. 開儀表板視窗 + 系統匣圖示,自動啟動靈動島,結束時收乾淨所有子進程。
@@ -63,6 +63,7 @@ if (app.isPackaged) {
 // 開發模式 (npm run app) 不覆寫任何路徑,沿用專案根目錄的 DB 與 settings.json
 
 let mainWindow = null;
+let splashWindow = null;
 let tray = null;
 let islandProc = null;
 let quitting = false;
@@ -71,17 +72,81 @@ const TRAY_ICON = nativeImage.createFromDataURL(
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAM0lEQVR4nGNgoCaoifn/nxhMfQMIaUAHGAYNHQNwhsUwNQAbINoAXIAiF1AlRdIuL1ACAHGrJsks7N9DAAAAAElFTkSuQmCC'
 );
 
+// 啟動畫面:server + Python monitor 起來要幾秒,這段空窗期本來就會乾等,
+// 拿來放 icon 動畫。圖直接吃 TRAY_ICON,換 icon 檔時這裡自動跟著換。
+function createSplash() {
+  splashWindow = new BrowserWindow({
+    width: 260,
+    height: 260,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    center: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false
+  });
+  const html = `
+    <style>
+      html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+      body {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 18px; font-family: 'Outfit', 'Segoe UI', sans-serif; user-select: none;
+      }
+      img {
+        width: 96px; height: 96px; image-rendering: auto;
+        animation: pulse 1.6s ease-in-out infinite;
+        filter: drop-shadow(0 6px 20px rgba(29, 185, 84, 0.35));
+      }
+      span {
+        color: #fff; font-size: 20px; font-weight: 600; letter-spacing: 0.14em;
+        opacity: 0; animation: fade 0.9s ease-out 0.25s forwards;
+      }
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 0.85; }
+        50%      { transform: scale(1.08); opacity: 1; }
+      }
+      @keyframes fade { to { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) {
+        img { animation: none; }
+        span { animation: none; opacity: 1; }
+      }
+    </style>
+    <img src="${TRAY_ICON.toDataURL()}">
+    <span>KANARIC</span>`;
+  splashWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  splashWindow.once('ready-to-show', () => splashWindow && splashWindow.show());
+}
+
+function closeSplash() {
+  if (splashWindow) {
+    splashWindow.destroy();
+    splashWindow = null;
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
     autoHideMenuBar: true,
     icon: TRAY_ICON,
+    show: false, // 等頁面畫好才顯示,啟動畫面在這之前頂著
     // 無標題列,系統按鈕直接疊在頁面上 (height 要跟 CSS .win-drag 一致)
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#00000000', symbolColor: '#ffffff', height: 36 }
   });
   mainWindow.loadURL(`http://localhost:${PORT}`);
+
+  // did-fail-load 重試時 ready-to-show 不會再觸發,所以用 did-finish-load;
+  // 保險起見再壓一個 8 秒 timeout,server 真的起不來也不會卡在啟動畫面
+  const reveal = () => {
+    if (!mainWindow || mainWindow.isVisible()) return;
+    closeSplash();
+    mainWindow.show();
+  };
+  mainWindow.webContents.on('did-finish-load', reveal);
+  setTimeout(reveal, 8000);
 
   // server.listen 是非同步的,若視窗搶先載入失敗就稍後重試
   mainWindow.webContents.on('did-fail-load', () => {
@@ -115,19 +180,22 @@ function launchIsland() {
 
 function showWindow() {
   if (mainWindow) {
+    closeSplash(); // 啟動途中就點系統匣的話,別讓啟動畫面壓在視窗上面
     mainWindow.show();
     mainWindow.focus();
   }
 }
 
 app.whenReady().then(async () => {
+  createSplash(); // 在 server 起來前就先亮出來
+
   // 先確定實際 port,再帶起 server (server.js 讀 process.env.PORT)
   PORT = await findFreePort(PORT);
   process.env.PORT = String(PORT);
   require('./server.js'); // 帶起 Express + WebSocket + media monitor
 
   tray = new Tray(TRAY_ICON);
-  tray.setToolTip('Floating Lyrics');
+  tray.setToolTip('Kanaric');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '開啟儀表板', click: showWindow },
     { label: '重啟靈動島', click: () => { if (islandProc) islandProc.kill(); setTimeout(launchIsland, 500); } },
@@ -156,6 +224,7 @@ app.on('window-all-closed', () => {});
 
 app.on('before-quit', () => {
   quitting = true;
+  closeSplash();
   global.isShuttingDown = true; // 告訴 server.js 不要重生 media monitor
   if (global.monitorProcess) {
     try { global.monitorProcess.kill(); } catch (e) {}
