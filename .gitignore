@@ -24,3 +24,5 @@ DynamicIslandUI/obj/
 # 執行期產物
 app.pid
 web-app/server_log.txt
+# 個人筆記/截圖/PDF,不進版控
+docs/
