@@ -24,6 +24,29 @@ npm run dist     # = build:py (PyInstaller → dist-py/) + build:island (dotnet 
 ```
 
 - Web dashboard: http://localhost:5720 (預設值;被占用時自動改用空閒 port,靈動島從命令列參數收到實際 port)
+
+### 發版 (GitHub Release)
+
+前端有一個更新提醒 (`GET /api/update-check` in server.js,`checkForUpdate()` in footer.ejs):
+比對 `web-app/package.json` 的 `version` 跟 GitHub `releases/latest` 的 tag,不一致就跳吐司提醒使用者
+去下載。要讓這個機制動,每次發版都要照下面流程放 release,tag 要打對:
+
+```bash
+# 1. 改版號
+#    web-app/package.json 的 "version" 改成新版號 (例如 1.1.0)
+
+# 2. build 安裝檔
+cd web-app && npm run dist   # 產物在 web-app/release/
+
+# 3. 打 tag、推、建 release、附安裝檔
+git tag v1.1.0                # 一定要帶 v 前綴,server.js 用 /^v/ 剝掉再跟 package.json 比對
+git push origin v1.1.0
+gh release create v1.1.0 "web-app/release/FloatingLyrics Setup 1.1.0.exe" \
+  --title "v1.1.0" --notes "..."
+```
+
+tag 沒帶 `v` 或漏推,更新提醒就抓不到新版。安裝檔未簽章,`gh release create` 會直接公開發布,屬於
+「發布公開內容」的動作,不要自動執行,要使用者自己按。
 - C# overlay: auto-launched by `npm run app`; standalone dev run: `DynamicIslandUI/bin/Release/net8.0-windows/DynamicIslandUI.exe` (build with `dotnet build DynamicIslandUI`; requires .NET 8 SDK).
 - There are no tests or linters configured.
 
