@@ -50,6 +50,10 @@
       {
         "from": "../dist-island",
         "to": "island"
+      },
+      {
+        "from": "../third_party",
+        "to": "third_party"
       }
     ],
     "win": {

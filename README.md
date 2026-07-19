@@ -136,3 +136,13 @@ Floating-Lyrics/
 | `sync_offsets` | 逐首歌的時間軸偏移 |
 | `artist_aliases` | 歌手別名對應（還原平台翻譯） |
 | `romaji_hints` | 各平台逐字羅馬音的讀音提示快取 |
+
+## 致謝
+
+懸浮歌詞島的概念啟發自 [Lyricify](https://github.com/WXRIW/Lyricify-App) 的
+**灵动词岛 / Dynamic Lyrics Island**（作者 WXRIW / XY Wang，採 CC BY-SA 4.0 授權）。
+本專案的介面與程式碼皆為獨立實作。
+
+`qrc_decrypt.py` 中的 QQ QRC 解密實作移植自 Lyricify 的 `DESHelper.cs`
+（Copyright 2023 XY Wang, WXRIW，Apache License 2.0），已由 C# 改寫為 Python。
+授權全文見 [`third_party/Lyricify-LICENSE-Apache-2.0.txt`](third_party/Lyricify-LICENSE-Apache-2.0.txt)。

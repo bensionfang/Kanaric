@@ -6,7 +6,31 @@ QRC 是 hex 字串 -> 3DES 解密 -> zlib 解壓 -> (可能再包一層 XML)。
 注意:這裡的 DES **不是**標準 DES,不能拿 pycryptodome 之類的函式庫來解。
 QQ 用的是一份流傳很廣、S-box 打錯字的 C 語言 DES 實作 (sbox2 第 24 個值應為 2 卻寫成 15、
 sbox4 第 53 個值應為 13 卻寫成 10)。這些錯誤讓它變成一個「自成一格但仍可逆」的 Feistel
-密碼,所以只能照著同一份錯的表實作。以下逐行移植自 Lyricify 的 DESHelper.cs。
+密碼,所以只能照著同一份錯的表實作。
+
+出處 / Attribution
+------------------
+本檔的 DES 實作移植自 Lyricify 的 DESHelper.cs:
+    https://github.com/WXRIW/Lyricify-App
+
+    Copyright 2023 XY Wang, WXRIW
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+授權全文見 third_party/Lyricify-LICENSE-Apache-2.0.txt。
+
+修改聲明 (Apache-2.0 §4(b)):本檔為修改後的版本 —— 由 C# 移植為 Python,
+並加入 QRC 專用的 hex 解碼、zlib 解壓與 XML 外層處理。
 """
 import binascii
 import zlib
