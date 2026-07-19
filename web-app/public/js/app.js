@@ -179,6 +179,7 @@ async function pollSystemMedia() {
             // 但首次載入 (prevTitle 空) 不重置:SSR 已給正確狀態,重置會閃一下綠勾
             window._lyricsOptions = [];
             if (prevTitle) resetLyricsOptBtn();
+            if (prevTitle && window.resetLlmWandBtn) resetLlmWandBtn();
             restoreOptionsState();   // 這首歌若已在 server 上搜過/搜尋中,把按鈕狀態接回來
             // 真的換歌才作廢循環段落 (行號對不上新歌詞了)。
             // lastMediaTitle 是空的代表這是剛載入頁面的第一次回報,那份段落要留給 restoreLoopRange
@@ -417,10 +418,11 @@ function renderLyrics() {
 }
 
 function updatePlaybackProgress(position) {
+    if (isScrubbing) return;   // 拖曳進度條時別把滑桿拉回播放位置
     const slider = document.getElementById('progress-slider');
     const fill = document.getElementById('progress-fill');
     const currentTimeEl = document.getElementById('current-time');
-    
+
     // Estimate total time based on current position and song duration
     let durationToUse = window.currentMediaDuration > 0 ? window.currentMediaDuration : songDurationSeconds;
     const actualDuration = Math.max(durationToUse, position + 10);
@@ -620,6 +622,25 @@ async function launchPyQt6() {
         }, 1000);
     }
 }
+
+// 進度條跳轉:點擊/拖曳放開時 seek。拖曳中只更新畫面,放開才真的跳
+// (app.js 在 footer 的播放列之前載入,滑桿要等 DOM 齊了才抓得到)
+let isScrubbing = false;
+document.addEventListener('DOMContentLoaded', function initProgressSeek() {
+    const slider = document.getElementById('progress-slider');
+    if (!slider) return;
+    slider.addEventListener('pointerdown', () => { isScrubbing = true; });
+    slider.addEventListener('input', () => {
+        const fill = document.getElementById('progress-fill');
+        if (fill) fill.style.width = `${slider.value}%`;
+        const t = document.getElementById('current-time');
+        if (t) t.textContent = formatTime(slider.value / 100 * (window.currentSeekDuration || 0));
+    });
+    slider.addEventListener('change', () => {
+        isScrubbing = false;
+        seekTo(slider.value / 100 * (window.currentSeekDuration || 0));
+    });
+});
 
 document.addEventListener('mousemove', (e) => {
     const wrapper = e.target.closest('.slider-wrapper');

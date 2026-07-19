@@ -11,7 +11,7 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Style -->
-    <link rel="stylesheet" href="/css/style.css?v=62">
+    <link rel="stylesheet" href="/css/style.css?v=67">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- 各頁共用:吐司 + 備選歌詞 + 重新載入歌詞 -->
@@ -89,10 +89,45 @@
                     <div class="menu-divider"></div>
                     <div class="menu-sub">
                     <button class="menu-row menu-action" id="source-toggle" onclick="toggleSourceSection(event)">
-                        <span class="menu-label">音訊來源</span>
+                        <span class="menu-label">音訊來源
+                            <i class="fa-regular fa-circle-question llm-help-btn" title="什麼是音訊來源？" onclick="startSourceTour(event)"></i>
+                        </span>
                         <i class="fa-solid fa-chevron-right hotkeys-chevron"></i>
                     </button>
                     <div class="menu-hotkeys" id="source-section"></div>
+                    </div>
+                    <div class="menu-sub">
+                    <button class="menu-row menu-action" id="llm-toggle" onclick="toggleLlmSection(event)">
+                        <span class="menu-label">AI 讀音校正
+                            <i class="fa-regular fa-circle-question llm-help-btn" title="什麼是 AI 讀音校正？" onclick="startLlmTour(event)"></i>
+                        </span>
+                        <i class="fa-solid fa-chevron-right hotkeys-chevron"></i>
+                    </button>
+                    <div class="menu-hotkeys" id="llm-section">
+                        <div class="hk-row">
+                            <span class="hk-label">模式</span>
+                            <select id="llm-mode" class="menu-select" onchange="saveSettingsToServer('llm_furigana', this.value)">
+                                <option value="off" selected>手動</option>
+                                <option value="fallback">自動 (無羅馬字來源時)</option>
+                                <option value="always">總是</option>
+                            </select>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">API Key</span>
+                            <input type="password" id="llm-key" class="hk-input llm-input" placeholder="未設定" autocomplete="off" onchange="saveLlmApiKey(this)">
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">Base URL</span>
+                            <input type="text" id="llm-base-url" class="hk-input llm-input" onchange="saveSettingsToServer('llm_base_url', this.value.trim())">
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">Model</span>
+                            <input type="text" id="llm-model" class="hk-input llm-input" onchange="saveSettingsToServer('llm_model', this.value.trim())">
+                        </div>
+                        <div class="hk-footer">
+                            <span>啟用後會將歌名與歌詞送至你設定的 LLM 服務</span>
+                        </div>
+                    </div>
                     </div>
                     <div class="menu-sub">
                     <button class="menu-row menu-action" id="hotkeys-toggle" onclick="toggleHotkeysSection(event)">

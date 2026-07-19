@@ -95,9 +95,9 @@ Reading errors are **not** a tokenizer problem, and swapping dictionaries is a d
 
 Don't re-run this. The errors that remain are mostly single-kanji on'yomi/kun'yomi coin-flips (談 はなし/だん, 角 かど/かく, 相 あい/そう) that no dictionary can settle without context. The two levers that *do* work are **better source data** (adding QQ's romaji track fixed 私, which fugashi and Kugou both got wrong) and, if ever needed, an **LLM pass for homograph disambiguation** — designed below, not yet implemented.
 
-### Planned: LLM 同形詞消歧 (BYOK, 未實作)
+### LLM 同形詞消歧 (BYOK, 已實作 2026-07)
 
-設計已與使用者討論定案 (2026-07),動工前照此實作;改設計要先跟使用者確認。
+實作:`llm_furigana.py` (請求/解析/模式與快取決策)、`db.py` 的 `llm_hints` 表、`furigana_inject.py` 的 `get_hints()` 回傳 (羅馬字, LLM) 兩層、server.js 的 `/api/llm-key` 與 `/api/llm-furigana/run`、header.ejs「AI 讀音校正」小節、footer.ejs 魔杖按鈕。以下設計說明即現行行為。
 
 **資料流**
 - 掛在 `furigana_inject.py get_hints()`,羅馬字 hint 解析完之後。模式 `llm_furigana`: `off` (預設) / `fallback` (羅馬字 hint 全空才自動觸發,另有介面手動按鈕) / `always` (每首都跑,當第四層蓋在羅馬字 hint 之後)。
@@ -120,7 +120,7 @@ Don't re-run this. The errors that remain are mostly single-kanji on'yomi/kun'yo
 - 設定入口:⋯ 設定選單新增「AI 讀音校正」可折疊小節,套自訂快捷鍵同款 pattern (`menu-sub` + chevron,header.ejs)。內容:模式 [關閉(預設)/自動(=fallback)/總是]、Base URL、Model (存 settings.json)、API Key password 欄 (只寫不讀,顯示「已設定 •••後四碼」),底部一行隱私揭露。
 - 手動觸發:播放列魔杖 ✨ 按鈕,與編輯假名筆按鈕並排。已設定 key 才顯示;狀態 平常可按 → 執行中轉圈 → 完成亮起;完成後再按 = 強制重跑 (覆寫 `llm_hints`)。同時是 fallback 模式的手動入口;不做歌詞區 inline 提示句。
 
-**驗證 (實作時)**:Ollama 本機端點跑通全流程;拿 `word_corrections` 48 條當 ground truth 量測 (基準 unidic-lite 28/48);確認 `GET /api/settings` 永不含 key、`llm_hints` 命中後第二次載入零 API 呼叫。
+**驗證狀態**:mock OpenAI 端點整合測試通過 (hint 套用/快取命中零呼叫/force 重跑/off 不呼叫);`GET /api/settings` 不含 key、dev 模式明文警告、清除 key 會刪 secrets.json 均已驗。**未做**:真實端點 (Ollama/DeepSeek) 全流程、word_corrections 48 條 ground truth 量測 —— 需使用者提供端點後執行。
 
 ### Credit / title lines
 

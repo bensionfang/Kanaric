@@ -1,3 +1,5 @@
+# LLM API key (BYOK),絕不進版控
+secrets.json
 # 本機資料庫 (每台機器各自初始化,不進版控)
 *.db
 *.db-shm

@@ -15,6 +15,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import fugashi
 from db import db
 from cn_music import fetch_hints, normalize_line
+from llm_furigana import get_llm_hints
 
 tagger = fugashi.Tagger()
 
@@ -160,10 +161,10 @@ def split_internal_kana(orig_chunk, hira_chunk, full_orig, full_hira, h_off=0):
             out.append(_ruby(seg, hira_chunk[s:e], full_orig, full_hira, h_off + s))
     return ''.join(out)
 
-def build_ruby_html(text, artist, title, hint=None):
+def build_ruby_html(text, artist, title, hints=()):
     """
     將單行純文字歌詞轉換為包含 <ruby> 標籤的 HTML。
-    hint 為該行來自羅馬字歌詞的正解假名 (可為 None)。
+    hints 為該行的正解假名候選,依序套用 (羅馬字 hint 先、LLM hint 後,後者蓋前者)。
     """
     if not text.strip():
         return text
@@ -188,8 +189,9 @@ def build_ruby_html(text, artist, title, hint=None):
     if pos < len(text):
         words.append({'orig': text[pos:], 'hira': text[pos:], 'is_space': True})
 
-    # 用羅馬字來源的假名校正小辭典挑錯的讀音
-    apply_hint(words, hint)
+    # 用羅馬字/LLM 來源的假名校正小辭典挑錯的讀音 (依序疊加,各自過 apply_hint 的 guard)
+    for hint in hints:
+        apply_hint(words, hint)
 
     # 連羅馬字來源也一起錯的字,用預設表壓過去 (見 _COMMON_READING)
     for w in words:
@@ -259,29 +261,39 @@ def build_ruby_html(text, artist, title, hint=None):
             
     return "".join(html_parts)
 
-def get_hints(artist, title, lrc_text):
+def get_hints(artist, title, lrc_text, force_llm=False):
     """
-    取得整首歌的羅馬字讀音提示 (先查快取,沒有才去抓)。
+    取得整首歌的讀音提示:(羅馬字 hint, LLM hint) 兩層,後者套在前者之上。
     只有含漢字的歌詞才值得抓,英文歌直接跳過以免多打一次網路請求。
+    force_llm 由前端魔杖觸發:無視模式強制重跑 LLM 並覆寫其快取。
     """
     if not re.search(r'[一-龯々]', lrc_text):
-        return {}
+        return {}, {}
+    romaji = {}
     try:
-        hints = db.get_romaji_hints(artist, title)
-        if hints is None:  # None = 沒抓過; {} = 抓過但沒來源 (負快取)
-            hints = fetch_hints(artist, title)
-            db.save_romaji_hints(artist, title, hints)
-        return hints
+        romaji = db.get_romaji_hints(artist, title)
+        if romaji is None:  # None = 沒抓過; {} = 抓過但沒來源 (負快取)
+            romaji = fetch_hints(artist, title)
+            db.save_romaji_hints(artist, title, romaji)
     except Exception as e:
         print(f"[furigana] romaji hints unavailable: {e}", file=sys.stderr)
-        return {}
+        romaji = {}
+    llm = {}
+    try:
+        llm = get_llm_hints(artist, title, lrc_text, has_romaji=bool(romaji), force=force_llm)
+    except Exception as e:
+        print(f"[furigana] llm hints unavailable: {e}", file=sys.stderr)
+    return romaji, llm
 
-def process_lrc(artist, title, lrc_text):
+def process_lrc(artist, title, lrc_text, force_llm=False):
     """
     處理整份 LRC 格式的歌詞檔案，逐行轉換為 ruby HTML 格式
     並保留原始的時間標籤。
     """
-    hints = get_hints(artist, title, lrc_text)
+    romaji, llm = get_hints(artist, title, lrc_text, force_llm=force_llm)
+    def line_hints(text):
+        k = normalize_line(text)
+        return [h for h in (romaji.get(k), llm.get(k)) if h]
     lines = lrc_text.split('\n')
     new_lines = []
     for line in lines:
@@ -299,7 +311,7 @@ def process_lrc(artist, title, lrc_text):
             if text.startswith("#TITLE#"):
                 ruby_text = text
             else:
-                ruby_text = build_ruby_html(text, artist, title, hints.get(normalize_line(text)))
+                ruby_text = build_ruby_html(text, artist, title, line_hints(text))
             new_lines.append(f"{tags}{ruby_text}")
         elif re.match(r'^\[[a-zA-Z]+:.*\]$', line):
             # 保留 LRC 檔案頭部的 Meta 標籤 (如 [ar:Artist])
@@ -309,7 +321,7 @@ def process_lrc(artist, title, lrc_text):
             if line.startswith("#TITLE#"):
                 ruby_text = line
             else:
-                ruby_text = build_ruby_html(line, artist, title, hints.get(normalize_line(line)))
+                ruby_text = build_ruby_html(line, artist, title, line_hints(line))
             new_lines.append(ruby_text)
             
     return '\n'.join(new_lines)
@@ -324,7 +336,7 @@ def main():
         lyrics = data.get("lyrics", "")
         
         if lyrics:
-            injected_lyrics = process_lrc(artist, title, lyrics)
+            injected_lyrics = process_lrc(artist, title, lyrics, force_llm=data.get("force_llm", False))
             print(json.dumps({"success": True, "lyrics": injected_lyrics}, ensure_ascii=False))
         else:
             print(json.dumps({"success": False, "error": "No lyrics provided"}))

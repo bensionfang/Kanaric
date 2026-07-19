@@ -49,6 +49,8 @@ class DatabaseManager:
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS artist_aliases (alias TEXT PRIMARY KEY, true_name TEXT)''')
         # 建立羅馬字讀音提示快取表 (data 為 JSON: {歌詞行: 平假名})
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS romaji_hints (artist TEXT, title TEXT, data TEXT, PRIMARY KEY (artist, title))''')
+        # LLM 讀音提示快取,獨立於 romaji_hints (保住其 {} 負快取語意;這張只存成功結果)
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS llm_hints (artist TEXT, title TEXT, data TEXT, PRIMARY KEY (artist, title))''')
         self.conn.commit()
 
     def get_artist_alias(self, alias: str) -> str:
@@ -94,6 +96,25 @@ class DatabaseManager:
         """儲存羅馬字讀音提示。空 dict 也要存,當作負快取避免重複請求"""
         self.cursor.execute(
             "INSERT OR REPLACE INTO romaji_hints VALUES (?, ?, ?)",
+            (artist, title, json.dumps(hints, ensure_ascii=False))
+        )
+        self.conn.commit()
+
+    def get_llm_hints(self, artist: str, title: str) -> Optional[dict]:
+        """取得快取的 LLM 讀音提示。None = 沒跑過 (失敗不進快取,所以不會有空 dict)"""
+        self.cursor.execute("SELECT data FROM llm_hints WHERE artist=? AND title=?", (artist, title))
+        row = self.cursor.fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row[0])
+        except (ValueError, TypeError):
+            return None
+
+    def save_llm_hints(self, artist: str, title: str, hints: dict) -> None:
+        """儲存 LLM 讀音提示 (只在成功時呼叫;魔杖強制重跑時覆寫)"""
+        self.cursor.execute(
+            "INSERT OR REPLACE INTO llm_hints VALUES (?, ?, ?)",
             (artist, title, json.dumps(hints, ensure_ascii=False))
         )
         self.conn.commit()

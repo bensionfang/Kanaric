@@ -53,6 +53,7 @@
                 </div>
                 <button id="loop-mode-btn" class="ctrl-btn" onclick="toggleLoopMode()" title="段落循環"><i class="fa-solid fa-bookmark"></i></button>
                 <button id="toggle-ruby-mode-btn" class="ctrl-btn" onclick="toggleRubyEditMode()" title="編輯假名模式"><i class="fa-solid fa-pen"></i></button>
+                <button id="llm-wand-btn" class="ctrl-btn" onclick="runLlmFurigana(this)" title="AI 讀音校正"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
                 <button class="ctrl-btn" onclick="reloadCurrentLyrics()" title="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
                 <button id="desktop-toggle-btn" class="ctrl-btn" onclick="launchPyQt6()" title="桌面靈動島">
                     <i class="fa-solid fa-mobile-screen"></i>
@@ -91,7 +92,7 @@
         function closeSettingsMenu() {
             const menu = document.getElementById('settings-menu');
             if (menu) menu.classList.remove('show');
-            ['hotkeys', 'source'].forEach(k => {
+            ['hotkeys', 'source', 'llm'].forEach(k => {
                 const sec = document.getElementById(k + '-section');
                 if (sec) sec.classList.remove('show');
                 const btn = document.getElementById(k + '-toggle');
@@ -100,31 +101,115 @@
         }
 
         document.addEventListener('click', (e) => {
+            // 迷你導覽進行中要框住選單裡的元素,點導覽卡 (在選單外) 不能把選單收掉
+            if (tourIndex >= 0 && currentTour !== tourSteps) return;
             const menu = document.getElementById('settings-menu');
             if (menu && menu.classList.contains('show') && !menu.contains(e.target)) {
                 closeSettingsMenu();
             }
         });
 
-        // 快捷鍵設定直接在選單裡展開,不另開視窗
-        function toggleHotkeysSection(e) {
+        // 子選單直接在設定選單旁展開。三個飛出面板共用同一個定位點,
+        // 同時開會疊在一起,所以開新的要把其他的收掉 (手風琴)。
+        const MENU_SECTIONS = ['hotkeys', 'source', 'llm'];
+        function toggleMenuSection(e, key) {
             if (e) e.stopPropagation();
-            const sec = document.getElementById('hotkeys-section');
-            const btn = document.getElementById('hotkeys-toggle');
+            const sec = document.getElementById(key + '-section');
+            const btn = document.getElementById(key + '-toggle');
             if (!sec) return;
             const open = sec.classList.toggle('show');
             if (btn) btn.classList.toggle('open', open);
+            if (open) {
+                MENU_SECTIONS.filter(k => k !== key).forEach(k => {
+                    const s = document.getElementById(k + '-section');
+                    if (s) s.classList.remove('show');
+                    const b = document.getElementById(k + '-toggle');
+                    if (b) b.classList.remove('open');
+                });
+                // 音訊來源:每次展開才掃一次媒體 session,關掉的 app 不會留在清單
+                if (key === 'source') loadMediaSources();
+            }
+        }
+        function toggleHotkeysSection(e) { toggleMenuSection(e, 'hotkeys'); }
+        function toggleSourceSection(e) { toggleMenuSection(e, 'source'); }
+        function toggleLlmSection(e) { toggleMenuSection(e, 'llm'); }
+
+        // key 只寫不讀:存完清空輸入框,placeholder 顯示「已設定 •••後四碼」
+        function saveLlmApiKey(inputEl) {
+            const key = inputEl.value.trim();
+            fetch('/api/llm-key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key })
+            })
+            .then(r => r.json())
+            .then(d => {
+                inputEl.value = '';
+                if (d.detected) {
+                    const b = document.getElementById('llm-base-url');
+                    if (b) b.value = d.detected.base_url;
+                    const m = document.getElementById('llm-model');
+                    if (m) m.value = d.detected.model;
+                    hkToast(`已偵測 ${d.detected.name}，自動填入端點與模型`);
+                } else {
+                    hkToast(d.set ? 'API Key 已儲存' : 'API Key 已清除');
+                }
+                refreshLlmKeyStatus();
+            })
+            .catch(() => hkToast('API Key 儲存失敗'));
         }
 
-        // 音訊來源:每次展開才掃一次目前系統上的媒體 session,關掉的 app 不會留在清單
-        function toggleSourceSection(e) {
-            if (e) e.stopPropagation();
-            const sec = document.getElementById('source-section');
-            const btn = document.getElementById('source-toggle');
-            if (!sec) return;
-            const open = sec.classList.toggle('show');
-            if (btn) btn.classList.toggle('open', open);
-            if (open) loadMediaSources();
+        function refreshLlmKeyStatus() {
+            fetch('/api/llm-key')
+                .then(r => r.json())
+                .then(d => {
+                    window._llmKeySet = d.set;
+                    const keyEl = document.getElementById('llm-key');
+                    if (keyEl) keyEl.placeholder = d.set ? `已設定 •••${d.last4}` : '未設定';
+                })
+                .catch(() => {});
+        }
+
+        // 魔杖的綠燈只代表「這一首」跑過 AI 校正,換歌就熄
+        window.resetLlmWandBtn = function() {
+            const b = document.getElementById('llm-wand-btn');
+            if (b) b.classList.remove('active');
+        };
+
+        // 魔杖:強制重跑這首歌的 LLM 讀音 (覆寫快取),結果由 server 推播回歌詞區
+        async function runLlmFurigana(btn) {
+            if (!window._llmKeySet) {
+                if (typeof showToast === 'function') showToast('請先在設定選單的「AI 讀音校正」設定 API Key');
+                return;
+            }
+            const song = window.currentSongInfo || {};
+            if (!song.title) {
+                if (typeof showToast === 'function') showToast('沒有播放中的歌曲');
+                return;
+            }
+            const icon = btn.querySelector('i');
+            btn.disabled = true;
+            btn.classList.remove('active');
+            icon.className = 'fa-solid fa-spinner fa-spin';
+            try {
+                const r = await fetch('/api/llm-furigana/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ artist: song.artist, title: song.title })
+                });
+                const d = await r.json();
+                if (r.ok && d.success) {
+                    btn.classList.add('active');
+                    if (typeof showToast === 'function') showToast('AI 讀音校正完成', 'fa-solid fa-wand-magic-sparkles');
+                } else if (typeof showToast === 'function') {
+                    showToast(d.error || 'AI 讀音校正失敗');
+                }
+            } catch (e) {
+                if (typeof showToast === 'function') showToast('AI 讀音校正失敗');
+            } finally {
+                icon.className = 'fa-solid fa-wand-magic-sparkles';
+                btn.disabled = false;
+            }
         }
 
         function loadMediaSources() {
@@ -146,6 +231,8 @@
                             </span>
                         </label>`;
                     }).join('');
+                    // 清單載入後高度會變,迷你導覽的高亮框要重量一次
+                    if (tourIndex >= 0) renderTourStep();
                 })
                 .catch(() => { sec.innerHTML = '<div class="hk-label">無法取得來源清單</div>'; });
         }
@@ -165,10 +252,11 @@
             { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '所有設定都在這裡：日文假名、文字大小、歌詞對齊、優先搜尋來源、音訊來源、快捷鍵等。' },
             { page: '/',       el: '#lyrics-scroll', title: '歌詞區',     text: '歌詞會隨播放自動同步捲動，漢字上方標示假名注音。點任一句歌詞可以直接跳轉到該時間點。' },
             { page: '/',       el: '.player-center', title: '播放控制',   text: '控制播放/暫停、上下一首，拖曳進度條可跳轉。' },
-            { page: '/',       el: '.player-right',  title: '工具列',     text: '由左至右：段落循環、編輯假名、取得備選歌詞、重新載入歌詞、桌面靈動島、放大模式。每顆都可以在設定選單裡自訂快捷鍵。接下來幾顆值得細講。' },
+            { page: '/',       el: '.player-right',  title: '工具列',     text: '由左至右：備選歌詞、段落循環、編輯假名、AI 讀音校正、重新載入歌詞、桌面靈動島、放大模式。每顆都可以在設定選單裡自訂快捷鍵。接下來由左到右細講。' },
+            { page: '/',       el: '#lyrics-opt-btn', title: '備選歌詞',  text: '歌詞抓錯或時間軸不對時按這裡。它會直接在背景搜尋各個來源（按鈕轉圈中），找到後變成綠色打勾並跳出提醒，點打勾即可挑選要套用的版本。想讓它每次換歌都自動搜，到設定選單打開「自動搜尋備選歌詞」。' },
             { page: '/',       el: '#loop-mode-btn', title: '段落循環', text: '想反覆練唱某一段就按這顆書籤。進入循環模式後，點歌詞選出起點那一句，再點一句當終點，就會立刻跳到起點開始無限循環——唱完終點那一句會自動跳回起點。同一句連點兩次就是單句循環。選好的範圍會用綠色底標示出來。再按一次書籤（或快捷鍵，預設 A）結束循環。' },
             { page: '/',       el: '#toggle-ruby-mode-btn', title: '編輯假名', text: '假名偶爾會標錯（人名、罕見讀音）。按下這顆筆進入編輯模式，點任一個漢字，它的假名就地變成可打字的欄位——打羅馬拼音會自動轉成假名。Enter 儲存、Esc 取消、雙擊該字則回復成自動判讀的讀音。修改只套用在這首歌。' },
-            { page: '/',       el: '#lyrics-opt-btn', title: '備選歌詞',  text: '歌詞抓錯或時間軸不對時按這裡。它會直接在背景搜尋各個來源（按鈕轉圈中），找到後變成綠色打勾並跳出提醒，點打勾即可挑選要套用的版本。想讓它每次換歌都自動搜，到設定選單打開「自動搜尋備選歌詞」。' },
+            { page: '/',       el: '#llm-wand-btn', title: 'AI 讀音校正', text: '用你自己的 LLM API 依歌詞上下文校正漢字讀音（行く = いく/ゆく 這類同形詞）。先在設定選單的「AI 讀音校正」填好 API Key，再按這顆魔杖對正在播放的歌執行。結果會快取，你手動修正過的假名永遠優先。' },
             { page: '/',       el: '#desktop-toggle-btn', title: '桌面靈動島', text: '開啟一個永遠置頂的懸浮歌詞條，離開瀏覽器也看得到歌詞，適合一邊工作一邊聽歌。再按一次關閉。顯示行數可以在設定選單調整。' },
             { page: '/',       el: '#offset-panel', reveal: true, title: '微調時間軸', text: '歌詞跟音樂對不上時用這裡校正。歌詞太晚出現就按「−」讓它提早，太早出現就按「+」讓它延遲，一次 0.1 秒；點中間的數字可以歸零。每首歌的偏移量會各自記住，下次播同一首自動套用，桌面靈動島也會跟著校正。平常它是半透明的，滑鼠移過去才會變清楚，也可以用快捷鍵調整（預設方向鍵左右）。' },
             { page: '/',       el: 'a.nav-item[href="/editor"]', title: '歌詞編輯器', text: '找不到歌詞、時間軸不準？歌詞編輯器可以手動修正。點「下一步」帶你進去看看。' },
@@ -180,6 +268,24 @@
               emptyText: '選了歌之後，這裡可以直接修改每句歌詞與時間戳。右上角可以設定歌手別名、尋找更多歌詞來源或貼上自訂歌詞，改完按「儲存修改」。等你聽過幾首歌再回來看看。' },
             { page: '/editor', el: null,             title: '完成！',     text: '就是這些！開始享受你的音樂吧 🎵 想重看說明，隨時從左上角選單點「使用說明」。' }
         ];
+        // 「AI 讀音校正」問號的迷你導覽:沿用同一套 tour 機制,只換步驟內容。
+        // 步驟不設 page = 不跨頁,在哪一頁點都能播。
+        const llmTourSteps = [
+            { el: '#llm-section',  title: 'AI 讀音校正',
+              text: '用你自己的 LLM API 依歌詞上下文校正漢字讀音——字典分不出的同形詞（行く = いく/ゆく）交給 AI 判斷。「自動」只在找不到羅馬字讀音來源時跑；「總是」每首都跑。' },
+            { el: '#llm-section',  title: '連線設定',
+              text: '支援任何 OpenAI 相容端點：DeepSeek、Gemini 免費端點、本機 Ollama。通常只要貼上 API Key——會自動偵測供應商並帶入 Base URL 與 Model，也可手動修改。啟用後會將歌名與歌詞送至你設定的服務，Key 只存在本機。' },
+            { el: '#llm-wand-btn', title: '魔杖按鈕',
+              text: '對正在播放的歌手動執行 AI 校正並覆寫快取。結果會快取，一首歌只呼叫一次 API。你手動修正過的假名永遠優先，不會被 AI 蓋掉。' }
+        ];
+        // 「音訊來源」問號的迷你導覽
+        const sourceTourSteps = [
+            { el: '#source-section', title: '音訊來源',
+              text: '決定歌詞跟著哪個 app 走。「自動」優先選正在播放的音樂 app；音樂暫停時也不會被背景影片搶走歌詞。' },
+            { el: '#source-section', title: '指定 app',
+              text: '選了特定 app 就只跟它——app 沒開啟時不顯示任何內容，也不會自動換到別的來源。清單每次展開時重新掃描，切換立即生效。' }
+        ];
+        let currentTour = tourSteps;
         let tourIndex = -1;
         let tourNoSongs = false; // 資料庫沒有任何快取歌曲時,編輯器的步驟要換一套說法
 
@@ -190,13 +296,33 @@
                 return;
             }
             localStorage.setItem('tourSeen', '1');
+            currentTour = tourSteps;
             tourIndex = 0;
             renderTourStep();
             document.addEventListener('keydown', tourEscHandler);
         }
 
+        // 問號啟動的迷你導覽:設定選單與該子選單保持展開,讓步驟框得到它們
+        function startMiniTour(e, steps, sectionKey) {
+            if (e) e.stopPropagation();
+            const sec = document.getElementById(sectionKey + '-section');
+            if (sec && !sec.classList.contains('show')) {
+                toggleMenuSection(null, sectionKey);   // 順便收掉其他展開中的子選單
+            }
+            currentTour = steps;
+            tourIndex = 0;
+            renderTourStep();
+            document.addEventListener('keydown', tourEscHandler);
+        }
+
+        function startLlmTour(e) { startMiniTour(e, llmTourSteps, 'llm'); }
+        function startSourceTour(e) { startMiniTour(e, sourceTourSteps, 'source'); }
+
         function endTour() {
+            const wasMiniTour = currentTour !== tourSteps;
             tourIndex = -1;
+            currentTour = tourSteps;
+            if (wasMiniTour) closeSettingsMenu();
             const hl = document.getElementById('tour-highlight');
             const po = document.getElementById('tour-popover');
             if (hl) hl.remove();
@@ -211,7 +337,7 @@
 
         function tourStepMove(delta) {
             tourIndex += delta;
-            if (tourIndex < 0 || tourIndex >= tourSteps.length) { endTour(); return; }
+            if (tourIndex < 0 || tourIndex >= currentTour.length) { endTour(); return; }
             renderTourStep();
         }
 
@@ -245,9 +371,9 @@
         }
 
         function renderTourStep() {
-            const step = tourSteps[tourIndex];
-            // 跨頁步驟:記住進度後跳轉,載入後由 DOMContentLoaded 恢復
-            if (step.page !== location.pathname) {
+            const step = currentTour[tourIndex];
+            // 跨頁步驟:記住進度後跳轉,載入後由 DOMContentLoaded 恢復 (迷你導覽不設 page,不跨頁)
+            if (step.page && step.page !== location.pathname) {
                 sessionStorage.setItem('tourResume', tourIndex);
                 location.href = step.page;
                 return;
@@ -297,13 +423,13 @@
                 hl.style.height = '0';
             }
 
-            const isLast = tourIndex === tourSteps.length - 1;
+            const isLast = tourIndex === currentTour.length - 1;
             const stepText = (tourNoSongs && step.emptyText) ? step.emptyText : step.text;
             po.innerHTML = `
                 <div class="tour-title">${step.title}</div>
                 <div class="tour-text">${stepText}</div>
                 <div class="tour-footer">
-                    <span class="tour-count">${tourIndex + 1}/${tourSteps.length}</span>
+                    <span class="tour-count">${tourIndex + 1}/${currentTour.length}</span>
                     <div class="tour-btns">
                         ${!isLast ? '<button class="tour-btn" onclick="endTour()">跳過</button>' : ''}
                         ${tourIndex > 0 ? '<button class="tour-btn" onclick="tourStepMove(-1)">上一步</button>' : ''}
@@ -547,6 +673,13 @@
                     if (ilEl) ilEl.value = data.island_lines;
                 }
                 
+                const llmMode = document.getElementById('llm-mode');
+                if (llmMode) llmMode.value = data.llm_furigana || 'off';
+                const llmBase = document.getElementById('llm-base-url');
+                if (llmBase && data.llm_base_url) llmBase.value = data.llm_base_url;
+                const llmModel = document.getElementById('llm-model');
+                if (llmModel && data.llm_model) llmModel.value = data.llm_model;
+
                 if (data.font_size !== undefined) {
                     const savedFs = data.font_size;
                     document.documentElement.style.setProperty('--lyrics-fs', savedFs + 'px');
@@ -576,6 +709,8 @@
             
             if (window.updateActiveHotkeys) window.updateActiveHotkeys();
 
+            refreshLlmKeyStatus();
+
             // 跨頁導覽:上一頁跳轉過來時恢復進度
             const tourResume = sessionStorage.getItem('tourResume');
             if (tourResume !== null) {
@@ -589,7 +724,8 @@
                 // 首頁:首次進站或帶 ?tour=1 時自動播放使用說明
                 const params = new URLSearchParams(location.search);
                 if (params.get('tour') === '1' || !localStorage.getItem('tourSeen')) {
-                    setTimeout(startTour, 800);
+                    // 使用者可能已經先開了別的導覽 (例如 AI 讀音校正的問號),不要蓋掉
+                    setTimeout(() => { if (tourIndex < 0) startTour(); }, 800);
                 }
             }
         });
@@ -660,16 +796,43 @@
                         // 換歌 = 上一首的備選歌詞失效;新歌若在 server 上搜過/搜尋中,把狀態接回來
                         window._lyricsOptions = [];
                         resetLyricsOptBtn();
+                        resetLlmWandBtn();
                         restoreOptionsState();
                     }
                     if (d.title && d.duration > 0) {
-                        const pct = Math.min(100, d.position / d.duration * 100);
-                        document.getElementById('progress-slider').value = pct;
-                        document.getElementById('progress-fill').style.width = pct + '%';
-                        document.getElementById('current-time').textContent = fmtTime(d.position);
+                        barDuration = d.duration;
+                        // 拖曳中或剛 seek 完 (系統回報還是舊位置) 不回寫滑桿
+                        if (!barScrubbing && performance.now() > barSeekMuteUntil) {
+                            const pct = Math.min(100, d.position / d.duration * 100);
+                            document.getElementById('progress-slider').value = pct;
+                            document.getElementById('progress-fill').style.width = pct + '%';
+                            document.getElementById('current-time').textContent = fmtTime(d.position);
+                        }
                         document.getElementById('total-time').textContent = fmtTime(d.duration);
                     }
                 } catch (e) {}
+            }
+
+            // 進度條跳轉:點擊/拖曳放開時 seek (首頁由 app.js 處理,這裡給其他頁)
+            let barDuration = window.__initialMedia.duration || 0;
+            let barScrubbing = false;
+            let barSeekMuteUntil = 0;
+            const barSlider = document.getElementById('progress-slider');
+            if (barSlider) {
+                barSlider.addEventListener('pointerdown', () => { barScrubbing = true; });
+                barSlider.addEventListener('input', () => {
+                    document.getElementById('progress-fill').style.width = barSlider.value + '%';
+                    document.getElementById('current-time').textContent = fmtTime(barSlider.value / 100 * barDuration);
+                });
+                barSlider.addEventListener('change', () => {
+                    barScrubbing = false;
+                    barSeekMuteUntil = performance.now() + 3000;
+                    fetch('/api/seek', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ position: barSlider.value / 100 * barDuration })
+                    });
+                });
             }
             // 換頁載入:把 server 渲染的曲名/歌手包成 span 並開啟 hover 捲動 (不自動捲,換頁不算換歌)
             setMarqueeText(document.getElementById('current-title'), (window.__initialMedia.title || '--'), false);

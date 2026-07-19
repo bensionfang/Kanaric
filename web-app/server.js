@@ -48,10 +48,55 @@ const DATA_DIR = process.env.DATA_DIR || PARENT_DIR;
 const venvPythonPath = path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe');
 const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
 
+// --- LLM API key (BYOK) ---
+// key 絕不放 settings.json (GET /api/settings 會整份吐回)。獨立存 DATA_DIR/secrets.json,
+// 打包版經 Electron safeStorage (DPAPI) 加密;dev 模式 (純 node) 明文 + 警告。
+// 只透過 spawnPy 的環境變數傳給 Python,不進 log、不進 URL。
+const SECRETS_FILE = path.join(DATA_DIR, 'secrets.json');
+let safeStorage = null;
+try {
+  const electron = require('electron');
+  if (electron && electron.safeStorage) safeStorage = electron.safeStorage;
+} catch (e) {}
+
+function canEncrypt() {
+  try { return !!(safeStorage && safeStorage.isEncryptionAvailable()); } catch (e) { return false; }
+}
+
+function loadLlmKey() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SECRETS_FILE, 'utf8'));
+    if (s.llm_api_key_enc && canEncrypt()) {
+      return safeStorage.decryptString(Buffer.from(s.llm_api_key_enc, 'base64'));
+    }
+    if (s.llm_api_key) return s.llm_api_key;
+  } catch (e) {}
+  return '';
+}
+let llmApiKey = loadLlmKey();
+
+function saveLlmKey(key) {
+  llmApiKey = key || '';
+  if (!llmApiKey) {
+    try { fs.unlinkSync(SECRETS_FILE); } catch (e) {}
+    return;
+  }
+  let payload;
+  if (canEncrypt()) {
+    payload = { llm_api_key_enc: safeStorage.encryptString(llmApiKey).toString('base64') };
+  } else {
+    console.warn('[llm] safeStorage 不可用,API key 以明文寫入 secrets.json (dev 模式)');
+    payload = { llm_api_key: llmApiKey };
+  }
+  fs.writeFileSync(SECRETS_FILE, JSON.stringify(payload), 'utf8');
+}
+
 // 打包模式下改用 PyInstaller 產出的 pytools.exe;開發模式用 python pytools.py
 const PYTOOLS_EXE = process.env.PYTOOLS_EXE || '';
 function spawnPy(args, opts = {}) {
-  const base = { env: { ...process.env, PYTHONIOENCODING: 'utf-8' }, windowsHide: true, ...opts };
+  const env = { ...process.env, PYTHONIOENCODING: 'utf-8' };
+  if (llmApiKey) env.LLM_API_KEY = llmApiKey;
+  const base = { env, windowsHide: true, ...opts };
   if (PYTOOLS_EXE) {
     return spawn(PYTOOLS_EXE, args, { cwd: path.dirname(PYTOOLS_EXE), ...base });
   }
@@ -338,6 +383,71 @@ app.post('/api/settings', (req, res) => {
   }
 });
 
+// LLM key 端點只寫不讀:POST 設定/清除,GET 只回有沒有設定 + 後四碼
+app.get('/api/llm-key', (req, res) => {
+  res.json({ set: !!llmApiKey, last4: llmApiKey ? llmApiKey.slice(-4) : '' });
+});
+
+// 依 key 前綴猜供應商,再實際拿 key 驗證。長前綴排前面 (sk-ant-/sk-or- 也符合 sk-)。
+// 驗證端點預設 /models;OpenRouter 的 /models 是公開端點 (不帶 key 也回 200,亂打的
+// key 會被誤判有效),所以它改用需要認證的 /auth/key。
+// prefer 撞不到時退回模型清單裡第一個,所以供應商改版模型名也不會壞。
+const LLM_PROVIDERS = [
+  { name: 'Anthropic',  base: 'https://api.anthropic.com/v1',  prefer: 'claude-haiku-4-5',        match: k => k.startsWith('sk-ant-') },
+  { name: 'OpenRouter', base: 'https://openrouter.ai/api/v1',  prefer: 'deepseek/deepseek-chat',  match: k => k.startsWith('sk-or-'),
+    auth: 'https://openrouter.ai/api/v1/auth/key' },
+  { name: 'Groq',       base: 'https://api.groq.com/openai/v1', prefer: 'llama-3.3-70b-versatile', match: k => k.startsWith('gsk_') },
+  { name: 'Gemini',     base: 'https://generativelanguage.googleapis.com/v1beta/openai', prefer: 'gemini-2.5-flash', match: k => k.startsWith('AIza') },
+  { name: 'DeepSeek',   base: 'https://api.deepseek.com/v1',   prefer: 'deepseek-chat',           match: k => k.startsWith('sk-') },
+  { name: 'OpenAI',     base: 'https://api.openai.com/v1',     prefer: 'gpt-4o-mini',             match: k => k.startsWith('sk-') },
+];
+
+async function detectLlmProvider(key) {
+  const matched = LLM_PROVIDERS.filter(p => p.match(key));
+  for (const p of (matched.length ? matched : LLM_PROVIDERS)) {
+    try {
+      const headers = { Authorization: `Bearer ${key}` };
+      const auth = await fetch(p.auth || (p.base + '/models'), { headers, signal: AbortSignal.timeout(6000) });
+      if (!auth.ok) continue;
+      // key 驗過了,再抓模型清單挑 model (抓不到就用 prefer)
+      let ids = [];
+      try {
+        const r = await fetch(p.base + '/models', { headers, signal: AbortSignal.timeout(6000) });
+        const data = r.ok ? await r.json() : null;
+        if (data && Array.isArray(data.data)) ids = data.data.map(m => m.id);
+      } catch (e) {}
+      const model = ids.find(id => id === p.prefer) || ids.find(id => id.includes(p.prefer)) || ids[0] || p.prefer;
+      return { name: p.name, base_url: p.base, model };
+    } catch (e) {}
+  }
+  return null;
+}
+
+app.post('/api/llm-key', async (req, res) => {
+  try {
+    saveLlmKey((req.body.key || '').trim());
+
+    // 存 key 順便偵測供應商,自動帶入 Base URL / Model —— 只填空欄位,不蓋使用者設定
+    let detected = null;
+    if (llmApiKey) {
+      let cur = {};
+      try { cur = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch (e) {}
+      if (!cur.llm_base_url || !cur.llm_model) {
+        detected = await detectLlmProvider(llmApiKey);
+        if (detected) {
+          if (cur.llm_base_url) detected.base_url = cur.llm_base_url;
+          if (cur.llm_model) detected.model = cur.llm_model;
+          fs.writeFileSync(SETTINGS_FILE, JSON.stringify(
+            { ...cur, llm_base_url: detected.base_url, llm_model: detected.model }, null, 4), 'utf8');
+        }
+      }
+    }
+    res.json({ success: true, set: !!llmApiKey, detected });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 目前系統上有哪些媒體來源 (設定選單的「音訊來源」用)。每次打開子選單才掃一次。
 app.get('/api/media-sources', async (req, res) => {
   if (os.platform() !== 'win32') return res.json({ current: 'auto', sources: [] });
@@ -417,16 +527,16 @@ function invalidateFurigana(artist, title) {
   furiganaCache.delete(furiganaKey(artist, title));
 }
 
-function injectFurigana(artist, title, lyrics) {
+function injectFurigana(artist, title, lyrics, forceLlm = false) {
   const key = furiganaKey(artist, title);
   const hit = furiganaCache.get(key);
-  if (hit && hit.src === lyrics) return Promise.resolve(hit.out);
+  if (!forceLlm && hit && hit.src === lyrics) return Promise.resolve(hit.out);
 
   return new Promise((resolve) => {
     console.log("injectFurigana called for:", title, artist);
     const pyProcess = spawnPy(['furigana']);
-    
-    pyProcess.stdin.write(JSON.stringify({ artist, title, lyrics }));
+
+    pyProcess.stdin.write(JSON.stringify({ artist, title, lyrics, force_llm: forceLlm }));
     pyProcess.stdin.end();
     
     let output = '';
@@ -590,6 +700,22 @@ app.post('/api/furigana/reset', (req, res) => {
       rebroadcastLyrics(artist, title);
     }
   );
+});
+
+// 1.6 魔杖:強制重跑 LLM 讀音校正 (無視模式與快取,成功後覆寫 llm_hints) 並推播
+app.post('/api/llm-furigana/run', (req, res) => {
+  const { artist, title } = req.body;
+  if (!artist || !title) return res.status(400).json({ error: 'Missing parameters' });
+  if (!llmApiKey) return res.status(400).json({ error: 'API key 未設定' });
+
+  db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
+    if (err || !row || !row.lyrics) return res.status(404).json({ error: '這首歌沒有快取歌詞' });
+    const injected = await injectFurigana(artist, title, row.lyrics, true);
+    if (global.broadcast && currentMediaState.title === title && currentMediaState.artist === artist) {
+      global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
+    }
+    res.json({ success: true });
+  });
 });
 
 // 2. Fetch lyrics (checks DB, if missing fetches from lrclib)

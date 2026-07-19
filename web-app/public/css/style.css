@@ -234,7 +234,8 @@ button.menu-action {
 }
 
 #hotkeys-toggle.open .hotkeys-chevron,
-#source-toggle.open .hotkeys-chevron {
+#source-toggle.open .hotkeys-chevron,
+#llm-toggle.open .hotkeys-chevron {
     transform: rotate(90deg);
 }
 
@@ -281,6 +282,24 @@ button.menu-action {
     overflow-y: auto;   /* 列數多過主選單高度就自己捲 */
 }
 
+/* AI 讀音校正:標籤旁的問號 + 展開的說明文字 */
+.llm-help-btn {
+    margin-left: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.llm-help-btn:hover {
+    color: var(--text-primary);
+}
+
+/* AI 讀音校正的子選單只有四列,直接放大到夠裝,不出現捲軸 */
+#llm-section {
+    width: 320px;
+    max-height: none;
+    overflow-y: visible;
+}
+
 .menu-hotkeys.show {
     display: block;
     animation: popIn 0.12s ease-out;
@@ -309,6 +328,13 @@ button.menu-action {
     border-radius: 4px;
     color: var(--text-primary);
     cursor: pointer;
+}
+
+/* AI 讀音校正的文字欄位:比快捷鍵欄寬、靠左、可打字 */
+.llm-input {
+    width: 210px;
+    text-align: left;
+    cursor: text;
 }
 
 .hk-input:focus {

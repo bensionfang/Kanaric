@@ -21,5 +21,7 @@
     "hk-island": "D",
     "hk-fullscreen": "F",
     "hk-ruby-edit": "E",
-    "media_source": "auto"
+    "media_source": "auto",
+    "llm_base_url": "",
+    "llm_model": ""
 }
