@@ -11,7 +11,7 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Style -->
-    <link rel="stylesheet" href="/css/style.css?v=67">
+    <link rel="stylesheet" href="/css/style.css?v=69">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- 各頁共用:吐司 + 備選歌詞 + 重新載入歌詞 -->
@@ -113,16 +113,23 @@
                             </select>
                         </div>
                         <div class="hk-row">
+                            <span class="hk-label">供應商</span>
+                            <select id="llm-preset" class="menu-select" onchange="applyLlmPreset(this.value)">
+                                <option value="">自訂</option>
+                            </select>
+                        </div>
+                        <div class="hk-row">
                             <span class="hk-label">API Key</span>
                             <input type="password" id="llm-key" class="hk-input llm-input" placeholder="未設定" autocomplete="off" onchange="saveLlmApiKey(this)">
                         </div>
                         <div class="hk-row">
                             <span class="hk-label">Base URL</span>
-                            <input type="text" id="llm-base-url" class="hk-input llm-input" onchange="saveSettingsToServer('llm_base_url', this.value.trim())">
+                            <input type="text" id="llm-base-url" class="hk-input llm-input" onchange="saveSettingsToServer('llm_base_url', this.value.trim()); syncLlmPresetSelect()">
                         </div>
                         <div class="hk-row">
                             <span class="hk-label">Model</span>
-                            <input type="text" id="llm-model" class="hk-input llm-input" onchange="saveSettingsToServer('llm_model', this.value.trim())">
+                            <input type="text" id="llm-model" class="hk-input llm-input" list="llm-model-list" onchange="saveSettingsToServer('llm_model', this.value.trim())">
+                            <datalist id="llm-model-list"></datalist>
                         </div>
                         <div class="hk-footer">
                             <span>啟用後會將歌名與歌詞送至你設定的 LLM 服務</span>

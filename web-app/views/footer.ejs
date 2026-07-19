@@ -53,7 +53,10 @@
                 </div>
                 <button id="loop-mode-btn" class="ctrl-btn" onclick="toggleLoopMode()" title="段落循環"><i class="fa-solid fa-bookmark"></i></button>
                 <button id="toggle-ruby-mode-btn" class="ctrl-btn" onclick="toggleRubyEditMode()" title="編輯假名模式"><i class="fa-solid fa-pen"></i></button>
-                <button id="llm-wand-btn" class="ctrl-btn" onclick="runLlmFurigana(this)" title="AI 讀音校正"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+                <div class="lyrics-opt-wrap">
+                    <button id="llm-wand-btn" class="ctrl-btn" onclick="runLlmFurigana(this)" title="AI 讀音校正"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+                    <div id="llm-wand-bubble" class="lyrics-opt-bubble"></div>
+                </div>
                 <button class="ctrl-btn" onclick="reloadCurrentLyrics()" title="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
                 <button id="desktop-toggle-btn" class="ctrl-btn" onclick="launchPyQt6()" title="桌面靈動島">
                     <i class="fa-solid fa-mobile-screen"></i>
@@ -128,11 +131,68 @@
                 });
                 // 音訊來源:每次展開才掃一次媒體 session,關掉的 app 不會留在清單
                 if (key === 'source') loadMediaSources();
+                if (key === 'llm') loadLlmModels();
             }
         }
         function toggleHotkeysSection(e) { toggleMenuSection(e, 'hotkeys'); }
         function toggleSourceSection(e) { toggleMenuSection(e, 'source'); }
         function toggleLlmSection(e) { toggleMenuSection(e, 'llm'); }
+
+        // 供應商 preset:選了預填 Base URL / Model (仍可手改),key 照舊自己貼。
+        // 與 server.js LLM_PROVIDERS 同源資料;Ollama 沒 key、自動偵測不會跑,只能靠這裡。
+        const LLM_PRESETS = {
+            'DeepSeek':    ['https://api.deepseek.com/v1', 'deepseek-chat'],
+            'Gemini':      ['https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-2.5-flash'],
+            'OpenAI':      ['https://api.openai.com/v1', 'gpt-4o-mini'],
+            'OpenRouter':  ['https://openrouter.ai/api/v1', 'deepseek/deepseek-chat'],
+            'Groq':        ['https://api.groq.com/openai/v1', 'llama-3.3-70b-versatile'],
+            'Anthropic':   ['https://api.anthropic.com/v1', 'claude-haiku-4-5'],
+            'Ollama (本機)': ['http://localhost:11434/v1', 'qwen3:8b'],
+        };
+        (function populateLlmPresets() {
+            const sel = document.getElementById('llm-preset');
+            if (!sel) return;
+            for (const name of Object.keys(LLM_PRESETS)) {
+                const o = document.createElement('option');
+                o.value = name; o.textContent = name;
+                sel.appendChild(o);
+            }
+        })();
+        async function applyLlmPreset(name) {
+            const p = LLM_PRESETS[name] || ['', ''];   // 自訂 = 清空,讓使用者從頭填
+
+            document.getElementById('llm-base-url').value = p[0];
+            document.getElementById('llm-model').value = p[1];
+            await saveSettingsToServer('llm_base_url', p[0]);
+            saveSettingsToServer('llm_model', p[1]);
+            loadLlmModels(true);
+        }
+        // Model 欄的建議清單:跟 server 要目前端點的 /models (key 留在 server)。失敗就空著;
+        // 換供應商時失敗會 toast (401 幾乎都是 key 跟端點對不上),打開選單時安靜。
+        function loadLlmModels(toastOnError) {
+            fetch('/api/llm-models')
+                .then(r => r.json())
+                .then(d => {
+                    const dl = document.getElementById('llm-model-list');
+                    if (!dl) return;
+                    dl.innerHTML = '';
+                    (d.models || []).forEach(id => {
+                        const o = document.createElement('option');
+                        o.value = id;
+                        dl.appendChild(o);
+                    });
+                    if (toastOnError && d.error) hkToast(`模型清單抓取失敗 (${d.error})，檢查 API Key 是否屬於這家供應商`);
+                })
+                .catch(() => {});
+        }
+        // 由 Base URL 反查 preset,讓下拉顯示目前生效的供應商 (載入設定與自動偵測後呼叫)
+        function syncLlmPresetSelect() {
+            const sel = document.getElementById('llm-preset');
+            const base = document.getElementById('llm-base-url');
+            if (!sel || !base) return;
+            const hit = Object.keys(LLM_PRESETS).find(n => LLM_PRESETS[n][0] === base.value.trim());
+            sel.value = hit || '';
+        }
 
         // key 只寫不讀:存完清空輸入框,placeholder 顯示「已設定 •••後四碼」
         function saveLlmApiKey(inputEl) {
@@ -151,6 +211,7 @@
                     const m = document.getElementById('llm-model');
                     if (m) m.value = d.detected.model;
                     hkToast(`已偵測 ${d.detected.name}，自動填入端點與模型`);
+                    syncLlmPresetSelect();
                 } else {
                     hkToast(d.set ? 'API Key 已儲存' : 'API Key 已清除');
                 }
@@ -170,11 +231,30 @@
                 .catch(() => {});
         }
 
-        // 魔杖的綠燈只代表「這一首」跑過 AI 校正,換歌就熄
+        // 魔杖的綠勾只代表「這一首」跑過 AI 校正,換歌就熄、變回魔杖
         window.resetLlmWandBtn = function() {
             const b = document.getElementById('llm-wand-btn');
-            if (b) b.classList.remove('active');
+            if (!b) return;
+            b.classList.remove('active');
+            b.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i>';
         };
+        // 綠勾 (同備選歌詞按鈕)。手動成功時直接呼叫;自動模式跑完的歌詞帶 llm-ruby 標記,
+        // renderLyrics 看到就點亮 —— 兩條路殊途同歸
+        window.setLlmWandDone = function() {
+            const b = document.getElementById('llm-wand-btn');
+            if (!b) return;
+            b.classList.add('active');
+            b.innerHTML = '<i class="fa-solid fa-check"></i>';
+        };
+        // 完成訊息:同備選歌詞的綠色泡泡,錨在魔杖上方,8 秒自動收
+        function showWandBubble(changed) {
+            const bubble = document.getElementById('llm-wand-bubble');
+            if (!bubble) return;
+            bubble.textContent = changed > 0 ? `AI 修正了 ${changed} 處讀音` : 'AI 校正完成，無需修正';
+            bubble.classList.add('show');
+            clearTimeout(window._wandBubbleTimer);
+            window._wandBubbleTimer = setTimeout(() => bubble.classList.remove('show'), 8000);
+        }
 
         // 魔杖:強制重跑這首歌的 LLM 讀音 (覆寫快取),結果由 server 推播回歌詞區
         async function runLlmFurigana(btn) {
@@ -187,10 +267,10 @@
                 if (typeof showToast === 'function') showToast('沒有播放中的歌曲');
                 return;
             }
-            const icon = btn.querySelector('i');
             btn.disabled = true;
             btn.classList.remove('active');
-            icon.className = 'fa-solid fa-spinner fa-spin';
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            let ok = false;
             try {
                 const r = await fetch('/api/llm-furigana/run', {
                     method: 'POST',
@@ -199,15 +279,16 @@
                 });
                 const d = await r.json();
                 if (r.ok && d.success) {
-                    btn.classList.add('active');
-                    if (typeof showToast === 'function') showToast('AI 讀音校正完成', 'fa-solid fa-wand-magic-sparkles');
+                    ok = true;
+                    setLlmWandDone();
+                    showWandBubble(d.changed);
                 } else if (typeof showToast === 'function') {
                     showToast(d.error || 'AI 讀音校正失敗');
                 }
             } catch (e) {
                 if (typeof showToast === 'function') showToast('AI 讀音校正失敗');
             } finally {
-                icon.className = 'fa-solid fa-wand-magic-sparkles';
+                if (!ok) btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i>';
                 btn.disabled = false;
             }
         }
@@ -679,6 +760,7 @@
                 if (llmBase && data.llm_base_url) llmBase.value = data.llm_base_url;
                 const llmModel = document.getElementById('llm-model');
                 if (llmModel && data.llm_model) llmModel.value = data.llm_model;
+                syncLlmPresetSelect();
 
                 if (data.font_size !== undefined) {
                     const savedFs = data.font_size;

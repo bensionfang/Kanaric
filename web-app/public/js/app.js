@@ -415,6 +415,10 @@ function renderLyrics() {
     jumpToActiveLine = true;   // 重畫後第一次置中用瞬移,不要從頂端滑下來
     restoreLoopRange();   // 換頁回來時把上次選好的段落接回來
     paintLoopRange();
+    if (isRubyEditMode) markLlmRubies();   // 編輯模式中收到重播 (如魔杖跑完) 也要補掛
+    // 歌詞帶 LLM 修正標記 = 這首跑過 AI 校正 (自動模式或快取),魔杖亮勾。
+    // 只點亮不熄滅:熄滅由換歌時的 resetLlmWandBtn 負責,免得手動跑完 0 修正的重播把勾洗掉
+    if (pane.querySelector('ruby.llm-ruby') && window.setLlmWandDone) setLlmWandDone();
 }
 
 function updatePlaybackProgress(position) {
@@ -669,12 +673,20 @@ function escapeHtml(text) {
 let currentEditingRuby = null;
 let isRubyEditMode = false;
 
+// LLM 改過的字掛懸停說明 (title 只在編輯模式掛,平常滑過歌詞不跳 tooltip)
+function markLlmRubies() {
+    document.querySelectorAll('ruby.llm-ruby').forEach(r => {
+        r.title = `AI 修正，原讀音：${r.dataset.llmPrev || ''}`;
+    });
+}
+
 window.toggleRubyEditMode = function() {
     isRubyEditMode = !isRubyEditMode;
     const btn = document.getElementById('toggle-ruby-mode-btn');
     if (btn) btn.classList.toggle('active', isRubyEditMode);
     document.body.classList.toggle('ruby-edit-mode', isRubyEditMode);
     localStorage.setItem('rubyEditMode', isRubyEditMode ? 'true' : 'false');   // 換頁後接回
+    if (isRubyEditMode) markLlmRubies();
     // 跟段落循環互斥 (兩者都要吃歌詞的點擊)
     if (isRubyEditMode && isLoopMode) toggleLoopMode();
 };

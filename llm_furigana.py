@@ -88,11 +88,19 @@ def parse_llm_response(content, lines):
     return hints
 
 
+# 最近一次 fetch 的失敗原因;一次性行程,全域夠用。furigana_inject main() 讀它回報 server,
+# 讓魔杖強制重跑時「請求失敗」不會被當成「校正完成」。
+LAST_ERROR = None
+
+
 def fetch_llm_hints(artist, title, lrc_text):
-    """打一次 API 拿整首歌的逐行讀音。失敗記 stderr、回 {} (視同無 hint)。"""
+    """打一次 API 拿整首歌的逐行讀音。失敗記 stderr + LAST_ERROR、回 {} (視同無 hint)。"""
+    global LAST_ERROR
+    LAST_ERROR = None
     cfg = _load_llm_settings()
     key = os.environ.get('LLM_API_KEY', '')
     if not key or not cfg['base_url'] or not cfg['model']:
+        LAST_ERROR = 'Base URL / Model 未設定'
         return {}
 
     lines = _lyric_lines(lrc_text)
@@ -127,11 +135,13 @@ def fetch_llm_hints(artist, title, lrc_text):
         resp.raise_for_status()
         content = resp.json()['choices'][0]['message']['content']
     except Exception as e:
+        LAST_ERROR = str(e)
         print(f"[llm_furigana] request failed: {e}", file=sys.stderr)
         return {}
 
     hints = parse_llm_response(content, lines)
     if not hints:
+        LAST_ERROR = '模型回覆無法解析'
         print("[llm_furigana] empty/unparsable response", file=sys.stderr)
     return hints
 

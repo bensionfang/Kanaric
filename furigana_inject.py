@@ -15,6 +15,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import fugashi
 from db import db
 from cn_music import fetch_hints, normalize_line
+import llm_furigana
 from llm_furigana import get_llm_hints
 
 tagger = fugashi.Tagger()
@@ -66,7 +67,7 @@ def _keeps_okurigana(orig, candidate):
             return False
     return True
 
-def apply_hint(words, hint):
+def apply_hint(words, hint, mark=False):
     """
     用羅馬字來源的整行假名 (hint) 校正 fugashi 的分詞讀音。
 
@@ -112,6 +113,8 @@ def apply_hint(words, hint):
         if not _keeps_okurigana(w['orig'], candidate):
             continue  # 對齊歪掉了,見 _keeps_okurigana
 
+        if mark:
+            w['llm_prev'] = w['hira']  # LLM 蓋掉前的讀音,前端標記「AI 改了這個」用
         w['hira'] = candidate
 
 _KANA_SEG = re.compile(r'[぀-ヿ]+|[^぀-ヿ]+')
@@ -190,18 +193,24 @@ def build_ruby_html(text, artist, title, hints=()):
         words.append({'orig': text[pos:], 'hira': text[pos:], 'is_space': True})
 
     # 用羅馬字/LLM 來源的假名校正小辭典挑錯的讀音 (依序疊加,各自過 apply_hint 的 guard)
-    for hint in hints:
-        apply_hint(words, hint)
+    # hints 元素為 (整行假名, 是否為 LLM 層);只有 LLM 層要留下修改標記
+    for hint, mark in hints:
+        apply_hint(words, hint, mark)
 
     # 連羅馬字來源也一起錯的字,用預設表壓過去 (見 _COMMON_READING)
+    # 這層蓋掉 LLM 的值時標記要一起收回,不然會把預設表的讀音掛名給 AI
     for w in words:
         if not w.get('is_space') and w['orig'] in _COMMON_READING:
+            if w['hira'] != _COMMON_READING[w['orig']]:
+                w.pop('llm_prev', None)
             w['hira'] = _COMMON_READING[w['orig']]
 
     # 親族呼稱接敬稱時改用暱稱讀音 (兄さん = にいさん,而非字典的 あにさん)
     non_space = [w for w in words if not w.get('is_space')]
     for a, b in zip(non_space, non_space[1:]):
         if a['orig'] in _KINSHIP_READING and b['orig'] in _HONORIFIC:
+            if a['hira'] != _KINSHIP_READING[a['orig']]:
+                a.pop('llm_prev', None)
             a['hira'] = _KINSHIP_READING[a['orig']]
 
     html_parts = []
@@ -241,11 +250,12 @@ def build_ruby_html(text, artist, title, hints=()):
         root_orig = orig[k:i+1]
         root_hira = hira[m:j+1]
 
-        # 查詢資料庫，檢查是否有使用者自訂的修正發音
+        # 查詢資料庫，檢查是否有使用者自訂的修正發音 (蓋掉 LLM 的話標記一起收回)
         db_hira = db.get_word_correction(artist, title, root_orig)
-        if db_hira is not None: 
+        if db_hira is not None:
             root_hira = db_hira
-            
+            item.pop('llm_prev', None)
+
         if not root_orig:
             pass # fallback, 不應發生
         elif root_orig == root_hira:
@@ -257,6 +267,11 @@ def build_ruby_html(text, artist, title, hints=()):
         else:
             # 處理可能還有內部假名的複雜組合
             part_html = f"{prefix}{split_internal_kana(root_orig, root_hira, root_orig, root_hira)}{suffix}"
+            # LLM 改過的詞:每顆 ruby 加標記 class + 整詞原讀音 (編輯模式亮綠、懸停看原讀音)
+            if item.get('llm_prev'):
+                part_html = part_html.replace(
+                    "class='editable-ruby'",
+                    f"class='editable-ruby llm-ruby' data-llm-prev='{item['llm_prev']}'")
             html_parts.append(part_html)
             
     return "".join(html_parts)
@@ -293,7 +308,7 @@ def process_lrc(artist, title, lrc_text, force_llm=False):
     romaji, llm = get_hints(artist, title, lrc_text, force_llm=force_llm)
     def line_hints(text):
         k = normalize_line(text)
-        return [h for h in (romaji.get(k), llm.get(k)) if h]
+        return [(h, is_llm) for h, is_llm in ((romaji.get(k), False), (llm.get(k), True)) if h]
     lines = lrc_text.split('\n')
     new_lines = []
     for line in lines:
@@ -337,7 +352,11 @@ def main():
         
         if lyrics:
             injected_lyrics = process_lrc(artist, title, lyrics, force_llm=data.get("force_llm", False))
-            print(json.dumps({"success": True, "lyrics": injected_lyrics}, ensure_ascii=False))
+            result = {"success": True, "lyrics": injected_lyrics}
+            # 魔杖強制重跑時把 LLM 失敗原因帶回去,server 才不會把「請求失敗」報成「校正完成」
+            if data.get("force_llm") and llm_furigana.LAST_ERROR:
+                result["llm_error"] = llm_furigana.LAST_ERROR
+            print(json.dumps(result, ensure_ascii=False))
         else:
             print(json.dumps({"success": False, "error": "No lyrics provided"}))
     except Exception as e:

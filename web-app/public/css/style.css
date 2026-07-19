@@ -337,6 +337,12 @@ button.menu-action {
     cursor: text;
 }
 
+/* 模式/供應商下拉與下面文字欄同寬,左緣對齊 */
+#llm-mode, #llm-preset {
+    width: 210px;
+    max-width: none;
+}
+
 .hk-input:focus {
     outline: none;
     border-color: var(--accent-main, #1db954);
@@ -727,6 +733,11 @@ body.ruby-edit-mode .lyrics-line ruby.editable-ruby:hover rt {
     background: rgba(255, 255, 255, 0.12);
     border-radius: 3px;
     cursor: pointer;
+}
+
+/* 編輯模式下,LLM 改過的讀音亮綠色 (平常外觀不變;懸停 title 顯示原讀音) */
+body.ruby-edit-mode .lyrics-line ruby.llm-ruby rt {
+    color: var(--accent-main, #1db954);
 }
 
 /* 段落循環:選 A/B 兩句。hover 用綠底取代「點了會跳轉」的白字+底線 */

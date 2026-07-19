@@ -423,6 +423,23 @@ async function detectLlmProvider(key) {
   return null;
 }
 
+// Model 欄的 datalist 建議清單:用現設 Base URL + 已存 key 打 /models (key 不出 server)。
+// 沒 key 也試 (Ollama 不用 key);失敗回空陣列,前端 datalist 空著、輸入框照常手打。
+app.get('/api/llm-models', async (req, res) => {
+  try {
+    let cur = {};
+    try { cur = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch (e) {}
+    if (!cur.llm_base_url) return res.json({ models: [] });
+    const headers = llmApiKey ? { Authorization: `Bearer ${llmApiKey}` } : {};
+    const r = await fetch(cur.llm_base_url.replace(/\/$/, '') + '/models', { headers, signal: AbortSignal.timeout(6000) });
+    const data = r.ok ? await r.json() : null;
+    const models = (data && Array.isArray(data.data)) ? data.data.map(m => m.id) : [];
+    res.json({ models, error: r.ok ? undefined : `HTTP ${r.status}` });
+  } catch (e) {
+    res.json({ models: [], error: e.message });
+  }
+});
+
 app.post('/api/llm-key', async (req, res) => {
   try {
     saveLlmKey((req.body.key || '').trim());
@@ -527,7 +544,8 @@ function invalidateFurigana(artist, title) {
   furiganaCache.delete(furiganaKey(artist, title));
 }
 
-function injectFurigana(artist, title, lyrics, forceLlm = false) {
+// meta (選填) 是 out-param:force 重跑時 Python 回報的 LLM 失敗原因放 meta.llmError
+function injectFurigana(artist, title, lyrics, forceLlm = false, meta = null) {
   const key = furiganaKey(artist, title);
   const hit = furiganaCache.get(key);
   if (!forceLlm && hit && hit.src === lyrics) return Promise.resolve(hit.out);
@@ -546,6 +564,7 @@ function injectFurigana(artist, title, lyrics, forceLlm = false) {
       console.log('Python script exited with code:', code, 'Output:', output.substring(0, 200));
       try {
         const parsed = JSON.parse(output);
+        if (meta && parsed.llm_error) meta.llmError = parsed.llm_error;
         if (parsed.success && parsed.lyrics) {
           if (furiganaCache.size >= FURIGANA_CACHE_MAX) {
             furiganaCache.delete(furiganaCache.keys().next().value);   // 丟最舊的
@@ -710,11 +729,24 @@ app.post('/api/llm-furigana/run', (req, res) => {
 
   db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
     if (err || !row || !row.lyrics) return res.status(404).json({ error: '這首歌沒有快取歌詞' });
-    const injected = await injectFurigana(artist, title, row.lyrics, true);
+    const meta = {};
+    const injected = await injectFurigana(artist, title, row.lyrics, true, meta);
     if (global.broadcast && currentMediaState.title === title && currentMediaState.artist === artist) {
       global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
     }
-    res.json({ success: true });
+    if (meta.llmError) {
+      // 原始錯誤 (含 URL 的 requests 例外字串) 太吵,收斂成人話;細節 Python 已印在 stderr
+      const e = meta.llmError;
+      const friendly = /401|403/.test(e) ? 'API Key 無效或與供應商不符'
+        : /404/.test(e) ? 'Base URL 或 Model 有誤'
+        : /timed?\s?out|connection|max retries/i.test(e) ? '無法連線至端點，請檢查 Base URL'
+        : /[一-鿿]/.test(e) ? e   // Python 端給的中文訊息本來就簡短,直接用
+        : '請檢查填入的資料';
+      return res.json({ success: false, error: `LLM 請求失敗：${friendly}` });
+    }
+    // ponytail: 以 ruby 顆數近似「處」,okurigana 拆多顆的詞會多算;要精確再改 Python 輸出計數
+    const changed = (injected.match(/llm-ruby/g) || []).length;
+    res.json({ success: true, changed });
   });
 });
 
