@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Kanaric Island</title>
-<link rel="stylesheet" href="/css/island.css?v=11">
+<link rel="stylesheet" href="/css/island.css?v=12">
 </head>
 <body>
 <div id="island" class="docked">
@@ -74,7 +74,7 @@ bridge.onDocked(d => el.island.classList.toggle('docked', d));
 
 // ── 狀態 ──
 let lyrics = [], songKey = '', pos = 0, playing = false, lastSync = 0, offset = 0;
-let islandLines = 2, lastLine1 = null, idleTimer = null, wasPlaying = null;
+let islandLines = 2, lastLine1 = null, idleTimer = null, wasPlaying = null, wasHasSession = null;
 
 function applySettings(s) {
   if (!s) return;
@@ -119,19 +119,39 @@ async function onMediaState(m) {
   pos = m.position || 0;
   lastSync = performance.now();
   // 暫停 3 秒後淡出,恢復播放立刻淡回來。
-  // **只在播放狀態真的改變時才動計時器**:media_monitor 每 0.1 秒就回報一次,
+  // **只在狀態真的改變時才動計時器**:media_monitor 每 0.1 秒就回報一次,
   // 每次都 clearTimeout 的話那 3 秒永遠數不完,島就一直不會淡出。
-  if (playing !== wasPlaying) {
+  //
+  // 「完全沒有播放來源」與「有歌但暫停」要分開:前者代表使用者剛把島打開、還沒開始放歌,
+  // 這時候淡出的話畫面上什麼都沒有,看起來就像島根本沒開。那個情況要保持可見顯示「等待播放…」。
+  const hasSession = !!m.title;
+  if (playing !== wasPlaying || hasSession !== wasHasSession) {
     wasPlaying = playing;
+    wasHasSession = hasSession;
     el.island.classList.toggle('playing', playing);   // 右端等化器動不動看這個
     clearTimeout(idleTimer);
-    if (playing) el.island.classList.remove('idle');
+    if (playing || !hasSession) el.island.classList.remove('idle');
     else idleTimer = setTimeout(() => el.island.classList.add('idle'), 3000);
+  }
+
+  // 播放來源整個消失 (音樂 app 關掉了):要退回「等待播放…」,不然島會一直掛著上一首的歌詞。
+  // 這一段以前不存在也沒差,因為沒 session 就淡出看不見了;現在不淡出,就得自己收乾淨。
+  if (!m.title) {
+    if (songKey !== '') {
+      songKey = ''; lyrics = []; lastLine1 = null;
+      el.art.style.backgroundImage = '';
+      el.song.textContent = '等待播放…';
+      el.song.classList.remove('hidden');
+      el.l1.classList.add('hidden');
+      el.l2.classList.add('hidden');
+      fitSize(el.song.textContent, '', el.song);
+    }
+    return;
   }
 
   // resolving = 歌名還沒定案 (iTunes 日文原名還原中),等定案再抓,否則會抓兩次
   const key = (m.artist || '') + '|||' + (m.title || '');
-  if (!m.title || m.resolving || key === songKey) return;
+  if (m.resolving || key === songKey) return;
   songKey = key;
   lyrics = []; lastLine1 = null;
   el.art.style.backgroundImage = m.thumbnail ? `url(data:image/png;base64,${m.thumbnail})` : '';

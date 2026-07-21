@@ -102,6 +102,11 @@
             <span class="header-desc">前五大最愛歌手的分佈比例</span>
         </div>
         <div class="chart-container" style="height: 300px;">
+            <!-- 甜甜圈沒有座標軸,零資料時是「整塊空白」而不是「空的圖表」,看起來像壞掉。
+                 折線/長條圖不用這個:它們至少會畫出軸線與 0 的基準,一看就知道是還沒有資料。 -->
+            <div id="artistChart-empty" class="chart-empty" style="display: none;">
+                <i class="fa-solid fa-circle-question"></i> 還沒有資料——播放任何一首歌超過 30 秒就會開始統計。
+            </div>
             <canvas id="artistChart"></canvas>
         </div>
     </div>
@@ -282,10 +287,17 @@
     }
 
     function renderArtistChart(data) {
+        const canvas = document.getElementById('artistChart');
+        const empty = document.getElementById('artistChart-empty');
+        const hasData = Array.isArray(data) && data.length > 0;
+        if (empty) empty.style.display = hasData ? 'none' : 'flex';
+        canvas.style.display = hasData ? '' : 'none';
+        if (!hasData) return;
+
         const labels = data.map(d => d.artist);
         const counts = data.map(d => d.play_count);
 
-        const ctx = document.getElementById('artistChart').getContext('2d');
+        const ctx = canvas.getContext('2d');
         if (artistChart) {
             artistChart.data.labels = labels;
             artistChart.data.datasets[0].data = counts;

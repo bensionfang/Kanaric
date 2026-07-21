@@ -1058,6 +1058,13 @@ rt { font-size: 14px; color: #86efac; transform: translateY(-2px); font-weight: 
 .rank-num { font-weight: 400; color: var(--text-dim); }
 
 .chart-container { flex-grow: 1; position: relative; height: 300px; width: 100%; }
+/* 零資料時頂替圖表的說明文字 (見 stats.ejs 的甜甜圈) */
+.chart-empty {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; padding: 0 24px;
+    color: var(--text-dim); font-size: 13px; text-align: center;
+}
 
 /* Animations */
 .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
