@@ -44,7 +44,20 @@ class DatabaseManager:
             self.cursor.execute("ALTER TABLE listening_history ADD COLUMN album TEXT")
         except sqlite3.OperationalError:
             pass
-            
+
+        # 統計用的版本無關歌名 (剝掉 "(Live)" / "(feat. …)" 之類尾綴)，與 server.js 的定義必須一致。
+        # virtual generated column，不佔空間；歌詞類的表刻意不加，那邊版本要分開。
+        try:
+            self.cursor.execute("""ALTER TABLE listening_history ADD COLUMN base_title TEXT
+                GENERATED ALWAYS AS (
+                    TRIM(CASE WHEN instr(replace(title, '（', '('), '(') > 1
+                         THEN substr(title, 1, instr(replace(title, '（', '('), '(') - 1)
+                         ELSE title END)
+                ) VIRTUAL""")
+        except sqlite3.OperationalError:
+            pass
+
+
         # 建立歌手別名映射表
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS artist_aliases (alias TEXT PRIMARY KEY, true_name TEXT)''')
         # 建立羅馬字讀音提示快取表 (data 為 JSON: {歌詞行: 平假名})

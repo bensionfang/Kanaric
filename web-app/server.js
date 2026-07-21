@@ -125,16 +125,41 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
       db.run('ALTER TABLE listening_history ADD COLUMN album TEXT', (err) => {
         if (!err) console.log('✓ Added album column to listening_history');
       });
+      // 統計用的版本無關歌名:剝掉第一個括號起的尾綴 ((Live) / (feat. …) / (Dome Tour …))。
+      // virtual generated column,不佔空間也不用改任何寫入端;快取類的表刻意不加這欄,
+      // 那些是歌詞資料,Live 版跟錄音室版必須分開。instr > 1 是為了歌名本身就以括號開頭時不被清空。
+      db.run(`ALTER TABLE listening_history ADD COLUMN base_title TEXT
+              GENERATED ALWAYS AS (
+                TRIM(CASE WHEN instr(replace(title, '（', '('), '(') > 1
+                     THEN substr(title, 1, instr(replace(title, '（', '('), '(') - 1)
+                     ELSE title END)
+              ) VIRTUAL`, (err) => {
+        if (!err) console.log('✓ Added base_title column to listening_history');
+      });
     });
 
     // 全新安裝時建立其餘資料表 (schema 與 db.py 一致)
     db.run(`CREATE TABLE IF NOT EXISTS cache (artist TEXT, title TEXT, lyrics TEXT, PRIMARY KEY (artist, title))`);
     db.run(`CREATE TABLE IF NOT EXISTS word_corrections (artist TEXT, title TEXT, word TEXT, hira TEXT, PRIMARY KEY (artist, title, word))`);
     db.run(`CREATE TABLE IF NOT EXISTS sync_offsets (artist TEXT, title TEXT, offset REAL, PRIMARY KEY (artist, title))`);
-    db.run(`CREATE TABLE IF NOT EXISTS artist_aliases (alias TEXT PRIMARY KEY, true_name TEXT)`);
+    // 別名快取要等建表的 callback 才載入 —— node-sqlite3 不保證 db.run/db.all 依序執行,
+    // 全新 DB 上先發 SELECT 會撞 "no such table"
+    db.run(`CREATE TABLE IF NOT EXISTS artist_aliases (alias TEXT PRIMARY KEY, true_name TEXT)`, () => loadAliases());
     db.run(`CREATE TABLE IF NOT EXISTS search_overrides (raw_artist TEXT, raw_title TEXT, search_artist TEXT, search_title TEXT, PRIMARY KEY (raw_artist, raw_title))`);
   }
 });
+
+// 歌手正規名對照。handleMediaUpdate 是同步的,不能在那裡等 db.get,所以整張表
+// (數列而已) 開機載入進記憶體,/api/aliases 寫入後同步更新這份快取。
+const artistAliases = new Map();
+function loadAliases() {
+  db.all('SELECT alias, true_name FROM artist_aliases', [], (err, rows) => {
+    if (err) return console.error('載入歌手別名失敗:', err.message);
+    artistAliases.clear();
+    for (const r of rows || []) if (r.true_name) artistAliases.set(r.alias, r.true_name);
+  });
+}
+const canonicalArtist = (a) => artistAliases.get(a) || a;
 
 // 平假名/片假名 (日文獨有,中文沒有) —— 用來判斷字串是不是日文
 const hasKana = (s) => /[぀-ヿ]/.test(s || '');
@@ -203,6 +228,17 @@ global.handleMediaUpdate = function(rawState) {
       }
     }
     
+    // 歌手別名收斂。這裡是所有下游資料的唯一入口,在這改一次,cache 的鍵、
+    // listening_history 的寫入、Python 端的讀音提示就全部只認正規名 —— 同一首歌
+    // 不會因為 Spotify 給「魚韻」、YouTube 給「サカナクション」而分裂成兩筆。
+    if (rawState.artist) {
+      const canon = canonicalArtist(rawState.artist);
+      if (canon !== rawState.artist) {
+        if (!rawState.original_artist) rawState.original_artist = rawState.artist;
+        rawState.artist = canon;
+      }
+    }
+
     // 沒有播放來源時,上一首的 iTunes 原名也要跟著清掉 (合併是淺層的,不清就會留著)
     if (!rawState.title) {
       rawState.original_title = '';
@@ -699,11 +735,9 @@ async function buildSearchQuery(title, artist, searchTitle, searchArtist) {
     }
   }
 
-  let trueArtist = qArtist;
-  const aliasRow = await new Promise((resolve) => {
-    db.get('SELECT true_name FROM artist_aliases WHERE alias=?', [qArtist], (e, row) => resolve(row));
-  });
-  if (aliasRow && aliasRow.true_name) trueArtist = aliasRow.true_name;
+  // handleMediaUpdate 已經收斂過播放中那首的歌手名,這裡是為了手動指定的
+  // searchArtist 與非播放路徑 (歌詞選單) 再套一次
+  const trueArtist = canonicalArtist(qArtist);
 
   const cleanTitle = qTitle.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
   return { qTitle, qArtist, trueArtist, cleanTitle };
@@ -1252,6 +1286,7 @@ app.post('/api/aliases', express.json(), (req, res) => {
   if (!alias || !true_name) return res.status(400).json({ error: 'alias and true_name are required' });
   db.run('INSERT OR REPLACE INTO artist_aliases (alias, true_name) VALUES (?, ?)', [alias, true_name], function(err) {
     if (err) return res.status(500).json({ error: err.message });
+    artistAliases.set(alias, true_name);
     res.json({ success: true });
   });
 });
@@ -1260,6 +1295,7 @@ app.delete('/api/aliases/:alias', (req, res) => {
   const alias = req.params.alias;
   db.run('DELETE FROM artist_aliases WHERE alias = ?', [alias], function(err) {
     if (err) return res.status(500).json({ error: err.message });
+    artistAliases.delete(alias);
     res.json({ success: true });
   });
 });
@@ -1342,7 +1378,7 @@ app.post('/api/play-event', (req, res) => {
   
   db.run(
     'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
-    [artist, title, album || null, songDuration],
+    [canonicalArtist(artist), title, album || null, songDuration],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ success: true, id: this.lastID });
@@ -1357,12 +1393,12 @@ app.get('/api/stats/summary', (req, res) => {
       COUNT(*) AS totalPlays,
       COALESCE(SUM(duration), 0) AS totalTime,
       COUNT(DISTINCT artist) AS totalArtists,
-      COUNT(DISTINCT(title || ' - ' || artist)) AS totalSongs,
+      COUNT(DISTINCT(base_title || ' - ' || artist)) AS totalSongs,
       COUNT(DISTINCT strftime('%Y-%m-%d', played_at, 'localtime')) AS activeDays,
       -- Estimate unique albums (approx 75% of unique songs, minimum 1 if songs > 0)
       CASE 
-        WHEN COUNT(DISTINCT(title || ' - ' || artist)) > 0 
-        THEN CAST(COUNT(DISTINCT(title || ' - ' || artist)) * 0.75 + 0.5 AS INTEGER) 
+        WHEN COUNT(DISTINCT(base_title || ' - ' || artist)) > 0 
+        THEN CAST(COUNT(DISTINCT(base_title || ' - ' || artist)) * 0.75 + 0.5 AS INTEGER) 
         ELSE 0 
       END AS totalAlbums
     FROM listening_history
@@ -1393,9 +1429,9 @@ app.get('/api/stats/summary', (req, res) => {
 
 app.get('/api/stats/top-songs', (req, res) => {
   const query = `
-    SELECT artist, title, COUNT(*) AS play_count, SUM(duration) AS total_duration
+    SELECT artist, base_title AS title, COUNT(*) AS play_count, SUM(duration) AS total_duration
     FROM listening_history
-    GROUP BY artist, title
+    GROUP BY artist, base_title
     ORDER BY play_count DESC
     LIMIT 10
   `;
@@ -1457,7 +1493,7 @@ app.get('/api/stats/timeline', (req, res) => {
 
 app.get('/api/stats/advanced', (req, res) => {
   const p1 = new Promise((resolve) => {
-    db.get('SELECT MAX(cnt) AS maxLoop FROM (SELECT COUNT(*) AS cnt FROM listening_history GROUP BY artist, title)', [], (err, row) => resolve(row ? row.maxLoop : 0));
+    db.get('SELECT MAX(cnt) AS maxLoop FROM (SELECT COUNT(*) AS cnt FROM listening_history GROUP BY artist, base_title)', [], (err, row) => resolve(row ? row.maxLoop : 0));
   });
   const p2 = new Promise((resolve) => {
     db.all("SELECT strftime('%H', played_at, 'localtime') AS hour, COUNT(*) AS count FROM listening_history GROUP BY hour ORDER BY hour", [], (err, rows) => resolve(rows || []));
@@ -1499,10 +1535,10 @@ app.get('/api/leaderboard', (req, res) => {
   let query = '';
   if (type === 'tracks') {
     query = `
-      SELECT artist, title, COUNT(*) AS count, SUM(duration) AS duration
+      SELECT artist, base_title AS title, COUNT(*) AS count, SUM(duration) AS duration
       FROM listening_history
       ${dateFilter}
-      GROUP BY artist, title
+      GROUP BY artist, base_title
       ORDER BY count DESC
       LIMIT 50
     `;
@@ -1659,9 +1695,9 @@ app.post('/api/lyrics/diff', (req, res) => {
 // 8. Export Playlist API
 app.get('/api/export-playlist', (req, res) => {
   const query = `
-    SELECT artist, title
+    SELECT artist, base_title AS title
     FROM listening_history
-    GROUP BY artist, title
+    GROUP BY artist, base_title
     ORDER BY COUNT(*) DESC
     LIMIT 50
   `;
