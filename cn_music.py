@@ -58,23 +58,26 @@ def _pick_song(candidates, artist, duration=None):
     光比標題不夠:翻唱、同名曲、live 版都會撞。有歌手就比歌手,有時長就比時長 (±3 秒),
     兩者都只當「加分」,排序時平手就保留平台自己的相關性順序。
 
-    只有在「歌手對不上 而且 時長差超過 10 秒」時才整個放棄 —— 歌手名在各平台寫法差異大
-    (所以才有 artist_aliases 這張表),單憑歌手不合就退貨會誤殺太多。
+    歌手不合時**時長是唯一的證據**,所以要對得上 (同一個 ±3 秒) 才收;單憑歌手不合就退貨
+    會誤殺太多 (歌手名在各平台寫法差異大,所以才有 artist_aliases 這張表),但放寬到 ±10 秒
+    等於沒有把關 —— 神はサイコロを振らない 的「初恋」(239 秒) 就是這樣被判成林志美的粵語
+    同名曲 (230 秒,差 9 秒),整首歌詞完全不對。沒有時長資訊時仍照舊放行。
     """
     if not candidates:
         return None
 
+    def dur_ok(f_dur):
+        return bool(duration and f_dur and abs(f_dur - duration) <= 3)
+
     def rank(item):
         _, _, f_artist, f_dur = item
-        artist_ok = _loose_eq(artist, f_artist)
-        dur_ok = bool(duration and f_dur and abs(f_dur - duration) <= 3)
-        return (not artist_ok, not dur_ok)
+        return (not _loose_eq(artist, f_artist), not dur_ok(f_dur))
 
     best = min(range(len(candidates)), key=lambda i: rank(candidates[i]) + (i,))
     song, _, f_artist, f_dur = candidates[best]
 
-    if duration and f_dur and not _loose_eq(artist, f_artist) and abs(f_dur - duration) > 10:
-        return None  # 歌手不合、長度也差一大截,幾乎確定是別首歌
+    if duration and f_dur and not _loose_eq(artist, f_artist) and not dur_ok(f_dur):
+        return None  # 歌手不合,時長也對不上 —— 幾乎確定是別首歌
 
     return song
 

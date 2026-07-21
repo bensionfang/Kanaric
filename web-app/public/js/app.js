@@ -547,7 +547,7 @@ const TOOLBAR_HOTKEYS = {
     'hk-lyrics-opt': { def: 'L', run: () => searchLyricsOptions() },
     'hk-llm-wand':   { def: 'W', run: () => { const b = document.getElementById('llm-wand-btn'); if (b && typeof runLlmFurigana === 'function') runLlmFurigana(b); } },
     'hk-reload':     { def: 'R', run: () => reloadCurrentLyrics() },
-    'hk-island':     { def: 'D', run: () => launchPyQt6() },
+    'hk-island':     { def: 'D', run: () => toggleIsland() },
     'hk-fullscreen': { def: 'F', run: () => toggleFullscreen() },
 };
 
@@ -665,7 +665,7 @@ document.addEventListener('keydown', (e) => {
 // -------------------------------------------------------------
 async function checkDesktopStatus() {
     try {
-        const res = await fetch('/api/desktop-status');
+        const res = await fetch('/api/island/status');
         const data = await res.json();
         const toggle = document.getElementById('desktop-toggle-btn');
         if (toggle) {
@@ -676,17 +676,20 @@ async function checkDesktopStatus() {
 
 document.addEventListener('DOMContentLoaded', checkDesktopStatus);
 
-async function launchPyQt6() {
+async function toggleIsland() {
     const toggle = document.getElementById('desktop-toggle-btn');
     if (toggle) toggle.disabled = true;
-    
+
     try {
-        const resp = await fetch('/api/launch-pyqt6', { method: 'POST' });
+        const resp = await fetch('/api/island/toggle', { method: 'POST' });
         const result = await resp.json();
-        
+
         if (resp.ok && result.success) {
             showToast(result.action === 'started' ? '靈動島已啟動！' : '靈動島已關閉！', 'fa-solid fa-rocket');
             if (toggle) toggle.classList.toggle('active', result.action === 'started');
+        } else if (result.available === false) {
+            // 純 node (npm start) 沒有 Electron 主進程,島這個視窗不存在
+            showToast('靈動島需要桌面版 Kanaric', 'fa-solid fa-circle-info');
         } else {
             showToast('操作失敗。', 'fa-solid fa-circle-xmark');
             checkDesktopStatus();

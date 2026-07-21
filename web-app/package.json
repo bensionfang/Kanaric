@@ -8,8 +8,7 @@
     "dev": "nodemon server.js",
     "app": "electron.cmd .",
     "build:py": "..\\venv\\Scripts\\python.exe -m PyInstaller --noconfirm --onedir --name pytools --collect-data pykakasi --collect-all unidic_lite --collect-data fugashi --distpath ..\\dist-py --workpath ..\\build-py --specpath ..\\build-py ..\\pytools.py",
-    "build:island": "dotnet publish ..\\DynamicIslandUI -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o ..\\dist-island",
-    "dist": "npm run build:py && npm run build:island && electron-builder",
+    "dist": "npm run build:py && electron-builder",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -40,6 +39,9 @@
     "files": [
       "electron.js",
       "server.js",
+      "s2t.js",
+      "island.js",
+      "preload-island.js",
       "views/**",
       "public/**"
     ],
@@ -47,10 +49,6 @@
       {
         "from": "../dist-py/pytools",
         "to": "pytools"
-      },
-      {
-        "from": "../dist-island",
-        "to": "island"
       },
       {
         "from": "../third_party",

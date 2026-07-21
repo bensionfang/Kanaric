@@ -1,0 +1,117 @@
+/* 靈動島視窗的外觀。視窗本身是透明的,圓角與背景全部畫在 #island 上;
+   左右各留 --edge 的透明邊,貼齊頂端時用來畫「外擴角」(舊 C# 島的 Flare)。 */
+:root {
+  --edge: 24px;
+  --island-bg: rgba(12, 12, 12, 0.9);
+  --island-fs: 16px;      /* 由 font_size 設定換算,JS 覆寫 */
+  --island-r: 20px;       /* 圓角;跟著字級走,見下方 #island */
+  --island-opacity: 1;    /* 由 island_opacity 設定覆寫 */
+}
+
+html, body {
+  margin: 0; height: 100%; background: transparent; overflow: hidden;
+}
+body {
+  font-family: 'Outfit', 'Noto Sans JP', 'Segoe UI', sans-serif;
+  user-select: none; cursor: default;
+  padding: 0 var(--edge);
+  box-sizing: border-box;
+  /* 島貼著內容的大小,不是撐滿視窗;視窗尺寸由 island.js 依量到的內容尺寸調整 */
+  display: flex; justify-content: center; align-items: center;
+}
+
+#island {
+  position: relative;
+  height: auto;
+  --island-r: calc(var(--island-fs) * 1.3);
+  display: inline-flex; align-items: center; gap: 12px;
+  max-width: 100%;
+  /* 內距要留得住:島的高度就是內容高度,padding 給太少字會像被框擠住。
+     左右對稱靠的是「左封面 / 右播放狀態」兩端等寬,不是靠補內距。 */
+  padding: 11px;
+  background: var(--island-bg);
+  backdrop-filter: blur(18px);
+  color: #fff;
+  /* 半徑要固定,不能用 999px 讓瀏覽器夾成「高度的一半」——貼齊頂端時只剩下面兩角有圓角,
+     那個半徑會被夾成整個高度,弧線從最上緣就開始往內收,封面與長歌詞就被擠到黑底外面。 */
+  border-radius: var(--island-r);
+  opacity: var(--island-opacity);
+  transition: border-radius 0.22s ease, opacity 0.4s ease;   /* 恢復播放時淡回來 */
+}
+
+/* 貼齊螢幕頂端:上緣切平,兩側長出反向圓角,做出「從瀏海長出來」的連續曲線 */
+#island.docked { border-radius: 0 0 var(--island-r) var(--island-r); }
+#island.docked::before, #island.docked::after {
+  content: ''; position: absolute; top: 0;
+  width: var(--edge); height: var(--edge);
+  background: var(--island-bg);
+}
+#island.docked::before {
+  left: calc(var(--edge) * -1);
+  -webkit-mask: radial-gradient(circle at 0 100%, transparent 0 var(--edge), #000 calc(var(--edge) + 0.5px));
+}
+#island.docked::after {
+  right: calc(var(--edge) * -1);
+  -webkit-mask: radial-gradient(circle at 100% 100%, transparent 0 var(--edge), #000 calc(var(--edge) + 0.5px));
+}
+
+/* 暫停 3 秒後整塊淡出,恢復播放淡入 (舊島 AnimateIslandState) */
+#island.idle { opacity: 0; transition: opacity 1s ease, border-radius 0.22s ease; }
+
+/* 封面是配角:小的圓角方圖,不要和文字等高的大圓 */
+#art {
+  width: calc(var(--island-fs) * 1.15); height: calc(var(--island-fs) * 1.15);
+  border-radius: 8px; flex: none;
+  background: #222 center/cover no-repeat;
+}
+
+#lines { min-width: 0; text-align: center; }
+
+/* 播放狀態:三根等化器條,跟封面等寬所以兩端秤得平。播放中跳動,暫停就定在低點 */
+#state {
+  width: calc(var(--island-fs) * 1.15); height: calc(var(--island-fs) * 0.9);
+  flex: none; display: flex; align-items: flex-end; justify-content: center; gap: 2px;
+}
+#state i {
+  width: 2px; height: 100%; border-radius: 1px;
+  background: rgba(255, 255, 255, 0.7);
+  transform-origin: bottom; transform: scaleY(0.35);
+  animation: eq 0.9s ease-in-out infinite;
+}
+#state i:nth-child(2) { animation-delay: 0.18s; }
+#state i:nth-child(3) { animation-delay: 0.36s; }
+#island:not(.playing) #state i { animation-play-state: paused; transform: scaleY(0.3); opacity: 0.5; }
+@keyframes eq {
+  0%, 100% { transform: scaleY(0.3); }
+  50%      { transform: scaleY(1); }
+}
+@media (prefers-reduced-motion: reduce) { #state i { animation: none; } }
+
+/* 量「這句歌詞不換行要多寬」用的隱形節點:絕對定位,所以量得到超出視窗的自然寬度 */
+#measure {
+  position: absolute; top: -9999px; left: 0;
+  white-space: nowrap; visibility: hidden; pointer-events: none;
+}
+#measure > div { white-space: nowrap; }
+#song, #l1, #l2 {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.15; text-align: center;
+}
+/* 前奏/剛換歌時顯示的歌名,字級跟主歌詞一致,換過去時大小不會跳一下 */
+#song { font-size: var(--island-fs); font-weight: 500; }
+#l1 { font-size: var(--island-fs); font-weight: 500; }
+/* 第二行是配角:字只比主行小 2px,層次主要靠顏色淡下去 */
+#l2 { font-size: calc(var(--island-fs) - 2px); color: rgba(255, 255, 255, 0.45); }
+.hidden { display: none; }
+
+/* 換行時淡入 + 微上浮 (舊島 621-630 的 QuarticEase) */
+@keyframes lyric-in {
+  from { opacity: 0.2; transform: translateY(4px); }
+  to   { opacity: 1;   transform: translateY(0); }
+}
+.lyric-anim { animation: lyric-in 0.2s cubic-bezier(0.25, 1, 0.5, 1); }
+#l2.lyric-anim { animation-duration: 0.3s; }
+
+/* 假名跟著本行的字色走 (網頁的當前句也是白的),不要自己一個顏色 */
+ruby rt { font-size: 0.55em; color: inherit; font-weight: 400; transform: translateY(-2px); }
+html.hide-furigana rt { display: none; }

@@ -60,7 +60,7 @@
                     <div id="llm-wand-bubble" class="lyrics-opt-bubble"></div>
                 </div>
                 <button id="reload-btn" class="ctrl-btn" onclick="reloadCurrentLyrics()" data-tip="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
-                <button id="desktop-toggle-btn" class="ctrl-btn" onclick="launchPyQt6()" data-tip="桌面靈動島">
+                <button id="desktop-toggle-btn" class="ctrl-btn" onclick="toggleIsland()" data-tip="桌面靈動島">
                     <i class="fa-solid fa-mobile-screen"></i>
                 </button>
                 <button id="fullscreen-btn" class="ctrl-btn fullscreen-btn" onclick="toggleFullscreen()" data-tip="放大模式">
@@ -404,7 +404,7 @@
         // ── 使用說明:引導式導覽 ──
         const tourSteps = [
             { page: '/',       el: '.nav-menu',      title: '側欄導覽',   text: '這裡可以切換頁面：懸浮歌詞、統計數據、排行榜、歌詞編輯器。滑鼠移到圖示上會顯示名稱。' },
-            { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '所有設定都在這裡：日文假名、文字大小、歌詞對齊、優先搜尋來源、音訊來源、快捷鍵等。' },
+            { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '所有設定都在這裡：日文假名、文字大小、歌詞對齊、優先搜尋來源、音訊來源、快捷鍵等。讀不了片假名的話，打開「片假名標平假名」，サヨナラ 上方就會多標一行 さよなら，網頁與靈動島同時生效。' },
             { page: '/',       el: '#lyrics-scroll', title: '歌詞區',     text: '歌詞會隨播放自動同步捲動，漢字上方標示假名注音。點任一句歌詞可以直接跳轉到該時間點。' },
             { page: '/',       el: '.player-center', title: '播放控制',   text: '控制播放/暫停、上下一首，拖曳進度條可跳轉。' },
             { page: '/',       el: '.player-right',  title: '工具列',     text: '由左至右：備選歌詞、段落循環、編輯假名、AI 讀音校正、重新載入歌詞、桌面靈動島、放大模式。每顆都可以在設定選單的「自訂快捷鍵」裡改快捷鍵,也能按眼睛圖示把不需要的工具從這排隱藏。接下來由左到右細講。' },
@@ -630,14 +630,29 @@
             } catch (e) { console.error(e); }
         }
         
+        // class 只是即時反應,真相在 settings.json (由 header.ejs 直接渲染)
         function updateFuriganaSetting(checked) {
-            localStorage.setItem('showFurigana', checked);
             if (checked) {
                 document.documentElement.classList.remove('hide-furigana');
             } else {
                 document.documentElement.classList.add('hide-furigana');
             }
             saveSettingsToServer('show_furigana', checked);
+        }
+
+        // 片假名 ruby 是 server 注音時決定的,不像 show_furigana 有 CSS 可切。
+        // 靈動島吃 server 廣播的 lyrics_updated 會自己更新,但網頁沒有 WebSocket
+        // (只輪詢 /api/current-media),所以這裡自己重抓一次歌詞重畫。
+        // 不用 fetchAndParseLyrics:那會先塞「正在搜尋歌詞」的轉圈,切個開關不該閃一下。
+        async function updateKatakanaRuby(checked) {
+            await saveSettingsToServer('katakana_ruby', checked);
+            const { title, artist } = currentSong();
+            if (!title || typeof parseLrcLyrics !== 'function') return;   // 只有首頁有歌詞面板
+            try {
+                const resp = await fetch(`/api/lyrics/fetch?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);
+                const data = await resp.json();
+                if (data.lyrics) { parseLrcLyrics(data.lyrics); renderLyrics(); }
+            } catch (e) { console.error(e); }
         }
 
         function updateAutoLyricsOptions(checked) {
@@ -807,23 +822,25 @@
             const fsInput = document.getElementById('fontsize-input');
             if (fsInput) fsInput.value = savedFs;
             
-            const showFurigana = localStorage.getItem('showFurigana') !== 'false';
-            const fToggle = document.getElementById('setting-furigana');
-            if (fToggle) fToggle.checked = showFurigana;
-            if (!showFurigana) document.documentElement.classList.add('hide-furigana');
-            
             fetch('/api/settings')
             .then(res => res.json())
             .then(data => {
+                // class 已由 header.ejs 用同一份 server 值渲染好,這裡只補 checkbox
                 if (data.show_furigana !== undefined) {
                     const fEl = document.getElementById('setting-furigana');
                     if (fEl) fEl.checked = data.show_furigana;
                 }
+                const krEl = document.getElementById('setting-katakana-ruby');
+                if (krEl) krEl.checked = data.katakana_ruby === true;
                 if (data.auto_lyrics_options !== undefined) {
                     const alEl = document.getElementById('setting-auto-lyrics-options');
                     if (alEl) alEl.checked = data.auto_lyrics_options;
                     localStorage.setItem('auto_lyrics_options', data.auto_lyrics_options);
                 }
+                const ioEl = document.getElementById('setting-island-opacity');
+                if (ioEl) ioEl.value = String(data.island_opacity === undefined ? 1 : data.island_opacity);
+                const ilkEl = document.getElementById('setting-island-locked');
+                if (ilkEl) ilkEl.checked = data.island_locked === true;
                 if (data.island_lines !== undefined) {
                     const ilEl = document.getElementById('setting-island-lines');
                     if (ilEl) ilEl.value = data.island_lines;
@@ -901,13 +918,14 @@
                     body: JSON.stringify({ action })
                 });
             };
-            window.launchPyQt6 = async function() {
+            window.toggleIsland = async function() {
                 const toggle = document.getElementById('desktop-toggle-btn');
                 if (toggle) toggle.disabled = true;
                 try {
-                    const resp = await fetch('/api/launch-pyqt6', { method: 'POST' });
+                    const resp = await fetch('/api/island/toggle', { method: 'POST' });
                     const result = await resp.json();
                     if (resp.ok && result.success && toggle) toggle.classList.toggle('active', result.action === 'started');
+                    else if (result.available === false) showToast('靈動島需要桌面版 Kanaric', 'fa-solid fa-circle-info');
                 } catch (e) {}
                 setTimeout(() => { if (toggle) toggle.disabled = false; }, 1000);
             };
@@ -1004,7 +1022,7 @@
             // 所以備選歌詞的按鈕狀態 (綠色打勾/搜尋中) 要自己接回來。
             // lyrics-tools.js 是 defer 載入的,這支行內 script 跑的時候它還不存在 → 等 DOMContentLoaded
             document.addEventListener('DOMContentLoaded', () => restoreOptionsState());
-            fetch('/api/desktop-status').then(r => r.json()).then(d => {
+            fetch('/api/island/status').then(r => r.json()).then(d => {
                 const t = document.getElementById('desktop-toggle-btn');
                 if (t) t.classList.toggle('active', d.isRunning);
             }).catch(() => {});

@@ -52,12 +52,15 @@ async function reloadCurrentLyrics() {
 // 備選歌詞
 // -------------------------------------------------------------
 // 按鈕還原成原本的清單圖示
+// loading 一定要跟著清:searchLyricsOptions 看到它就整個提早 return,
+// 漏清的話按鈕看起來是正常的清單圖示,按下去卻永遠沒反應 (要重整分頁才好)
 function resetLyricsOptBtn() {
     const btn = document.getElementById('lyrics-opt-btn');
     if (!btn) return;
     btn.innerHTML = '<i class="fa-solid fa-list"></i>';
     btn.classList.remove('active');
     delete btn.dataset.ready;
+    delete btn.dataset.loading;
     btn.title = '搜尋備選歌詞';
 }
 

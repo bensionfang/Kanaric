@@ -433,6 +433,11 @@ app.get('/editor', (req, res) => {
   res.render('editor', { activePage: 'editor' });
 });
 
+// 靈動島視窗的內容 (由 Electron 主進程的 island.js 載入,見該檔說明)
+app.get('/island', (req, res) => {
+  res.render('island');
+});
+
 // REST APIs
 // 1. 取得目前音樂的狀態 (供前端初次載入時同步)
 app.get('/api/current-media', (req, res) => {
@@ -445,6 +450,8 @@ app.get('/api/current-media', (req, res) => {
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 // 讀不到 / 壞掉一律當空物件,呼叫端自己給預設值
+// 靈動島視窗 (Electron 主進程,見 island.js) 也要讀設定,掛上 global 共用同一份實作
+global.readSettings = readSettings;
 function readSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
@@ -466,18 +473,28 @@ app.get('/api/settings', (req, res) => {
   }
 });
 
+// 設定的唯一寫入點:網頁走 POST /api/settings,靈動島視窗 (Electron 主進程) 直接呼叫
+// global.updateSettings。兩邊共用才會一起發 settings_updated,島跟網頁不會各存各的。
+global.updateSettings = function (patch) {
+  let currentSettings = {};
+  if (fs.existsSync(SETTINGS_FILE)) {
+    currentSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  }
+  const newSettings = { ...currentSettings, ...patch };
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 4), 'utf8');
+  if (global.broadcast) {
+    global.broadcast({ type: 'settings_updated', settings: newSettings });
+  }
+  // 片假名 ruby 是注音時就決定的,改了設定要重新注音推播,不然要等換歌才看得到
+  if ('katakana_ruby' in patch && currentMediaState.title) {
+    rebroadcastLyrics(currentMediaState.artist, currentMediaState.title);
+  }
+  return newSettings;
+};
+
 app.post('/api/settings', (req, res) => {
   try {
-    let currentSettings = {};
-    if (fs.existsSync(SETTINGS_FILE)) {
-      currentSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-    }
-    const newSettings = { ...currentSettings, ...req.body };
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 4), 'utf8');
-    if (global.broadcast) {
-      global.broadcast({ type: 'settings_updated', settings: newSettings });
-    }
-    res.json({ success: true, settings: newSettings });
+    res.json({ success: true, settings: global.updateSettings(req.body) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -685,14 +702,16 @@ function invalidateFurigana(artist, title) {
 // meta (選填) 是 out-param:force 重跑時 Python 回報的 LLM 失敗原因放 meta.llmError
 function injectFurigana(artist, title, lyrics, forceLlm = false, meta = null) {
   const key = furiganaKey(artist, title);
+  // 產出會隨「片假名標平假名」設定不同,所以旗標要一起比對,否則切換設定後會拿到舊 HTML
+  const kataRuby = readSettings().katakana_ruby === true;
   const hit = furiganaCache.get(key);
-  if (!forceLlm && hit && hit.src === lyrics) return Promise.resolve(hit.out);
+  if (!forceLlm && hit && hit.src === lyrics && hit.kata === kataRuby) return Promise.resolve(hit.out);
 
   return new Promise((resolve) => {
     console.log("injectFurigana called for:", title, artist);
     const pyProcess = spawnPy(['furigana']);
 
-    pyProcess.stdin.write(JSON.stringify({ artist, title, lyrics, force_llm: forceLlm }));
+    pyProcess.stdin.write(JSON.stringify({ artist, title, lyrics, force_llm: forceLlm, katakana_ruby: kataRuby }));
     pyProcess.stdin.end();
     
     let output = '';
@@ -707,7 +726,7 @@ function injectFurigana(artist, title, lyrics, forceLlm = false, meta = null) {
           if (furiganaCache.size >= FURIGANA_CACHE_MAX) {
             furiganaCache.delete(furiganaCache.keys().next().value);   // 丟最舊的
           }
-          furiganaCache.set(key, { src: lyrics, out: parsed.lyrics });
+          furiganaCache.set(key, { src: lyrics, out: parsed.lyrics, kata: kataRuby });
           resolve(parsed.lyrics);
         } else {
           console.error("Python script failed:", parsed.error);
@@ -1671,57 +1690,24 @@ app.post('/api/db-clear', express.json(), (req, res) => {
   });
 });
 
-// 6. Launch/Toggle PyQt6
-app.get('/api/desktop-status', (req, res) => {
-  const pidFile = path.join(DATA_DIR, 'app.pid');
-  let isRunning = false;
-  if (fs.existsSync(pidFile)) {
-    try {
-      const existingPid = parseInt(fs.readFileSync(pidFile, 'utf8').trim());
-      process.kill(existingPid, 0);
-      isRunning = true;
-    } catch (e) {
-      isRunning = false;
-    }
-  }
-  res.json({ isRunning });
+// 6. 靈動島開關
+// 島是 Electron 主進程的一個視窗 (web-app/island.js),不是獨立進程,所以這裡只轉呼叫
+// 主進程掛上來的 global。純 node (npm start) 沒有主進程,回 available:false 讓 UI 自己說明。
+app.get('/api/island/status', (req, res) => {
+  res.json({
+    available: typeof global.isIslandOpen === 'function',
+    isRunning: typeof global.isIslandOpen === 'function' ? global.isIslandOpen() : false
+  });
 });
 
-app.post('/api/launch-pyqt6', (req, res) => {
+app.post('/api/island/toggle', (req, res) => {
+  if (typeof global.isIslandOpen !== 'function') {
+    return res.json({ success: false, available: false, error: '靈動島需要桌面版 Kanaric' });
+  }
   try {
-    const pidFile = path.join(DATA_DIR, 'app.pid');
-    let isRunning = false;
-    let existingPid = null;
-    
-    if (fs.existsSync(pidFile)) {
-      try {
-        existingPid = parseInt(fs.readFileSync(pidFile, 'utf8').trim());
-        process.kill(existingPid, 0); // Check if process exists
-        isRunning = true;
-      } catch (e) {
-        isRunning = false;
-      }
-    }
-    
-    if (isRunning) {
-      try {
-        process.kill(existingPid); // Terminate the process
-      } catch (e) {}
-      if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
-      return res.json({ success: true, action: 'stopped' });
-    }
-
-    const exePath = process.env.ISLAND_EXE || path.join(PARENT_DIR, 'DynamicIslandUI', 'bin', 'Release', 'net8.0-windows', 'DynamicIslandUI.exe');
-    if (!fs.existsSync(exePath)) return res.status(404).json({ error: 'C# UI not found. Please build it first.' });
-
-    // Minimize the active window (browser) using ctypes
-    spawnPy(['minimize']);
-
-    // 必須把實際 port 傳進去,否則預設 port 被占用改用別的 port 時靈動島會連不上
-    const child = spawn(exePath, [String(PORT)], { detached: true, stdio: 'ignore', cwd: path.dirname(exePath) });
-    child.unref();
-    fs.writeFileSync(pidFile, child.pid.toString());
-    res.json({ success: true, pid: child.pid, action: 'started' });
+    const open = global.isIslandOpen();
+    if (open) global.closeIsland(); else global.openIsland();
+    res.json({ success: true, available: true, action: open ? 'stopped' : 'started' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

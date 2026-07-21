@@ -22,9 +22,9 @@
 
 <!-- 歌詞時間軸微調 (每首歌獨立記憶):定位在 .main-content 右下角 -->
 <div class="offset-panel" id="offset-panel">
-    <button onclick="adjustSyncOffset(-0.1)" title="歌詞慢了"><i class="fa-solid fa-minus"></i></button>
-    <span id="offset-display" onclick="resetSyncOffset()" title="點擊歸零">0 ms</span>
-    <button onclick="adjustSyncOffset(0.1)" title="歌詞快了"><i class="fa-solid fa-plus"></i></button>
+    <button onclick="adjustSyncOffset(-0.1)" data-tip="歌詞慢了"><i class="fa-solid fa-minus"></i></button>
+    <span id="offset-display" onclick="resetSyncOffset()" data-tip="點擊歸零">0 ms</span>
+    <button onclick="adjustSyncOffset(0.1)" data-tip="歌詞快了"><i class="fa-solid fa-plus"></i></button>
 </div>
 
 <script src="/js/app.js?v=44"></script>

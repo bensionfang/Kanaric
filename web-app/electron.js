@@ -1,15 +1,14 @@
 /**
  * Electron 桌面殼:一鍵帶起整個系統
  * 1. 打包模式下把使用者資料 (DB/settings) 指向 %APPDATA%/Kanaric,
- *    並把 Python 工具與 C# 靈動島指向安裝目錄的 resources/。
+ *    並把 Python 工具指向安裝目錄的 resources/。
  * 2. 在主進程內直接載入 server.js (Express + WebSocket + Python 子進程)。
- * 3. 開儀表板視窗 + 系統匣圖示,自動啟動靈動島,結束時收乾淨所有子進程。
+ * 3. 開儀表板視窗 + 系統匣圖示 + 靈動島視窗 (island.js),結束時收乾淨所有子進程。
  */
 const { app, BrowserWindow, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
-const { spawn } = require('child_process');
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -44,19 +43,18 @@ if (app.isPackaged) {
   process.env.LYRICS_DB_PATH = process.env.DB_PATH; // Python 端 (db.py)
   process.env.LYRICS_SETTINGS_PATH = path.join(dataDir, 'settings.json'); // Python 端 (search_fallback.py)
   process.env.PYTOOLS_EXE = path.join(process.resourcesPath, 'pytools', 'pytools.exe');
-  process.env.ISLAND_EXE = path.join(process.resourcesPath, 'island', 'DynamicIslandUI.exe');
 
   // 首次啟動:生成預設 settings.json
   if (!fs.existsSync(process.env.LYRICS_SETTINGS_PATH)) {
     fs.writeFileSync(process.env.LYRICS_SETTINGS_PATH, JSON.stringify({
-      font_size: 32, font_family: 'Noto Sans JP', custom_css_path: '', mini_mode: false,
-      dynamic_color: true, sync_offset: 0, pin_window: true, show_furigana: true,
-      hotkeys_enable: false, autoscroll: true, auto_lyrics_options: false,
+      font_size: 32, sync_offset: 0, show_furigana: true, katakana_ruby: false,
+      autoscroll: true, auto_lyrics_options: false,
       'hk-advance': 'ArrowLeft', 'hk-delay': 'ArrowRight',
       'hk-plain-prev': 'ArrowUp', 'hk-plain-next': 'ArrowDown',
       'hk-ab-loop': 'A', 'hk-ruby-edit': 'E', 'hk-lyrics-opt': 'L', 'hk-reload': 'R',
       'hk-island': 'D', 'hk-fullscreen': 'F',
-      dynamic_island: false, island_lines: 2, media_source: 'auto'
+      dynamic_island: false, island_lines: 2, island_opacity: 1, island_locked: false,
+      media_source: 'auto'
     }, null, 4), 'utf8');
   }
 }
@@ -65,7 +63,6 @@ if (app.isPackaged) {
 let mainWindow = null;
 let splashWindow = null;
 let tray = null;
-let islandProc = null;
 let quitting = false;
 
 const TRAY_ICON = nativeImage.createFromDataURL(
@@ -164,20 +161,13 @@ function createWindow() {
   });
 }
 
-function launchIsland() {
-  const exe = process.env.ISLAND_EXE ||
-    path.join(DEV_ROOT, 'DynamicIslandUI', 'bin', 'Release', 'net8.0-windows', 'DynamicIslandUI.exe');
-  if (!fs.existsSync(exe)) {
-    console.warn('DynamicIslandUI.exe not found, skip:', exe);
-    return;
-  }
-  // 把實際使用的 port 傳給靈動島 (它用來連 WebSocket 與呼叫 API)
-  islandProc = spawn(exe, [String(PORT)], { cwd: path.dirname(exe), stdio: 'ignore' });
-  // 寫入 app.pid,讓網頁上的「啟動/關閉靈動島」按鈕能感知並控制這個進程
-  try {
-    fs.writeFileSync(path.join(process.env.DATA_DIR || DEV_ROOT, 'app.pid'), String(islandProc.pid));
-  } catch (e) {}
-  islandProc.on('exit', () => { islandProc = null; });
+// 靈動島是這個 app 的一個視窗 (web-app/island.js),不再是獨立的 C# 進程。
+// server.js 的 /api/island/* 只轉呼叫這三個 global,所以網頁按鈕與系統匣走同一條路。
+function wireIsland() {
+  const island = require('./island.js');
+  global.openIsland = () => island.openIsland(PORT);
+  global.closeIsland = island.closeIsland;
+  global.isIslandOpen = island.isIslandOpen;
 }
 
 function showWindow() {
@@ -196,11 +186,13 @@ app.whenReady().then(async () => {
   process.env.PORT = String(PORT);
   require('./server.js'); // 帶起 Express + WebSocket + media monitor
 
+  wireIsland();
+
   tray = new Tray(TRAY_ICON);
   tray.setToolTip('Kanaric');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '開啟儀表板', click: showWindow },
-    { label: '重啟靈動島', click: () => { if (islandProc) islandProc.kill(); setTimeout(launchIsland, 500); } },
+    { label: '顯示/隱藏靈動島', click: () => (global.isIslandOpen() ? global.closeIsland() : global.openIsland()) },
     { type: 'separator' },
     { label: '結束', click: () => app.quit() }
   ]));
@@ -215,7 +207,7 @@ app.whenReady().then(async () => {
   } catch (e) {}
   
   if (settings.dynamic_island) {
-    launchIsland();
+    global.openIsland();
   }
 });
 
@@ -231,14 +223,5 @@ app.on('before-quit', () => {
   if (global.monitorProcess) {
     try { global.monitorProcess.kill(); } catch (e) {}
   }
-  if (islandProc) {
-    try { islandProc.kill(); } catch (e) {}
-  }
-  // 網頁按鈕開的靈動島是 detached 進程,electron 沒有 handle,只能靠 app.pid 收掉
-  const pidFile = path.join(process.env.DATA_DIR || DEV_ROOT, 'app.pid');
-  try {
-    const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim());
-    if (pid) process.kill(pid);
-  } catch (e) {}
-  try { fs.unlinkSync(pidFile); } catch (e) {}
+  // 靈動島現在是本 app 的視窗,跟著 app 一起結束,不需要額外收尾
 });

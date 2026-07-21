@@ -1,5 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<!-- 假名開關由 server 的 settings.json 決定,直接渲染進 class ——
+     以前是前端讀 localStorage 補 class、checkbox 卻讀 server 值,兩邊會不同步:
+     換瀏覽器 (localStorage 空) 時 server 設定等於失效,開關還要按兩下才生效。 -->
+<html lang="zh-TW"<%- locals.settings && locals.settings.show_furigana === false ? ' class="hide-furigana"' : '' %>>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,19 +14,16 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Style -->
-    <link rel="stylesheet" href="/css/style.css?v=76">
+    <link rel="stylesheet" href="/css/style.css?v=78">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- 各頁共用:吐司 + 備選歌詞 + 重新載入歌詞 -->
-    <script src="/js/lyrics-tools.js?v=10" defer></script>
+    <script src="/js/lyrics-tools.js?v=11" defer></script>
     <script>
         (function() {
             const fs = localStorage.getItem('fontsize');
             if (fs) {
                 document.documentElement.style.setProperty('--lyrics-fs', fs + 'px');
-            }
-            if (localStorage.getItem('showFurigana') === 'false') {
-                document.documentElement.classList.add('hide-furigana');
             }
         })();
     </script>
@@ -44,6 +44,13 @@
                         <span class="menu-label">顯示日文假名</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="setting-furigana" onchange="updateFuriganaSetting(this.checked)" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="menu-row">
+                        <span class="menu-label">片假名標平假名</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-katakana-ruby" onchange="updateKatakanaRuby(this.checked)">
                             <span class="slider round"></span>
                         </label>
                     </div>
@@ -75,6 +82,22 @@
                             <option value="1">1 行</option>
                             <option value="2" selected>2 行</option>
                         </select>
+                    </div>
+                    <div class="menu-row">
+                        <span class="menu-label">靈動島透明度</span>
+                        <select id="setting-island-opacity" class="menu-select" onchange="saveSettingsToServer('island_opacity', parseFloat(this.value))">
+                            <option value="1">不透明</option>
+                            <option value="0.85">85%</option>
+                            <option value="0.7">70%</option>
+                            <option value="0.5">50%</option>
+                        </select>
+                    </div>
+                    <div class="menu-row">
+                        <span class="menu-label">鎖定靈動島位置</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-island-locked" onchange="saveSettingsToServer('island_locked', this.checked)">
+                            <span class="slider round"></span>
+                        </label>
                     </div>
                     <div class="menu-row">
                         <span class="menu-label">優先搜尋來源</span>

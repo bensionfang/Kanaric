@@ -164,10 +164,11 @@ def split_internal_kana(orig_chunk, hira_chunk, full_orig, full_hira, h_off=0):
             out.append(_ruby(seg, hira_chunk[s:e], full_orig, full_hira, h_off + s))
     return ''.join(out)
 
-def build_ruby_html(text, artist, title, hints=()):
+def build_ruby_html(text, artist, title, hints=(), kata_ruby=False):
     """
     將單行純文字歌詞轉換為包含 <ruby> 標籤的 HTML。
     hints 為該行的正解假名候選,依序套用 (羅馬字 hint 先、LLM hint 後,後者蓋前者)。
+    kata_ruby 開啟時,純片假名的詞也標上平假名讀音 (給讀不了片假名的使用者)。
     """
     if not text.strip():
         return text
@@ -228,7 +229,15 @@ def build_ruby_html(text, artist, title, hints=()):
         has_kanji = re.search(r'[\u4e00-\u9faf\u3005]', orig)
         
         if not has_kanji:
-            html_parts.append(orig)
+            # 片假名標平假名:純字形轉換,不查字典 (unidic 的讀音欄位反而有機會出錯)。
+            # 讀音相同 (ー、・、英數字) 就不必包 ruby。class 刻意不是 editable-ruby ——
+            # 這不是可修正的讀音,不進 word_corrections,編輯模式不該碰它。
+            # ponytail: 只處理不含漢字的詞;含漢字的詞前後綴夾片假名不管,實務上罕見。
+            kana = kata2hira(orig)
+            if kata_ruby and kana != orig:
+                html_parts.append(f"<ruby class='kata-ruby'>{orig}<rt>{kana}</rt></ruby>")
+            else:
+                html_parts.append(orig)
             continue
 
         # 去除前後相同綴詞 (處理送り仮名)
@@ -302,7 +311,7 @@ def get_hints(artist, title, lrc_text, force_llm=False):
         print(f"[furigana] llm hints unavailable: {e}", file=sys.stderr)
     return romaji, llm
 
-def process_lrc(artist, title, lrc_text, force_llm=False):
+def process_lrc(artist, title, lrc_text, force_llm=False, kata_ruby=False):
     """
     處理整份 LRC 格式的歌詞檔案，逐行轉換為 ruby HTML 格式
     並保留原始的時間標籤。
@@ -333,7 +342,7 @@ def process_lrc(artist, title, lrc_text, force_llm=False):
             if text.startswith("#TITLE#"):
                 ruby_text = text
             else:
-                ruby_text = build_ruby_html(text, artist, title, line_hints(text))
+                ruby_text = build_ruby_html(text, artist, title, line_hints(text), kata_ruby)
             new_lines.append(f"{tags}{ruby_text}")
         elif re.match(r'^\[[a-zA-Z]+:.*\]$', line):
             # 保留 LRC 檔案頭部的 Meta 標籤 (如 [ar:Artist])
@@ -343,7 +352,7 @@ def process_lrc(artist, title, lrc_text, force_llm=False):
             if line.startswith("#TITLE#"):
                 ruby_text = line
             else:
-                ruby_text = build_ruby_html(line, artist, title, line_hints(line))
+                ruby_text = build_ruby_html(line, artist, title, line_hints(line), kata_ruby)
             new_lines.append(ruby_text)
             
     return '\n'.join(new_lines)
@@ -358,7 +367,9 @@ def main():
         lyrics = data.get("lyrics", "")
         
         if lyrics:
-            injected_lyrics = process_lrc(artist, title, lyrics, force_llm=data.get("force_llm", False))
+            injected_lyrics = process_lrc(artist, title, lyrics,
+                                          force_llm=data.get("force_llm", False),
+                                          kata_ruby=data.get("katakana_ruby", False))
             result = {"success": True, "lyrics": injected_lyrics}
             # 魔杖強制重跑時把 LLM 失敗原因帶回去,server 才不會把「請求失敗」報成「校正完成」
             if data.get("force_llm") and llm_furigana.LAST_ERROR:

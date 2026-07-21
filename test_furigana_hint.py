@@ -51,3 +51,12 @@ assert process_lrc('x', 'y', zh) == zh
 assert '<ruby' in process_lrc('x', 'y', '[00:12.34]君の声が聞こえる')
 
 print('OK')
+
+# 6. 片假名標平假名:預設不動,開啟時包 ruby 且原文保留、長音符 ー 不展開
+assert '<ruby' not in build_ruby_html('サヨナラ', 'x', 'y')
+kr = build_ruby_html('サヨナラ', 'x', 'y', kata_ruby=True)
+assert 'サヨナラ' in kr and '<rt>さよなら</rt>' in kr, kr
+assert '<rt>らーめん</rt>' in build_ruby_html('ラーメン', 'x', 'y', kata_ruby=True)
+assert build_ruby_html('ー', 'x', 'y', kata_ruby=True) == 'ー'   # 轉了也一樣就不包
+
+print('OK')
