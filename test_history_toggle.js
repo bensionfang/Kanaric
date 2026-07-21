@@ -50,6 +50,14 @@ async function waitForServer() {
   return false;
 }
 
+async function waitForTables() {
+  for (let i = 0; i < 100; i++) {
+    try { await count('listening_history'); await count('word_corrections'); return true; }
+    catch { await sleep(100); }
+  }
+  return false;
+}
+
 async function run() {
   // 1. 預設 (設定檔沒這個鍵) = 會記錄
   fs.writeFileSync(SETTINGS, '{}', 'utf8');
@@ -114,6 +122,9 @@ async function run() {
   try {
     if (!(await waitForServer())) throw new Error('server 沒有起來');
     probe = new sqlite3.Database(process.env.DB_PATH);
+    // /api/settings 一通不代表建表跑完 —— express 開始 listen 與 db 建表是兩條並行的路。
+    // 機器忙的時候第一筆 play() 會撞上 "no such table: listening_history",測試就偶發炸掉。
+    if (!(await waitForTables())) throw new Error('資料表沒有建起來');
     await run();
   } catch (e) {
     console.error('測試無法執行:', e.message);

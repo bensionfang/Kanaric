@@ -251,7 +251,10 @@ global.logListen = function(state) {
   if (readSettings().track_history === false) return;
   db.run(
     'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
-    [state.artist, state.title, state.album || null, Math.round(state.duration) || 180]
+    [state.artist, state.title, state.album || null, Math.round(state.duration) || 180],
+    // 沒有 callback 的話,node-sqlite3 會把錯誤丟成未捕捉例外整個 server 掛掉
+    // (開機頭幾秒建表還沒跑完就撞上這裡的話就是 "no such table")
+    (err) => { if (err) console.error('logListen 寫入失敗:', err.message); }
   );
 };
 
@@ -403,6 +406,8 @@ app.use((req, res, next) => {
   };
   // 側欄要靠 track_history 決定顯不顯示統計/排行榜,等前端問完 API 才隱藏會閃一下
   res.locals.settings = readSettings();
+  // 魔杖鈕只在設好 API key 時出現;交給前端問 /api/llm-key 再隱藏會先閃一下
+  res.locals.llmKeySet = !!llmApiKey;
   // 備選歌詞按鈕的狀態也一起渲染,否則會先畫成未搜尋、等前端問完 server 才變綠 (閃一下)
   const job = optionJobs.get(jobKey(m.artist, m.title));
   res.locals.optState = {
@@ -1698,6 +1703,14 @@ app.get('/api/island/status', (req, res) => {
     available: typeof global.isIslandOpen === 'function',
     isRunning: typeof global.isIslandOpen === 'function' ? global.isIslandOpen() : false
   });
+});
+
+app.post('/api/island/reset-position', (req, res) => {
+  if (typeof global.resetIslandPosition !== 'function') {
+    return res.json({ success: false, available: false });
+  }
+  global.resetIslandPosition();
+  res.json({ success: true });
 });
 
 app.post('/api/island/toggle', (req, res) => {

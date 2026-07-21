@@ -2,7 +2,10 @@
    左右各留 --edge 的透明邊,貼齊頂端時用來畫「外擴角」(舊 C# 島的 Flare)。 */
 :root {
   --edge: 24px;
-  --island-bg: rgba(12, 12, 12, 0.9);
+  /* 透明度只調底色的 alpha,不用整塊 opacity —— 整塊調的話歌詞會跟著糊掉,
+     30% 時字幾乎看不見,而使用者要的是「底變透、字還看得清楚」。
+     整塊的 opacity 留給 .idle (暫停淡出) 專用。 */
+  --island-bg: rgba(12, 12, 12, calc(0.9 * var(--island-opacity)));
   --island-fs: 16px;      /* 由 font_size 設定換算,JS 覆寫 */
   --island-r: 20px;       /* 圓角;跟著字級走,見下方 #island */
   --island-opacity: 1;    /* 由 island_opacity 設定覆寫 */
@@ -27,15 +30,15 @@ body {
   display: inline-flex; align-items: center; gap: 12px;
   max-width: 100%;
   /* 內距要留得住:島的高度就是內容高度,padding 給太少字會像被框擠住。
+     左右多留一點:封面是實心方塊,貼太近圓角看起來就快溢出去了。
      左右對稱靠的是「左封面 / 右播放狀態」兩端等寬,不是靠補內距。 */
-  padding: 11px;
+  padding: 11px 15px;
   background: var(--island-bg);
   backdrop-filter: blur(18px);
   color: #fff;
   /* 半徑要固定,不能用 999px 讓瀏覽器夾成「高度的一半」——貼齊頂端時只剩下面兩角有圓角,
      那個半徑會被夾成整個高度,弧線從最上緣就開始往內收,封面與長歌詞就被擠到黑底外面。 */
   border-radius: var(--island-r);
-  opacity: var(--island-opacity);
   transition: border-radius 0.22s ease, opacity 0.4s ease;   /* 恢復播放時淡回來 */
 }
 
@@ -67,14 +70,15 @@ body {
 
 #lines { min-width: 0; text-align: center; }
 
-/* 播放狀態:三根等化器條,跟封面等寬所以兩端秤得平。播放中跳動,暫停就定在低點 */
+/* 播放狀態:三根等化器條。**盒寬要比封面寬一點**——封面是實心方塊、等化器只有三根細線,
+   兩邊盒子一樣寬時墨水量差太多,眼睛會覺得歌詞偏左。條子也加粗一點補視覺重量。 */
 #state {
-  width: calc(var(--island-fs) * 1.15); height: calc(var(--island-fs) * 0.9);
-  flex: none; display: flex; align-items: flex-end; justify-content: center; gap: 2px;
+  width: calc(var(--island-fs) * 1.45); height: calc(var(--island-fs) * 0.9);
+  flex: none; display: flex; align-items: flex-end; justify-content: center; gap: 3px;
 }
 #state i {
-  width: 2px; height: 100%; border-radius: 1px;
-  background: rgba(255, 255, 255, 0.7);
+  width: 3px; height: 100%; border-radius: 1.5px;
+  background: rgba(255, 255, 255, 0.75);
   transform-origin: bottom; transform: scaleY(0.35);
   animation: eq 0.9s ease-in-out infinite;
 }

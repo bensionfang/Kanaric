@@ -23,7 +23,7 @@
     "llm_model": "",
     "llm_furigana": "off",
     "track_history": true,
-    "island_x": 1989,
-    "island_y": 82,
+    "island_x": null,
+    "island_y": null,
     "island_docked": true
 }

@@ -10,8 +10,10 @@ const path = require('path');
 const fs = require('fs');
 const net = require('net');
 
+// app.quit() 是非同步的:光呼叫它,後面的 whenReady 還是會跑,第二個實例會先起一份 server
+// 與 media monitor 佔用另一個 port,再自己崩掉。要 app.exit() 立刻收工。
 if (!app.requestSingleInstanceLock()) {
-  app.quit();
+  app.exit(0);
 }
 
 let PORT = Number(process.env.PORT) || 5720;
@@ -168,6 +170,7 @@ function wireIsland() {
   global.openIsland = () => island.openIsland(PORT);
   global.closeIsland = island.closeIsland;
   global.isIslandOpen = island.isIslandOpen;
+  global.resetIslandPosition = island.resetIslandPosition;
 }
 
 function showWindow() {

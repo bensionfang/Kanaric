@@ -61,7 +61,11 @@ body {
     padding: 30px 20px;
     display: flex;
     flex-direction: column;
-    z-index: 10;
+    /* 側欄是 grid item,grid/flex item 即使 position:static 也會吃 z-index 並建立 stacking context,
+       所以設定選單 (裡面的 .brand 9999 / .settings-menu 1000) 的實際疊放層級是「這個數字」。
+       以前寫 10,跟 leaderboard 那排 filter 的 inline z-index:10 平手、DOM 在後面的贏,
+       設定選單就被排行榜的內容蓋住點不到。要贏過所有內容,又要保持在 .win-drag (9998) 之下。 */
+    z-index: 9997;
     transition: width 0.3s ease;
     overflow-x: hidden;
 }
@@ -129,7 +133,8 @@ body {
     margin-bottom: 45px;
     white-space: nowrap;
     position: relative;
-    /* 疊在 .win-drag 之上,否則設定鈕的點擊會被拖曳條吃掉 */
+    /* 讓設定選單疊在側欄其他東西之上。注意這個數字只在側欄自己的 stacking context 內比大小
+       (見 .sidebar 的 z-index),要跟頁面內容比是側欄那個值在比,不是這個。 */
     z-index: 9999;
     -webkit-app-region: drag;
 }
@@ -201,6 +206,32 @@ body {
 }
 
 .menu-fontsize input[type="range"] { width: 90px; }
+
+/* 設定選單平鋪列的控制項寬度對齊:文字大小 (滑桿 90 + gap 8 + 數字框 45) = 143,
+   優先搜尋來源的下拉跟著同寬,左緣才切齊 */
+#settings-menu > .menu-row > .menu-fontsize,
+#settings-menu > .menu-row > .menu-select,
+#settings-menu > .menu-row > .segmented-control {
+    width: 143px;
+}
+
+/* 靈動島的「重置」按鈕:尺寸對齊同一節的下拉選單 (.menu-select),右欄才是一條直線 */
+.island-reset-btn {
+    width: 61px;
+    height: 28px;
+    padding: 4px 8px;
+    font-size: 13px;
+    border-radius: 6px;
+}
+
+/* 滑桿旁的數值 (靈動島透明度):固定寬度,拉的時候標籤不會跟著跳 */
+.hk-value {
+    min-width: 38px;
+    text-align: right;
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
 
 .menu-select {
     background: var(--bg-main);
@@ -625,11 +656,14 @@ button.menu-action i {
     border-radius: 2px;
 }
 
+/* 「正在搜尋歌詞…」佔滿整個歌詞區,12px 的暗灰在大字歌詞旁邊小到看不見。
+   放大並改用次要灰 (仍是灰的,只是讀得到) */
 .loading-spinner {
     text-align: center;
     padding: 30px 0;
-    color: var(--text-dim);
-    font-size: 12px;
+    color: var(--text-secondary);
+    font-size: 18px;
+    letter-spacing: 0.02em;
 }
 
 .vinyl {
@@ -1119,6 +1153,8 @@ input:checked + .slider { background-color: var(--accent-main); }
 input:checked + .slider:before { transform: translateX(20px); }
 .slider.round { border-radius: 24px; }
 .slider.round:before { border-radius: 50%; }
+/* input 本身是隱形的,disabled 沒有樣式的話開關看起來照樣可按 (純 node 模式的靈動島開關) */
+input:disabled + .slider { opacity: 0.35; cursor: not-allowed; }
 
 /* Range Slider Accent Color */
 input[type="range"] {

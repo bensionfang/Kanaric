@@ -55,10 +55,13 @@
                 </div>
                 <button id="loop-mode-btn" class="ctrl-btn" onclick="toggleLoopMode()" data-tip="段落循環"><i class="fa-solid fa-bookmark"></i></button>
                 <button id="toggle-ruby-mode-btn" class="ctrl-btn" onclick="toggleRubyEditMode()" data-tip="編輯假名模式"><i class="fa-solid fa-pen"></i></button>
+                <!-- 沒設 API key 就不長這顆 (按了也只會回 400);設好之後重載即出現 -->
+                <% if (locals.llmKeySet) { %>
                 <div class="lyrics-opt-wrap">
                     <button id="llm-wand-btn" class="ctrl-btn" onclick="runLlmFurigana(this)" data-tip="AI 讀音校正"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
                     <div id="llm-wand-bubble" class="lyrics-opt-bubble"></div>
                 </div>
+                <% } %>
                 <button id="reload-btn" class="ctrl-btn" onclick="reloadCurrentLyrics()" data-tip="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
                 <button id="desktop-toggle-btn" class="ctrl-btn" onclick="toggleIsland()" data-tip="桌面靈動島">
                     <i class="fa-solid fa-mobile-screen"></i>
@@ -93,11 +96,12 @@
             }
         }
 
-        // 收設定選單時,飛出去的快捷鍵子選單也要一起收,否則下次打開它還開著
+        // 收設定選單時,飛出去的子選單也要一起收,否則下次打開它還開著。
+        // 名單一律走 MENU_SECTIONS —— 以前這裡寫死三個 key,新增小節就會漏收。
         function closeSettingsMenu() {
             const menu = document.getElementById('settings-menu');
             if (menu) menu.classList.remove('show');
-            ['hotkeys', 'source', 'llm'].forEach(k => {
+            MENU_SECTIONS.forEach(k => {
                 const sec = document.getElementById(k + '-section');
                 if (sec) sec.classList.remove('show');
                 const btn = document.getElementById(k + '-toggle');
@@ -116,7 +120,7 @@
 
         // 子選單直接在設定選單旁展開。三個飛出面板共用同一個定位點,
         // 同時開會疊在一起,所以開新的要把其他的收掉 (手風琴)。
-        const MENU_SECTIONS = ['hotkeys', 'source', 'llm', 'data'];
+        const MENU_SECTIONS = ['island', 'hotkeys', 'source', 'llm', 'data'];
         function toggleMenuSection(e, key) {
             if (e) e.stopPropagation();
             const sec = document.getElementById(key + '-section');
@@ -136,12 +140,47 @@
                 if (key === 'llm') loadLlmModels();
                 // 資料用量要掃全表,展開才查 —— 每次開設定選單都算沒必要
                 if (key === 'data') loadDbUsage();
+                // 島可能被系統匣或播放列那顆按鈕開關過,展開時問一次現況
+                if (key === 'island') refreshIslandToggle();
             }
         }
         function toggleHotkeysSection(e) { toggleMenuSection(e, 'hotkeys'); }
         function toggleSourceSection(e) { toggleMenuSection(e, 'source'); }
         function toggleLlmSection(e) { toggleMenuSection(e, 'llm'); }
         function toggleDataSection(e) { toggleMenuSection(e, 'data'); }
+        function toggleIslandSection(e) { toggleMenuSection(e, 'island'); }
+
+        // -------------------------------------------------------------
+        // 靈動島
+        // -------------------------------------------------------------
+        // 選單裡的「顯示靈動島」跟播放列那顆按鈕、系統匣選單是同一個狀態,三邊都要對得上
+        async function refreshIslandToggle() {
+            const el = document.getElementById('setting-island-on');
+            if (!el) return;
+            try {
+                const d = await (await fetch('/api/island/status')).json();
+                el.checked = !!d.isRunning;
+                el.disabled = d.available === false;   // 純 node 模式沒有島
+            } catch (e) {}
+        }
+
+        // 滑桿是整數百分比,設定存 0–1 的小數 (島的 CSS 直接吃這個值)
+        let islandOpacityTimer = null;
+        function updateIslandOpacity(pct) {
+            const label = document.getElementById('island-opacity-value');
+            if (label) label.textContent = pct + '%';
+            // 拖曳中每一格都存會狂打 API,停手 200ms 才寫
+            clearTimeout(islandOpacityTimer);
+            islandOpacityTimer = setTimeout(() => saveSettingsToServer('island_opacity', pct / 100), 200);
+        }
+
+        async function resetIslandPosition() {
+            try {
+                const d = await (await fetch('/api/island/reset-position', { method: 'POST' })).json();
+                showToast(d.success ? '靈動島已回到螢幕上方置中' : '靈動島需要桌面版 Kanaric',
+                          d.success ? 'fa-solid fa-crosshairs' : 'fa-solid fa-circle-info');
+            } catch (e) {}
+        }
 
         // -------------------------------------------------------------
         // 聆聽紀錄與資料
@@ -404,7 +443,7 @@
         // ── 使用說明:引導式導覽 ──
         const tourSteps = [
             { page: '/',       el: '.nav-menu',      title: '側欄導覽',   text: '這裡可以切換頁面：懸浮歌詞、統計數據、排行榜、歌詞編輯器。滑鼠移到圖示上會顯示名稱。' },
-            { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '所有設定都在這裡：日文假名、文字大小、歌詞對齊、優先搜尋來源、音訊來源、快捷鍵等。讀不了片假名的話，打開「片假名標平假名」，サヨナラ 上方就會多標一行 さよなら，網頁與靈動島同時生效。' },
+            { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '常用的開關直接列在上面：日文假名、片假名標平假名、文字大小、歌詞對齊、優先搜尋來源。下半部收成幾個小節——靈動島、音訊來源、AI 讀音校正、自訂快捷鍵、聆聽紀錄與資料，點一下往旁邊展開。讀不了片假名的話打開「片假名標平假名」，サヨナラ 上方會多標一行 さよなら，網頁與靈動島同時生效。' },
             { page: '/',       el: '#lyrics-scroll', title: '歌詞區',     text: '歌詞會隨播放自動同步捲動，漢字上方標示假名注音。點任一句歌詞可以直接跳轉到該時間點。' },
             { page: '/',       el: '.player-center', title: '播放控制',   text: '控制播放/暫停、上下一首，拖曳進度條可跳轉。' },
             { page: '/',       el: '.player-right',  title: '工具列',     text: '由左至右：備選歌詞、段落循環、編輯假名、AI 讀音校正、重新載入歌詞、桌面靈動島、放大模式。每顆都可以在設定選單的「自訂快捷鍵」裡改快捷鍵,也能按眼睛圖示把不需要的工具從這排隱藏。接下來由左到右細講。' },
@@ -412,7 +451,7 @@
             { page: '/',       el: '#loop-mode-btn', title: '段落循環', text: '想反覆練唱某一段就按這顆書籤。進入循環模式後，點歌詞選出起點那一句，再點一句當終點，就會立刻跳到起點開始無限循環——唱完終點那一句會自動跳回起點。同一句連點兩次就是單句循環。選好的範圍會用綠色底標示出來。再按一次書籤（或快捷鍵，預設 A）結束循環。' },
             { page: '/',       el: '#toggle-ruby-mode-btn', title: '編輯假名', text: '假名偶爾會標錯（人名、罕見讀音）。按下這顆筆進入編輯模式，點任一個漢字，它的假名就地變成可打字的欄位——打羅馬拼音會自動轉成假名。Enter 儲存、Esc 取消、雙擊該字則回復成自動判讀的讀音。修改只套用在這首歌。' },
             { page: '/',       el: '#llm-wand-btn', title: 'AI 讀音校正', text: '用你自己的 LLM API 依歌詞上下文校正漢字讀音（行く = いく/ゆく 這類同形詞）。先在設定選單的「AI 讀音校正」填好 API Key，再按這顆魔杖對正在播放的歌執行。結果會快取，你手動修正過的假名永遠優先。' },
-            { page: '/',       el: '#desktop-toggle-btn', title: '桌面靈動島', text: '開啟一個永遠置頂的懸浮歌詞條，離開瀏覽器也看得到歌詞，適合一邊工作一邊聽歌。再按一次關閉。顯示行數可以在設定選單調整。' },
+            { page: '/',       el: '#desktop-toggle-btn', title: '桌面靈動島', text: '開啟一個永遠置頂的懸浮歌詞條，切到別的視窗也看得到歌詞，適合一邊工作一邊聽歌。再按一次關閉，它也會跟著 Kanaric 一起結束。島可以直接拖著走，拖到螢幕最上緣會自動吸附；在島上單擊一下可以在「貼齊頂端」與「浮在下面一點」之間切換。歌詞行數、透明度、鎖定位置、重置位置、開機自動顯示都在設定選單的「靈動島」小節。' },
             { page: '/',       el: '#offset-panel', reveal: true, title: '微調時間軸', text: '歌詞跟音樂對不上時用這裡校正。歌詞太晚出現就按「−」讓它提早，太早出現就按「+」讓它延遲，一次 0.1 秒；點中間的數字可以歸零。每首歌的偏移量會各自記住，下次播同一首自動套用，桌面靈動島也會跟著校正。平常它是半透明的，滑鼠移過去才會變清楚，也可以用快捷鍵調整（預設方向鍵左右）。' },
             { page: '/',       el: 'a.nav-item[href="/editor"]', title: '歌詞編輯器', text: '找不到歌詞、時間軸不準？歌詞編輯器可以手動修正。點「下一步」帶你進去看看。' },
             { page: '/editor', el: '.stats-dashboard-grid > .dashboard-card:first-child', title: '選擇歌曲',
@@ -837,8 +876,15 @@
                     if (alEl) alEl.checked = data.auto_lyrics_options;
                     localStorage.setItem('auto_lyrics_options', data.auto_lyrics_options);
                 }
+                const iaEl = document.getElementById('setting-island-auto');
+                if (iaEl) iaEl.checked = data.dynamic_island === true;
                 const ioEl = document.getElementById('setting-island-opacity');
-                if (ioEl) ioEl.value = String(data.island_opacity === undefined ? 1 : data.island_opacity);
+                if (ioEl) {
+                    const pct = Math.round((data.island_opacity === undefined ? 1 : Number(data.island_opacity)) * 100);
+                    ioEl.value = String(pct);
+                    const lab = document.getElementById('island-opacity-value');
+                    if (lab) lab.textContent = pct + '%';
+                }
                 const ilkEl = document.getElementById('setting-island-locked');
                 if (ilkEl) ilkEl.checked = data.island_locked === true;
                 if (data.island_lines !== undefined) {

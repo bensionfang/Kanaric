@@ -57,8 +57,9 @@ function openIsland(port) {
   const s = settings();
   const { width, height } = windowSize(s);
   const { workArea } = screen.getPrimaryDisplay();
-  const wantX = s.island_x !== undefined ? s.island_x : workArea.x + (workArea.width - width) / 2;
-  const wantY = s.island_y !== undefined ? s.island_y : workArea.y;
+  // 用 isFinite 而不是 !== undefined:重設位置是把設定寫成 null,那時要當作「沒記過」
+  const wantX = Number.isFinite(s.island_x) ? s.island_x : workArea.x + (workArea.width - width) / 2;
+  const wantY = Number.isFinite(s.island_y) ? s.island_y : workArea.y;
   const { x, y } = clampToScreen(wantX, wantY, width, height);
 
   win = new BrowserWindow({
@@ -88,9 +89,26 @@ function closeIsland() {
   if (win) win.destroy();   // close 事件沒人攔,destroy 比較直接;closed 會清掉 win
   win = null;
   stopDrag();
+  clearInterval(dockAnim);
 }
 
 function isIslandOpen() { return !!win; }
+
+// 拖到奇怪的地方 (或存了一個已拔掉的螢幕座標) 時的退路:清掉記住的位置,回到主螢幕上方置中
+function resetIslandPosition() {
+  clearInterval(dockAnim);   // 吸附動畫還在跑的話會把 y 拉回去,重置就白做了
+  if (global.updateSettings) {
+    try { global.updateSettings({ island_x: null, island_y: null, island_docked: true }); } catch (e) {}
+  }
+  if (!win) return;
+  const b = win.getBounds();
+  const { workArea } = screen.getPrimaryDisplay();
+  win.setBounds({
+    x: Math.round(workArea.x + (workArea.width - b.width) / 2),
+    y: workArea.y, width: b.width, height: b.height
+  });
+  win.webContents.send('island:docked', true);
+}
 
 
 function stopDrag() {
@@ -148,7 +166,8 @@ ipcMain.on('island:drag-start', () => {
 
 ipcMain.on('island:drag-end', () => {
   stopDrag();
-  if (!win) return;
+  // 鎖定時 drag-start 就沒開始拖,這裡也要跟著早退 —— 否則在島上點一下就會白寫一次 settings.json
+  if (!win || settings().island_locked) return;
   const b = win.getBounds();
   const { workArea } = screen.getDisplayNearestPoint({ x: b.x, y: b.y });
   const docked = b.y - workArea.y < DOCK_THRESHOLD;
@@ -184,4 +203,4 @@ ipcMain.on('island:resize', (_e, size) => {
   win.setBounds({ x, y, width, height });
 });
 
-module.exports = { openIsland, closeIsland, isIslandOpen };
+module.exports = { openIsland, closeIsland, isIslandOpen, resetIslandPosition };

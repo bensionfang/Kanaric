@@ -627,10 +627,12 @@ document.addEventListener('keydown', (e) => {
     
     const fullKey = prefix + keyName;
     
-    if (fullKey === activeHotkeys.delay) {
+    // advance = 讓歌詞提早出現 = 負偏移,對應畫面左邊的「−」鈕 (預設 ArrowLeft);delay 反之。
+    // 以前這兩個是反的:按 ArrowRight 會得到 -100ms,跟它正上方的「+」鈕相反。
+    if (fullKey === activeHotkeys.advance) {
         e.preventDefault();
         adjustSyncOffset(-0.1);
-    } else if (fullKey === activeHotkeys.advance) {
+    } else if (fullKey === activeHotkeys.delay) {
         e.preventDefault();
         adjustSyncOffset(0.1);
     } else if (fullKey === activeHotkeys.plainPrev) {

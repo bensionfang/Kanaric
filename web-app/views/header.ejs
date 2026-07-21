@@ -14,7 +14,7 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Style -->
-    <link rel="stylesheet" href="/css/style.css?v=78">
+    <link rel="stylesheet" href="/css/style.css?v=84">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- 各頁共用:吐司 + 備選歌詞 + 重新載入歌詞 -->
@@ -69,37 +69,6 @@
                         </div>
                     </div>
                     <div class="menu-row">
-                        <span class="menu-label">歌詞對齊</span>
-                        <div class="segmented-control" id="align-segmented">
-                            <button class="segment-btn" data-align="left" onclick="changeTextAlign('left', this)">左</button>
-                            <button class="segment-btn active" data-align="center" onclick="changeTextAlign('center', this)">中</button>
-                            <button class="segment-btn" data-align="right" onclick="changeTextAlign('right', this)">右</button>
-                        </div>
-                    </div>
-                    <div class="menu-row">
-                        <span class="menu-label">靈動島歌詞行數</span>
-                        <select id="setting-island-lines" class="menu-select" onchange="saveSettingsToServer('island_lines', parseInt(this.value))">
-                            <option value="1">1 行</option>
-                            <option value="2" selected>2 行</option>
-                        </select>
-                    </div>
-                    <div class="menu-row">
-                        <span class="menu-label">靈動島透明度</span>
-                        <select id="setting-island-opacity" class="menu-select" onchange="saveSettingsToServer('island_opacity', parseFloat(this.value))">
-                            <option value="1">不透明</option>
-                            <option value="0.85">85%</option>
-                            <option value="0.7">70%</option>
-                            <option value="0.5">50%</option>
-                        </select>
-                    </div>
-                    <div class="menu-row">
-                        <span class="menu-label">鎖定靈動島位置</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="setting-island-locked" onchange="saveSettingsToServer('island_locked', this.checked)">
-                            <span class="slider round"></span>
-                        </label>
-                    </div>
-                    <div class="menu-row">
                         <span class="menu-label">優先搜尋來源</span>
                         <select id="setting-preferred-source" class="menu-select" onchange="localStorage.setItem('preferred_source', this.value); saveSettingsToServer('preferred_source', this.value)">
                             <option value="NetEase">NetEase (網易雲)</option>
@@ -109,7 +78,62 @@
                             <option value="QQMusic">QQ 音樂</option>
                         </select>
                     </div>
+                    <div class="menu-row">
+                        <span class="menu-label">歌詞對齊</span>
+                        <div class="segmented-control" id="align-segmented">
+                            <button class="segment-btn" data-align="left" onclick="changeTextAlign('left', this)">左</button>
+                            <button class="segment-btn active" data-align="center" onclick="changeTextAlign('center', this)">中</button>
+                            <button class="segment-btn" data-align="right" onclick="changeTextAlign('right', this)">右</button>
+                        </div>
+                    </div>
                     <div class="menu-divider"></div>
+                    <div class="menu-sub">
+                    <button class="menu-row menu-action" id="island-toggle" onclick="toggleIslandSection(event)">
+                        <span class="menu-label">靈動島</span>
+                        <i class="fa-solid fa-chevron-right hotkeys-chevron"></i>
+                    </button>
+                    <div class="menu-hotkeys" id="island-section">
+                        <div class="hk-row">
+                            <span class="hk-label">顯示靈動島</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-island-on" onchange="toggleIsland()">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">開啟 Kanaric 時自動顯示</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-island-auto" onchange="saveSettingsToServer('dynamic_island', this.checked)">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">鎖定位置</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-island-locked" onchange="saveSettingsToServer('island_locked', this.checked)">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">歌詞行數</span>
+                            <select id="setting-island-lines" class="menu-select" onchange="saveSettingsToServer('island_lines', parseInt(this.value))">
+                                <option value="1">1 行</option>
+                                <option value="2" selected>2 行</option>
+                            </select>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">重置位置</span>
+                            <button class="hk-reset island-reset-btn" onclick="resetIslandPosition()" title="回到螢幕上方置中">重置</button>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">透明度</span>
+                            <div class="menu-fontsize">
+                                <input type="range" min="30" max="100" step="5" value="100" id="setting-island-opacity" oninput="updateIslandOpacity(this.value)">
+                                <span id="island-opacity-value" class="hk-value">100%</span>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
                     <div class="menu-sub">
                     <button class="menu-row menu-action" id="source-toggle" onclick="toggleSourceSection(event)">
                         <span class="menu-label">音訊來源
@@ -165,13 +189,14 @@
                         <i class="fa-solid fa-chevron-right hotkeys-chevron"></i>
                     </button>
                     <div class="menu-hotkeys" id="hotkeys-section">
+                        <!-- 順序與標籤對齊播放列的「− +」:hk-advance = 提早 = 左邊的「−」 -->
                         <div class="hk-row">
-                            <span class="hk-label">歌詞快了</span>
+                            <span class="hk-label">歌詞慢了</span>
                             <span class="hk-eye-slot"></span>
                             <input type="text" id="hk-advance" class="hk-input" readonly onclick="recordHotkey(this, 'hk-advance')">
                         </div>
                         <div class="hk-row">
-                            <span class="hk-label">歌詞慢了</span>
+                            <span class="hk-label">歌詞快了</span>
                             <span class="hk-eye-slot"></span>
                             <input type="text" id="hk-delay" class="hk-input" readonly onclick="recordHotkey(this, 'hk-delay')">
                         </div>
