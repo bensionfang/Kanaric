@@ -318,6 +318,45 @@ button.menu-action {
     color: var(--text-secondary);
 }
 
+/* 只有快捷鍵區改三欄 grid (llm-section 也用 .hk-row,不能動全域):
+   名稱 / 眼睛 / 輸入框,每列三欄固定,輸入框起點永遠對齊 */
+#hotkeys-section {
+    width: 280px;   /* 放得下最長標籤 (純文字上一句),1fr 才不會被撐開 */
+}
+#hotkeys-section .hk-row {
+    display: grid;
+    grid-template-columns: 1fr 20px 116px;
+    column-gap: 8px;
+}
+#hotkeys-section .hk-label {
+    min-width: 0;   /* 關鍵:不加的話長標籤會撐開 1fr 欄,把後面欄位推歪 */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#hotkeys-section .hk-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* 眼睛鈕落在中間欄 (無眼睛的列用 .hk-eye-slot 占位,輸入框才會對齊) */
+.hk-eye {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1;
+    justify-self: center;
+}
+.hk-eye:hover { color: var(--text-primary); }
+.hk-eye.off { opacity: 0.4; }
+.hk-eye-slot { display: block; }
+
+/* 從工具列隱藏的工具 */
+.tool-hidden { display: none !important; }
+
 .hk-input {
     width: 120px;
     text-align: center;

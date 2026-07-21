@@ -129,6 +129,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
+    minWidth: 800,  // = Spotify 桌面最小外框;窄於 1100 stats grid 走 @media 塌單欄
+    minHeight: 600,
     autoHideMenuBar: true,
     icon: TRAY_ICON,
     show: false, // 等頁面畫好才顯示,啟動畫面在這之前頂著

@@ -526,10 +526,65 @@ const TOOLBAR_HOTKEYS = {
     'hk-ab-loop':    { def: 'A', run: () => toggleLoopMode() },
     'hk-ruby-edit':  { def: 'E', run: () => toggleRubyEditMode() },
     'hk-lyrics-opt': { def: 'L', run: () => searchLyricsOptions() },
+    'hk-llm-wand':   { def: 'W', run: () => { const b = document.getElementById('llm-wand-btn'); if (b && typeof runLlmFurigana === 'function') runLlmFurigana(b); } },
     'hk-reload':     { def: 'R', run: () => reloadCurrentLyrics() },
     'hk-island':     { def: 'D', run: () => launchPyQt6() },
     'hk-fullscreen': { def: 'F', run: () => toggleFullscreen() },
 };
+
+// 右下角工具列可自訂顯示/隱藏:tool key → 按鈕元素 id (單一真相源)。
+// 顯示狀態存 localStorage 'tool-vis-<key>','0'=隱藏,預設顯示 (跟快捷鍵同一套 per-browser)。
+const TOOLBAR_TOOLS = [
+    { key: 'lyrics-opt', id: 'lyrics-opt-btn' },
+    { key: 'ab-loop',    id: 'loop-mode-btn' },
+    { key: 'ruby-edit',  id: 'toggle-ruby-mode-btn' },
+    { key: 'llm-wand',   id: 'llm-wand-btn' },
+    { key: 'reload',     id: 'reload-btn' },
+    { key: 'island',     id: 'desktop-toggle-btn' },
+    { key: 'fullscreen', id: 'fullscreen-btn' },
+];
+
+function _toolHideTarget(id) {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    // 備選歌詞/魔杖包在 .lyrics-opt-wrap (含浮層錨點),要連 wrapper 一起藏
+    return el.closest('.lyrics-opt-wrap') || el;
+}
+
+window.applyToolbarVisibility = function() {
+    TOOLBAR_TOOLS.forEach(({ key, id }) => {
+        const target = _toolHideTarget(id);
+        if (target) target.classList.toggle('tool-hidden', localStorage.getItem('tool-vis-' + key) === '0');
+    });
+};
+
+// 設定選單裡的眼睛圖示反映目前狀態
+window.refreshToolEyes = function() {
+    TOOLBAR_TOOLS.forEach(({ key }) => {
+        const eye = document.querySelector(`.hk-eye[data-tool="${key}"]`);
+        if (!eye) return;
+        const hidden = localStorage.getItem('tool-vis-' + key) === '0';
+        eye.classList.toggle('off', hidden);
+        const icon = eye.querySelector('i');
+        if (icon) icon.className = hidden ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+    });
+};
+
+window.toggleToolVisibility = function(key) {
+    const hidden = localStorage.getItem('tool-vis-' + key) === '0';
+    if (hidden) localStorage.removeItem('tool-vis-' + key); // 回到預設顯示
+    else localStorage.setItem('tool-vis-' + key, '0');
+    window.applyToolbarVisibility();
+    window.refreshToolEyes();
+};
+
+window.resetToolVisibility = function() {
+    TOOLBAR_TOOLS.forEach(({ key }) => localStorage.removeItem('tool-vis-' + key));
+    window.applyToolbarVisibility();
+    window.refreshToolEyes();
+};
+
+document.addEventListener('DOMContentLoaded', window.applyToolbarVisibility);
 
 window.updateActiveHotkeys = function() {
     activeHotkeys.advance = localStorage.getItem('hk-advance') || 'ArrowLeft';

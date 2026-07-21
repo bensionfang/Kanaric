@@ -59,11 +59,11 @@
                     <button id="llm-wand-btn" class="ctrl-btn" onclick="runLlmFurigana(this)" data-tip="AI 讀音校正"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
                     <div id="llm-wand-bubble" class="lyrics-opt-bubble"></div>
                 </div>
-                <button class="ctrl-btn" onclick="reloadCurrentLyrics()" data-tip="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
+                <button id="reload-btn" class="ctrl-btn" onclick="reloadCurrentLyrics()" data-tip="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
                 <button id="desktop-toggle-btn" class="ctrl-btn" onclick="launchPyQt6()" data-tip="桌面靈動島">
                     <i class="fa-solid fa-mobile-screen"></i>
                 </button>
-                <button class="ctrl-btn fullscreen-btn" onclick="toggleFullscreen()" data-tip="放大模式">
+                <button id="fullscreen-btn" class="ctrl-btn fullscreen-btn" onclick="toggleFullscreen()" data-tip="放大模式">
                     <i class="fa-solid fa-expand icon-expand"></i>
                     <i class="fa-solid fa-compress icon-compress"></i>
                 </button>
@@ -355,7 +355,7 @@
             { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '所有設定都在這裡：日文假名、文字大小、歌詞對齊、優先搜尋來源、音訊來源、快捷鍵等。' },
             { page: '/',       el: '#lyrics-scroll', title: '歌詞區',     text: '歌詞會隨播放自動同步捲動，漢字上方標示假名注音。點任一句歌詞可以直接跳轉到該時間點。' },
             { page: '/',       el: '.player-center', title: '播放控制',   text: '控制播放/暫停、上下一首，拖曳進度條可跳轉。' },
-            { page: '/',       el: '.player-right',  title: '工具列',     text: '由左至右：備選歌詞、段落循環、編輯假名、AI 讀音校正、重新載入歌詞、桌面靈動島、放大模式。每顆都可以在設定選單裡自訂快捷鍵。接下來由左到右細講。' },
+            { page: '/',       el: '.player-right',  title: '工具列',     text: '由左至右：備選歌詞、段落循環、編輯假名、AI 讀音校正、重新載入歌詞、桌面靈動島、放大模式。每顆都可以在設定選單的「自訂快捷鍵」裡改快捷鍵,也能按眼睛圖示把不需要的工具從這排隱藏。接下來由左到右細講。' },
             { page: '/',       el: '#lyrics-opt-btn', title: '備選歌詞',  text: '歌詞抓錯或時間軸不對時按這裡。它會直接在背景搜尋各個來源（按鈕轉圈中），找到後變成綠色打勾並跳出提醒，點打勾即可挑選要套用的版本。想讓它每次換歌都自動搜，到設定選單打開「自動搜尋備選歌詞」。' },
             { page: '/',       el: '#loop-mode-btn', title: '段落循環', text: '想反覆練唱某一段就按這顆書籤。進入循環模式後，點歌詞選出起點那一句，再點一句當終點，就會立刻跳到起點開始無限循環——唱完終點那一句會自動跳回起點。同一句連點兩次就是單句循環。選好的範圍會用綠色底標示出來。再按一次書籤（或快捷鍵，預設 A）結束循環。' },
             { page: '/',       el: '#toggle-ruby-mode-btn', title: '編輯假名', text: '假名偶爾會標錯（人名、罕見讀音）。按下這顆筆進入編輯模式，點任一個漢字，它的假名就地變成可打字的欄位——打羅馬拼音會自動轉成假名。Enter 儲存、Esc 取消、雙擊該字則回復成自動判讀的讀音。修改只套用在這首歌。' },
@@ -674,7 +674,7 @@
             'hk-advance': 'ArrowLeft', 'hk-delay': 'ArrowRight',
             'hk-plain-prev': 'ArrowUp', 'hk-plain-next': 'ArrowDown',
             // 右下角工具列 (預設鍵與 app.js 的 TOOLBAR_HOTKEYS 一致)
-            'hk-ab-loop': 'A', 'hk-ruby-edit': 'E', 'hk-lyrics-opt': 'L', 'hk-reload': 'R',
+            'hk-ab-loop': 'A', 'hk-ruby-edit': 'E', 'hk-lyrics-opt': 'L', 'hk-llm-wand': 'W', 'hk-reload': 'R',
             'hk-island': 'D', 'hk-fullscreen': 'F'
         };
         let activeHotkeyInput = null;
@@ -687,6 +687,7 @@
                 saveSettingsToServer(id, defaultHkMap[id]);
             });
             if (window.updateActiveHotkeys) window.updateActiveHotkeys();
+            if (window.resetToolVisibility) window.resetToolVisibility();
             hkToast('快捷鍵已恢復預設');
         }
 
@@ -810,7 +811,8 @@
                 const el = document.getElementById(id);
                 if (el) el.value = localStorage.getItem(id) || defaultHkMap[id];
             });
-            
+            if (window.refreshToolEyes) window.refreshToolEyes();
+
             if (window.updateActiveHotkeys) window.updateActiveHotkeys();
 
             refreshLlmKeyStatus();

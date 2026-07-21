@@ -144,42 +144,57 @@
                     <div class="menu-hotkeys" id="hotkeys-section">
                         <div class="hk-row">
                             <span class="hk-label">歌詞快了</span>
+                            <span class="hk-eye-slot"></span>
                             <input type="text" id="hk-advance" class="hk-input" readonly onclick="recordHotkey(this, 'hk-advance')">
                         </div>
                         <div class="hk-row">
                             <span class="hk-label">歌詞慢了</span>
+                            <span class="hk-eye-slot"></span>
                             <input type="text" id="hk-delay" class="hk-input" readonly onclick="recordHotkey(this, 'hk-delay')">
                         </div>
                         <div class="hk-row">
                             <span class="hk-label">純文字上一句</span>
+                            <span class="hk-eye-slot"></span>
                             <input type="text" id="hk-plain-prev" class="hk-input" readonly onclick="recordHotkey(this, 'hk-plain-prev')">
                         </div>
                         <div class="hk-row">
                             <span class="hk-label">純文字下一句</span>
+                            <span class="hk-eye-slot"></span>
                             <input type="text" id="hk-plain-next" class="hk-input" readonly onclick="recordHotkey(this, 'hk-plain-next')">
                         </div>
                         <div class="hk-row">
+                            <span class="hk-label">搜尋備選歌詞</span>
+                            <button class="hk-eye" data-tool="lyrics-opt" onclick="toggleToolVisibility('lyrics-opt')" title="在工具列顯示/隱藏"><i class="fa-solid fa-eye"></i></button>
+                            <input type="text" id="hk-lyrics-opt" class="hk-input" readonly onclick="recordHotkey(this, 'hk-lyrics-opt')">
+                        </div>
+                        <div class="hk-row">
                             <span class="hk-label">段落循環</span>
+                            <button class="hk-eye" data-tool="ab-loop" onclick="toggleToolVisibility('ab-loop')" title="在工具列顯示/隱藏"><i class="fa-solid fa-eye"></i></button>
                             <input type="text" id="hk-ab-loop" class="hk-input" readonly onclick="recordHotkey(this, 'hk-ab-loop')">
                         </div>
                         <div class="hk-row">
                             <span class="hk-label">編輯假名模式</span>
+                            <button class="hk-eye" data-tool="ruby-edit" onclick="toggleToolVisibility('ruby-edit')" title="在工具列顯示/隱藏"><i class="fa-solid fa-eye"></i></button>
                             <input type="text" id="hk-ruby-edit" class="hk-input" readonly onclick="recordHotkey(this, 'hk-ruby-edit')">
                         </div>
                         <div class="hk-row">
-                            <span class="hk-label">搜尋備選歌詞</span>
-                            <input type="text" id="hk-lyrics-opt" class="hk-input" readonly onclick="recordHotkey(this, 'hk-lyrics-opt')">
+                            <span class="hk-label">AI 讀音校正</span>
+                            <button class="hk-eye" data-tool="llm-wand" onclick="toggleToolVisibility('llm-wand')" title="在工具列顯示/隱藏"><i class="fa-solid fa-eye"></i></button>
+                            <input type="text" id="hk-llm-wand" class="hk-input" readonly onclick="recordHotkey(this, 'hk-llm-wand')">
                         </div>
                         <div class="hk-row">
                             <span class="hk-label">重新載入歌詞</span>
+                            <button class="hk-eye" data-tool="reload" onclick="toggleToolVisibility('reload')" title="在工具列顯示/隱藏"><i class="fa-solid fa-eye"></i></button>
                             <input type="text" id="hk-reload" class="hk-input" readonly onclick="recordHotkey(this, 'hk-reload')">
                         </div>
                         <div class="hk-row">
                             <span class="hk-label">桌面靈動島</span>
+                            <button class="hk-eye" data-tool="island" onclick="toggleToolVisibility('island')" title="在工具列顯示/隱藏"><i class="fa-solid fa-eye"></i></button>
                             <input type="text" id="hk-island" class="hk-input" readonly onclick="recordHotkey(this, 'hk-island')">
                         </div>
                         <div class="hk-row">
                             <span class="hk-label">放大模式</span>
+                            <button class="hk-eye" data-tool="fullscreen" onclick="toggleToolVisibility('fullscreen')" title="在工具列顯示/隱藏"><i class="fa-solid fa-eye"></i></button>
                             <input type="text" id="hk-fullscreen" class="hk-input" readonly onclick="recordHotkey(this, 'hk-fullscreen')">
                         </div>
                         <div class="hk-footer">
