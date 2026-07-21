@@ -840,6 +840,7 @@ function rebroadcastLyrics(artist, title) {
   if (!currentMediaState || currentMediaState.title !== title || currentMediaState.artist !== artist) return;
   db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
     if (!err && row && row.lyrics) {
+      row.lyrics = toTraditional(row.lyrics);
       const injected = await injectFurigana(artist, title, row.lyrics);
       if (global.broadcast) {
         global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
@@ -904,6 +905,7 @@ app.post('/api/llm-furigana/run', (req, res) => {
 
   db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
     if (err || !row || !row.lyrics) return res.status(404).json({ error: '這首歌沒有快取歌詞' });
+    row.lyrics = toTraditional(row.lyrics);
     const meta = {};
     const injected = await injectFurigana(artist, title, row.lyrics, true, meta);
     if (global.broadcast && currentMediaState.title === title && currentMediaState.artist === artist) {
@@ -1096,6 +1098,7 @@ app.get('/api/lyrics/fetch', async (req, res) => {
     
     console.log("DB returned:", row ? "found" : "not found");
     if (row && row.lyrics) {
+      row.lyrics = toTraditional(row.lyrics);
       const injected = await injectFurigana(artist, title, row.lyrics);
       return res.json({ lyrics: injected, source: 'cache' });
     }
@@ -1656,6 +1659,7 @@ app.get('/api/lyrics/raw', (req, res) => {
   db.get('SELECT lyrics FROM cache WHERE title = ? AND artist = ?', [title, artist], async (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
     if (row && row.lyrics) {
+      row.lyrics = toTraditional(row.lyrics);
       let showFurigana = true;
       if (fs.existsSync(SETTINGS_FILE)) {
         try {
