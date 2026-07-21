@@ -123,15 +123,44 @@
       top: 0; left: 0; right: 0; bottom: 0;
       background: #121212;
       display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
       justify-content: center;
       align-items: center;
       z-index: 999;
       font-size: 2rem;
       font-weight: 800;
+      text-align: center;
+      padding: 2rem;
+      box-sizing: border-box;
     }
+    #loading .sub {
+      font-size: 1.1rem;
+      font-weight: 400;
+      opacity: 0.7;
+      max-width: 520px;
+      line-height: 1.7;
+    }
+
+    .exit-btn {
+      position: fixed;
+      top: 20px; right: 28px;
+      z-index: 1000;
+      width: 44px; height: 44px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2rem; line-height: 1;
+      color: #b3b3b3; text-decoration: none;
+      border-radius: 50%;
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+    .exit-btn:hover { background: #282828; color: #fff; }
   </style>
 </head>
 <body>
+
+  <!-- 這頁是獨立的全螢幕故事頁 (沒有 include header/footer,所以沒有側欄可以按),
+       離開的路只有最後一張投影片的按鈕 —— 落在第一張就想走的人會卡住,固定一顆才對。 -->
+  <a href="/" class="exit-btn" title="回到歌詞頁">&times;</a>
 
   <div id="loading">載入你的年度回顧中...</div>
 
@@ -253,7 +282,18 @@
         const summary = await summaryRes.json();
         const topSongs = await topSongsRes.json();
         const topArtists = await topArtistsRes.json();
-        
+
+        // 全新安裝時整份都是 0,照樣播完五張投影片只會看到一串零跟停在「載入中」的歌手名。
+        // 沒有資料就不要假裝有,直接說清楚要怎麼讓它長出來。
+        if (!summary.totalPlays) {
+          document.getElementById('loading').innerHTML =
+            '還沒有可以回顧的資料' +
+            '<div class="sub">播放任何一首歌超過 30 秒就會被記錄下來，' +
+            '累積幾天之後再回來看。<br>（如果你把設定裡的「記錄聆聽紀錄」關掉了，這裡就不會有東西。）</div>' +
+            '<a href="/" style="text-decoration: none;"><button class="btn primary">回到歌詞頁</button></a>';
+          return;
+        }
+
         // Update DOM
         document.getElementById('val-minutes').innerText = Math.round(summary.totalTime / 60).toLocaleString();
         

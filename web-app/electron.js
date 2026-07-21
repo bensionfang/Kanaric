@@ -66,6 +66,7 @@ let mainWindow = null;
 let splashWindow = null;
 let tray = null;
 let quitting = false;
+let updatePending = null;   // 已下載完、等下次結束才安裝的新版號
 
 const TRAY_ICON = nativeImage.createFromDataURL(
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAM0lEQVR4nGNgoCaoifn/nxhMfQMIaUAHGAYNHQNwhsUwNQAbINoAXIAiF1AlRdIuL1ACAHGrJsks7N9DAAAAAElFTkSuQmCC'
@@ -173,6 +174,22 @@ function wireIsland() {
   global.resetIslandPosition = island.resetIslandPosition;
 }
 
+// 系統匣選單會長出「安裝更新」那一項,所以要能重建,不能只在啟動時組一次
+function refreshTrayMenu() {
+  if (!tray) return;
+  const items = [
+    { label: '開啟儀表板', click: showWindow },
+    { label: '顯示/隱藏靈動島', click: () => (global.isIslandOpen() ? global.closeIsland() : global.openIsland()) },
+  ];
+  if (updatePending) {
+    items.push({ type: 'separator' });
+    items.push({ label: `安裝更新 v${updatePending} 並重新啟動`, click: () => global.quitAndInstallUpdate && global.quitAndInstallUpdate() });
+  }
+  items.push({ type: 'separator' });
+  items.push({ label: '結束', click: () => app.quit() });
+  tray.setContextMenu(Menu.buildFromTemplate(items));
+}
+
 function showWindow() {
   if (mainWindow) {
     closeSplash(); // 啟動途中就點系統匣的話,別讓啟動畫面壓在視窗上面
@@ -193,12 +210,7 @@ app.whenReady().then(async () => {
 
   tray = new Tray(TRAY_ICON);
   tray.setToolTip('Kanaric');
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '開啟儀表板', click: showWindow },
-    { label: '顯示/隱藏靈動島', click: () => (global.isIslandOpen() ? global.closeIsland() : global.openIsland()) },
-    { type: 'separator' },
-    { label: '結束', click: () => app.quit() }
-  ]));
+  refreshTrayMenu();
   tray.on('double-click', showWindow);
 
   createWindow();
@@ -212,7 +224,49 @@ app.whenReady().then(async () => {
   if (settings.dynamic_island) {
     global.openIsland();
   }
+
+  setupAutoUpdate();
 });
+
+// 還原備份會關掉 server 的 db 連線,之後這支進程只能重開。掛成 global 讓 /api/restore 呼叫,
+// 純 node 模式沒有主進程 → 那支路由自己會改成請使用者手動重啟。
+global.relaunchApp = () => {
+  quitting = true;
+  app.relaunch();
+  app.exit(0);
+};
+
+// 自動更新。網頁那支 /api/update-check 保留不動 —— 它是 `npm start` 純 node 模式唯一的
+// 更新提示管道,而且只會叫使用者自己去下載。打包版由這裡接手真的把新版裝起來。
+// 未簽章不影響下載與安裝,只是安裝那一刻 SmartScreen 會再出現一次,屬預期。
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;   // dev 模式沒有 latest.yml 可比,跑了只會噴錯
+  let autoUpdater;
+  try { ({ autoUpdater } = require('electron-updater')); } catch (e) { return; }
+
+  // 網頁端沒有 WebSocket client (只輪詢 /api/current-media),所以狀態掛在 global 上
+  // 讓 /api/update-check 一起回報,不為了一則通知在網頁多開一條連線
+  global.autoUpdateEnabled = true;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('error', (e) => console.error('自動更新失敗:', e && e.message));
+  autoUpdater.on('update-downloaded', (info) => {
+    // 不強制立刻重開打斷正在聽歌的人:預設下次結束 app 時自動裝,想現在裝就從系統匣或網頁點
+    updatePending = (info && info.version) || null;
+    global.updateReadyVersion = updatePending;
+    refreshTrayMenu();
+  });
+
+  autoUpdater.checkForUpdates().catch(() => {});
+  // 長時間掛著的使用者也要等得到新版
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000);
+
+  global.quitAndInstallUpdate = () => {
+    quitting = true;
+    autoUpdater.quitAndInstall();
+  };
+}
 
 app.on('second-instance', showWindow);
 

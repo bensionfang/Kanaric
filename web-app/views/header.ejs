@@ -282,6 +282,20 @@
                         <div class="hk-row">
                             <span class="hk-label hk-note">假名修正、時間軸校正等你自己改過的資料，清除功能不會動到。</span>
                         </div>
+                        <div class="menu-divider"></div>
+                        <div class="hk-row">
+                            <span class="hk-label">備份全部資料</span>
+                            <button class="hk-reset" onclick="downloadBackup(this)">下載</button>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">從備份還原</span>
+                            <!-- 檔案輸入框藏起來,外觀跟旁邊的按鈕一致 -->
+                            <input type="file" id="restore-file" accept=".db" style="display: none;" onchange="restoreBackup(this)">
+                            <button class="hk-reset" onclick="document.getElementById('restore-file').click()">選擇檔案</button>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label hk-note">備份是單一 .db 檔，含歌詞快取、聆聽紀錄與你手改過的所有資料，以及介面設定。基於安全，AI 讀音校正的 API Key 不會放進備份。還原會覆蓋現有資料並重新啟動。</span>
+                        </div>
                         <div class="hk-footer">
                             <span>資料庫檔案 <b id="usage-file">—</b></span>
                         </div>
@@ -310,6 +324,10 @@
                 <a href="/leaderboard" class="nav-item nav-stats-item<%= hideStats %> <%= activePage === 'leaderboard' ? 'active' : '' %>">
                     <i class="fa-solid fa-trophy"></i>
                     <span>排行榜</span>
+                </a>
+                <a href="/wrapped" class="nav-item nav-stats-item<%= hideStats %> <%= activePage === 'wrapped' ? 'active' : '' %>">
+                    <i class="fa-solid fa-wand-sparkles"></i>
+                    <span>年度回顧</span>
                 </a>
                 <a href="/editor" class="nav-item <%= activePage === 'editor' ? 'active' : '' %>">
                     <i class="fa-solid fa-pen-to-square"></i>

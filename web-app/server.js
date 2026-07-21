@@ -593,11 +593,28 @@ app.get('/api/update-check', async (req, res) => {
       current: APP_VERSION,
       latest: updateCheckCache.latest,
       url: updateCheckCache.url,
-      hasUpdate: !!updateCheckCache.latest && updateCheckCache.latest !== APP_VERSION
+      hasUpdate: !!updateCheckCache.latest && updateCheckCache.latest !== APP_VERSION,
+      // 打包版由 electron-updater 自己下載安裝,前端就不該再叫使用者去下載;
+      // ready 是「已經下載完、等著裝」的版號 (不能進上面那份 1 小時快取,它隨時會變)
+      autoUpdate: global.autoUpdateEnabled === true,
+      ready: global.updateReadyVersion || null
     });
   } catch (e) {
-    res.json({ current: APP_VERSION, latest: null, url: null, hasUpdate: false });
+    res.json({
+      current: APP_VERSION, latest: null, url: null, hasUpdate: false,
+      autoUpdate: global.autoUpdateEnabled === true,
+      ready: global.updateReadyVersion || null
+    });
   }
+});
+
+// 立刻套用已下載好的更新 (結束 app → 裝新版 → 自己重開)。純 node 模式沒有主進程,回 available:false
+app.post('/api/update-install', (req, res) => {
+  if (typeof global.quitAndInstallUpdate !== 'function') {
+    return res.json({ success: false, available: false });
+  }
+  res.json({ success: true });
+  setTimeout(() => global.quitAndInstallUpdate(), 300);
 });
 
 app.post('/api/llm-key', async (req, res) => {
@@ -1695,6 +1712,107 @@ app.post('/api/db-clear', express.json(), (req, res) => {
   });
 });
 
+// 5c. 備份與還原。
+// 資料只存在這台電腦上,沒有雲端同步 —— 換電腦或重灌時,不可重建的那一類 (手改的假名、
+// 時間軸校正、歌手別名、搜尋覆寫) 全部會消失。備份就是為了那些東西存在的。
+//
+// 做法刻意不引入 zip 函式庫:`VACUUM INTO` 產生一份壓實過、且與 WAL 一致的單檔快照,
+// 再把 settings.json 的內容塞進那個檔案自己的一張 meta 表 —— 備份因此仍然是「一個 .db 檔」。
+// secrets.json (LLM API key) 不進備份:備份檔會被隨手複製、傳送,key 不該跟著跑。
+const BACKUP_META = '_backup_meta';
+// 還原後這支 server 的 db 連線已經關掉,任何後續查詢都會炸;擋在最前面比讓它半死不活好
+let restoring = false;
+
+app.get('/api/backup', (req, res) => {
+  if (restoring) return res.status(503).json({ error: '正在還原,請重新啟動 Kanaric' });
+  // 暫存檔放在 DB 旁邊而不是系統 temp:同一個磁碟區才能用 rename,也不會被防毒中途攔走
+  const tmp = `${DB_PATH}.backup-${Date.now()}`;
+  const cleanup = () => { try { fs.unlinkSync(tmp); } catch (e) {} };
+
+  db.run('VACUUM INTO ?', [tmp], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    const meta = new sqlite3.Database(tmp, (e) => {
+      if (e) { cleanup(); return res.status(500).json({ error: e.message }); }
+      meta.serialize(() => {
+        meta.run(`CREATE TABLE IF NOT EXISTS ${BACKUP_META} (key TEXT PRIMARY KEY, value TEXT)`);
+        const put = meta.prepare(`INSERT OR REPLACE INTO ${BACKUP_META} (key, value) VALUES (?, ?)`);
+        put.run('app', 'Kanaric');
+        put.run('version', APP_VERSION);
+        put.run('created_at', new Date().toISOString());
+        put.run('settings', JSON.stringify(readSettings()));
+        put.finalize(() => meta.close(() => {
+          // 用本地日期而不是 toISOString():台灣凌晨備份會被標成前一天,看起來像拿錯檔案
+          const d = new Date();
+          const pad = (n) => String(n).padStart(2, '0');
+          const name = `Kanaric-backup-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.db`;
+          res.download(tmp, name, () => cleanup());
+        }));
+      });
+    });
+  });
+});
+
+// 上傳走 raw body 而不是 multipart:前端直接把 File 當 body 送,就不必為了一支路由裝 multer
+app.post('/api/restore', express.raw({ type: 'application/octet-stream', limit: '1gb' }), (req, res) => {
+  if (restoring) return res.status(503).json({ error: '正在還原,請重新啟動 Kanaric' });
+  if (!req.body || !req.body.length) return res.status(400).json({ error: '沒有收到檔案' });
+
+  const incoming = `${DB_PATH}.incoming-${Date.now()}`;
+  try { fs.writeFileSync(incoming, req.body); }
+  catch (e) { return res.status(500).json({ error: e.message }); }
+  const drop = () => { try { fs.unlinkSync(incoming); } catch (e) {} };
+
+  // 先驗證再動現有資料:隨便一個 .db 檔 (或根本不是 db 的檔案) 都不該蓋掉使用者的東西
+  const probe = new sqlite3.Database(incoming, sqlite3.OPEN_READONLY, (e) => {
+    if (e) { drop(); return res.status(400).json({ error: '這不是有效的資料庫檔案' }); }
+    probe.get(`SELECT value FROM ${BACKUP_META} WHERE key = 'app'`, [], (e2, row) => {
+      probe.close();
+      if (e2 || !row || row.value !== 'Kanaric') {
+        drop();
+        return res.status(400).json({ error: '這不是 Kanaric 的備份檔' });
+      }
+      probe2();
+    });
+  });
+
+  function probe2() {
+    const p = new sqlite3.Database(incoming, sqlite3.OPEN_READONLY);
+    p.get(`SELECT value FROM ${BACKUP_META} WHERE key = 'settings'`, [], (e, row) => {
+      p.close(() => swap(row && row.value));
+    });
+  }
+
+  function swap(settingsJson) {
+    restoring = true;
+    // 現有資料先留一份再蓋 —— 還原是不可逆動作,使用者選錯檔案時要有東西可以救。
+    // .bak-* 已在 .gitignore 裡
+    const rescue = `${DB_PATH}.bak-restore-${Date.now()}`;
+    db.close((closeErr) => {
+      if (closeErr) { restoring = false; drop(); return res.status(500).json({ error: closeErr.message }); }
+      try {
+        fs.copyFileSync(DB_PATH, rescue);
+        fs.copyFileSync(incoming, DB_PATH);
+        // WAL/SHM 是舊資料庫的日誌,留著會讓 SQLite 拿舊內容覆蓋剛還原的檔案
+        for (const suffix of ['-wal', '-shm']) {
+          try { fs.unlinkSync(DB_PATH + suffix); } catch (e) {}
+        }
+        if (settingsJson) {
+          try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(JSON.parse(settingsJson), null, 4), 'utf8'); } catch (e) {}
+        }
+      } catch (e) {
+        drop();
+        return res.status(500).json({ error: e.message });
+      }
+      drop();
+      // 連線已關,這支 server 不能再服務了。桌面版自己重開,純 node 只能請使用者動手
+      const canRelaunch = typeof global.relaunchApp === 'function';
+      res.json({ success: true, rescue: path.basename(rescue), relaunching: canRelaunch });
+      if (canRelaunch) setTimeout(() => global.relaunchApp(), 800);
+    });
+  }
+});
+
 // 6. 靈動島開關
 // 島是 Electron 主進程的一個視窗 (web-app/island.js),不是獨立進程,所以這裡只轉呼叫
 // 主進程掛上來的 global。純 node (npm start) 沒有主進程,回 available:false 讓 UI 自己說明。
@@ -1795,26 +1913,6 @@ app.post('/api/lyrics/diff', (req, res) => {
   pyProcess.stdin.end();
 });
 
-// 8. Export Playlist API
-app.get('/api/export-playlist', (req, res) => {
-  const query = `
-    SELECT artist, base_title AS title
-    FROM listening_history
-    GROUP BY artist, base_title
-    ORDER BY COUNT(*) DESC
-    LIMIT 50
-  `;
-  db.all(query, [], (err, rows) => {
-    if (err) return res.status(500).send('Database Error');
-    let m3uContent = "#EXTM3U\n";
-    rows.forEach(row => {
-      m3uContent += `#EXTINF:-1,${row.artist} - ${row.title}\n${row.artist} - ${row.title}.mp3\n`;
-    });
-    res.setHeader('Content-Type', 'audio/x-mpegurl');
-    res.setHeader('Content-Disposition', 'attachment; filename="top50.m3u"');
-    res.send(m3uContent);
-  });
-});
 
 const server = http.createServer(app);
 // WebSocket 的 upgrade 不會經過 express middleware,同源守門要在這裡再擋一次 ——

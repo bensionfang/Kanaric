@@ -231,6 +231,53 @@
             }
         }
 
+        // 備份是 server 現做的 (VACUUM INTO),幾百 ms 到幾秒都有可能,按鈕要有在動的樣子。
+        // 用 blob 而不是直接把 href 指過去:失敗時才有辦法把錯誤訊息顯示出來
+        async function downloadBackup(btn) {
+            const label = btn.textContent;
+            btn.disabled = true; btn.textContent = '準備中…';
+            try {
+                const r = await fetch('/api/backup');
+                if (!r.ok) throw new Error((await r.json()).error || r.status);
+                const blob = await r.blob();
+                const name = (r.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/);
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = name ? name[1] : 'Kanaric-backup.db';
+                a.click();
+                URL.revokeObjectURL(a.href);
+                showToast('備份已下載', 'fa-solid fa-circle-check', 2500);
+            } catch (e) {
+                showToast('備份失敗：' + e.message, 'fa-solid fa-triangle-exclamation', 4000);
+            } finally {
+                btn.disabled = false; btn.textContent = label;
+            }
+        }
+
+        async function restoreBackup(input) {
+            const file = input.files && input.files[0];
+            input.value = '';   // 清掉才能連續選同一個檔案
+            if (!file) return;
+            if (!confirm(`確定用「${file.name}」還原嗎？\n\n目前的歌詞快取、聆聽紀錄與所有手動修正都會被備份檔的內容取代。\n（現有資料會先另存一份救援檔，但請確認你選對檔案。）`)) return;
+            try {
+                const r = await fetch('/api/restore', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/octet-stream' },
+                    body: file
+                });
+                const d = await r.json();
+                if (!r.ok || !d.success) throw new Error(d.error || r.status);
+                if (d.relaunching) {
+                    showToast('還原完成，Kanaric 正在重新啟動…', 'fa-solid fa-circle-check', 8000);
+                } else {
+                    // 純 node 模式沒有主進程可以自己重開,而 db 連線已經關掉了
+                    showToast('還原完成，請手動重新啟動 Kanaric', 'fa-solid fa-circle-check', 10000);
+                }
+            } catch (e) {
+                showToast('還原失敗：' + e.message, 'fa-solid fa-triangle-exclamation', 5000);
+            }
+        }
+
         // 供應商 preset:選了預填 Base URL / Model (仍可手改),key 照舊自己貼。
         // 與 server.js LLM_PROVIDERS 同源資料;Ollama 沒 key、自動偵測不會跑,只能靠這裡。
         const LLM_PRESETS = {
@@ -320,14 +367,32 @@
             if (sessionStorage.getItem('updateChecked')) return;
             sessionStorage.setItem('updateChecked', '1');
             fetch('/api/update-check').then(r => r.json()).then(d => {
-                if (!d.hasUpdate || localStorage.getItem('updateSeenVersion') === d.latest) return;
-                localStorage.setItem('updateSeenVersion', d.latest);
-                showToast(`有新版 v${d.latest} 可更新,點擊前往下載`, 'fa-solid fa-circle-up', 8000);
-                const toast = document.getElementById('toast');
-                if (toast) {
+                const clickableToast = (text, icon, onClick) => {
+                    showToast(text, icon, 10000);
+                    const toast = document.getElementById('toast');
+                    if (!toast) return;
                     toast.classList.add('toast-clickable');
-                    toast.onclick = () => window.open(d.url, '_blank', 'noopener');
+                    toast.onclick = onClick;
+                };
+
+                // 桌面版:新版已經自己下載好了,只差重開。這則比「去下載」有用得多,所以不看
+                // updateSeenVersion 的已讀記錄 —— 沒裝之前每次開都該提醒
+                if (d.ready) {
+                    clickableToast(`新版 v${d.ready} 已下載，點擊立即安裝並重新啟動`, 'fa-solid fa-circle-up', async () => {
+                        try {
+                            const r = await fetch('/api/update-install', { method: 'POST' });
+                            const j = await r.json();
+                            if (j.success) showToast('正在安裝更新，Kanaric 會自動重新啟動…', 'fa-solid fa-circle-check', 10000);
+                        } catch (e) {}
+                    });
+                    return;
                 }
+                if (!d.hasUpdate || localStorage.getItem('updateSeenVersion') === d.latest) return;
+                // 打包版會自己在背景下載,叫使用者去手動下載反而是錯的指示 —— 安靜等 ready
+                if (d.autoUpdate) return;
+                localStorage.setItem('updateSeenVersion', d.latest);
+                clickableToast(`有新版 v${d.latest} 可更新,點擊前往下載`, 'fa-solid fa-circle-up',
+                               () => window.open(d.url, '_blank', 'noopener'));
             }).catch(() => {});
         }
 

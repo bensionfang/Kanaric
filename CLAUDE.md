@@ -27,9 +27,10 @@ npm run dist     # = build:py (PyInstaller → dist-py/) + electron-builder (→
 
 ### 發版 (GitHub Release)
 
-前端有一個更新提醒 (`GET /api/update-check` in server.js,`checkForUpdate()` in footer.ejs):
-比對 `web-app/package.json` 的 `version` 跟 GitHub `releases/latest` 的 tag,不一致就跳吐司提醒使用者
-去下載。要讓這個機制動,每次發版都要照下面流程放 release,tag 要打對:
+更新有**兩條路,不要合併**:打包版由 `electron-updater` 自己下載安裝 (`setupAutoUpdate()` in electron.js,
+只在 `app.isPackaged` 時啟用);`npm start` 純 node 模式沒有主進程,只剩 `GET /api/update-check` 跳吐司
+叫使用者自己去下載。`/api/update-check` 因此多回 `autoUpdate`/`ready` 兩個旗標,`checkForUpdate()`
+(footer.ejs) 靠它決定要顯示哪一種提示 —— **打包版不該再叫人去手動下載**,那是錯的指示。
 
 ```bash
 # 1. 改版號
@@ -38,17 +39,22 @@ npm run dist     # = build:py (PyInstaller → dist-py/) + electron-builder (→
 # 2. build 安裝檔
 cd web-app && npm run dist   # 產物在 web-app/release/
 
-# 3. 打 tag、推、建 release、附安裝檔
+# 3. 打 tag、推、建 release、附安裝檔 + latest.yml
 git tag v1.1.0                # 一定要帶 v 前綴,server.js 用 /^v/ 剝掉再跟 package.json 比對
 git push origin v1.1.0
-gh release create v1.1.0 "web-app/release/Kanaric Setup 1.1.0.exe" \
+gh release create v1.1.0 \
+  "web-app/release/Kanaric Setup 1.1.0.exe" \
+  "web-app/release/latest.yml" \
   --title "v1.1.0" --notes "..."
 ```
 
-tag 沒帶 `v` 或漏推,更新提醒就抓不到新版。安裝檔未簽章,`gh release create` 會直接公開發布,屬於
-「發布公開內容」的動作,不要自動執行,要使用者自己按。
+**`latest.yml` 一定要一起上傳** —— electron-updater 是靠它比對版本的,漏了自動更新就完全不會發生
+(而且不會報錯,只是安靜地什麼都沒做)。`build.publish` 設成 github provider 才會產出這個檔。
+tag 沒帶 `v` 或漏推,純 node 模式的更新提醒也抓不到新版。安裝檔未簽章,`gh release create` 會直接
+公開發布,屬於「發布公開內容」的動作,不要自動執行,要使用者自己按。
 - 靈動島 = Electron 的一個視窗 (`web-app/island.js`),由 `npm run app` 一起帶起,沒有獨立進程也沒有 build 步驟。
-- 沒有 test runner 或 linter。零星的獨立測試檔直接用直譯器跑:`node test_origin_guard.js` (同源守門)、`node test_s2t.js` (簡轉繁)、`node test_itunes_resolving.js` (iTunes 原名還原的時序)、`node test_history_toggle.js` (聆聽紀錄開關 + 清除白名單)、`python test_pick_session.py`、`python test_furigana_hint.py` (Python 的要用 `venv/Scripts/python.exe`,系統 python 沒裝 fugashi)。
+- 沒有 test runner 或 linter。零星的獨立測試檔直接用直譯器跑:`node test_origin_guard.js` (同源守門)、`node test_s2t.js` (簡轉繁)、`node test_itunes_resolving.js` (iTunes 原名還原的時序)、`node test_history_toggle.js` (聆聽紀錄開關 + 清除白名單)、`node test_backup_restore.js` (備份/還原 + 還原前的驗證守門)、`python test_pick_session.py`、`python test_furigana_hint.py` (Python 的要用 `venv/Scripts/python.exe`,系統 python 沒裝 fugashi)。
+- `ROADMAP.md` (repo 根) 記著 v1.0.0 之後的規劃與**明確不做的事**。動到「未來要做什麼」的討論先看它,免得重新提案已經否決過的方向 (雲端同步、換 tokenizer、離線辭典)。
 
 ## Architecture
 
@@ -88,6 +94,7 @@ One Node.js backend, multiple thin clients, with Python scripts as helpers spawn
   - `listening_history` 另有 `base_title` (virtual generated column,剝掉第一個括號起的尾綴):統計/排行榜一律 GROUP BY 它,讓 `(Live)`/`(feat. …)` 算同一首。**歌詞類的表刻意不加這欄** —— Live 版歌詞本來就不同,必須分開快取。定義同時寫在 server.js 建表處與 `db.py`,改一邊要改兩邊。
   - **`track_history` 設定 (預設 true) 的閘門只在 `global.logListen`,不要在別處再判斷一次。** `listening_history` 只有這一個寫入點 (換新歌、暫停後續播兩條計時器路徑共用);判斷刻意放在計時器「觸發時」而非排程時,使用者播到一半關掉就真的不會被記錄。關閉時側欄的統計數據/排行榜也一起隱藏 (`.nav-stats-item`,SSR 靠 `res.locals.settings` 決定,不然會閃一下才隱藏),但**路由保留** —— 關掉是「不記錄 / 不礙眼」,不是鎖起來。舊的 `/api/play-event` 是雲端同步時代的遺留、沒有任何呼叫者,已刪除,不要為了「外部 agent 也能回報」加回來。
   - **清除功能 (`/api/db-clear`) 的白名單寫死在 `CLEAR_TARGETS`,只碰得到可重建的資料。** `cache`/`romaji_hints`/`llm_hints` 清掉只是下次重抓;`word_corrections`、`sync_offsets`、`artist_aliases`、`search_overrides` 是使用者親手打的,**任何清除路徑都不准碰**,`/api/db-usage` 只顯示筆數。清 `lyrics` 要一併清記憶體的 `furiganaCache` 與 `itunesCache`,否則已刪的歌詞還會被吐出來;最後一定要 `VACUUM`,不然檔案不會真的變小。`romaji_hints`/`llm_hints` 是 Python 端 (`db.py`) 建的,**全新安裝上可能不存在** —— 這幾條 `db.run` 的 callback 不能省,沒 callback 的 "no such table" 會被 node-sqlite3 丟成未捕捉例外、整個 server 掛掉。回歸測試 `node test_history_toggle.js`。
+  - **備份/還原 (`/api/backup`、`/api/restore`) 是那批「不可重建」資料唯一的救生艇。** 備份 = **單一 `.db` 檔**:`VACUUM INTO` 產生壓實且與 WAL 一致的快照 (所以不必打包 `-wal`/`-shm`,也不必引入 zip 函式庫),再把 `settings.json` 的內容寫進備份檔自己的 `_backup_meta` 表。**`secrets.json` (LLM API key) 刻意不進備份** —— 備份檔會被隨手複製傳送。還原走 `express.raw`,前端直接把 File 當 body 送,不為了一支路由裝 multer;**動現有資料前一定要先驗 `_backup_meta.app === 'Kanaric'`**,否則隨便一個 sqlite 檔都能蓋掉使用者心血,而且要先複製一份 `.bak-restore-*` 救援檔。還原成功後 `db.close()` 已經執行,這支 server 不能再服務,靠 `global.relaunchApp()` (electron.js 掛的) 重開;純 node 模式沒有它,改成請使用者手動重啟。回歸測試 `node test_backup_restore.js`。
   - 體積實測 (2026-07,393 首歌 / 349 筆紀錄 = 1.7 MB):`cache` 每首約 1.2 KB、`romaji_hints` 每首約 0.9 KB,而 `listening_history` 每筆只有 31 bytes (佔全庫 0.6%)。**要談資料庫大小,施力點是歌詞快取,不是聆聽紀錄。**
 
 ### Desktop packaging (Electron)

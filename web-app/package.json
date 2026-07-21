@@ -19,6 +19,7 @@
     "body-parser": "^2.2.2",
     "dotenv": "^17.4.2",
     "ejs": "^6.0.1",
+    "electron-updater": "^6.8.9",
     "express": "^5.2.1",
     "opencc-js": "^1.4.1",
     "sqlite3": "^5.1.7",
@@ -53,6 +54,13 @@
       {
         "from": "../third_party",
         "to": "third_party"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "bensionfang",
+        "repo": "Kanaric"
       }
     ],
     "win": {
