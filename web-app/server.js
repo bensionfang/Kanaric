@@ -7,7 +7,6 @@
  * 4. 提供 RESTful API 供前端介面使用。
  */
 const express = require('express');
-const cors = require('cors');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const bodyParser = require('body-parser');
@@ -32,7 +31,31 @@ let currentMediaState = {
 };
 
 // Middleware
-app.use(cors());
+// 這台伺服器綁 127.0.0.1、沒有任何 auth,所有正當客戶端都是同源的 (網頁後台) 或
+// 根本不是瀏覽器 (C# 靈動島用 HttpClient)。所以不開 CORS,而且主動擋掉任何從別的
+// 網站發過來的請求 —— 綁 localhost 擋不住這種攻擊:使用者只要在開著 Kanaric 時瀏覽
+// 任一網頁,那個網頁就能打這裡的 API (把 llm_base_url 改成攻擊者的位址,再觸發
+// /api/llm-models,BYOK 的 API key 就送出去了)。
+//
+// 兩層都要,少一層就有破口:
+//   Origin        —— fetch/XHR 一定帶;但 <script src>/<img> 這類不帶。
+//   Sec-Fetch-Site —— 瀏覽器對「所有」請求都帶,包含 <script src>,補上上面那個破口。
+// 非瀏覽器客戶端兩個 header 都沒有,照常放行 (能在本機跑程式的攻擊者早就贏了)。
+const ALLOWED_ORIGINS = new Set([
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
+]);
+app.use((req, res, next) => {
+  const origin = req.get('Origin');
+  if (origin && !ALLOWED_ORIGINS.has(origin)) {
+    return res.status(403).json({ error: 'Cross-origin requests are not allowed' });
+  }
+  const site = req.get('Sec-Fetch-Site');
+  if (site && site !== 'same-origin' && site !== 'none') {
+    return res.status(403).json({ error: 'Cross-site requests are not allowed' });
+  }
+  next();
+});
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -1714,7 +1737,13 @@ app.get('/api/export-playlist', (req, res) => {
 });
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+// WebSocket 的 upgrade 不會經過 express middleware,同源守門要在這裡再擋一次 ——
+// 否則惡意網頁還是能連上來收播放狀態廣播 (你正在聽什麼)。靈動島用 C# ClientWebSocket,
+// 不帶 Origin,照常放行。
+const wss = new WebSocketServer({
+  server,
+  verifyClient: ({ origin }) => !origin || ALLOWED_ORIGINS.has(origin),
+});
 
 wss.on('connection', (ws) => {
   console.log('WebSocket client connected (Dynamic Island)');
