@@ -99,6 +99,7 @@ async def poll_media():
                 title = info.title if info.title else ""
                 artist = info.artist if info.artist else ""
                 album = info.album_title if info.album_title else ""
+                source = current_session.source_app_user_model_id or ""
                 real_pos = timeline.position.total_seconds() if timeline else 0.0
                 duration_sec = timeline.end_time.total_seconds() if timeline else 0.0
                 is_playing = (playback_info and playback_info.playback_status == 4)
@@ -139,6 +140,7 @@ async def poll_media():
                     "title": title,
                     "artist": artist,
                     "album": album,
+                    "source": source,
                     "position": interpolated_pos,
                     "duration": duration_sec,
                     "is_playing": is_playing,
@@ -157,6 +159,7 @@ async def poll_media():
                     "title": "",
                     "artist": "",
                     "album": "",
+                    "source": "",
                     "position": 0.0,
                     "duration": 0.0,
                     "is_playing": False,

@@ -287,6 +287,26 @@ function manualSearchLyrics() {
     searchLyricsOptions(true, true);
 }
 
+// 把目前自訂欄的歌名/歌手記成這首歌 (原始名) 的搜尋覆蓋,下次自動套用。兩欄都空 = 清除。
+async function rememberSearchOverride() {
+    const { title, artist } = currentSong();
+    if (!title) return noSongToast();
+    const st = (document.getElementById('manual-title')?.value || '').trim();
+    const sa = (document.getElementById('manual-artist')?.value || '').trim();
+    try {
+        const resp = await fetch('/api/search-override', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, artist, searchTitle: st, searchArtist: sa })
+        });
+        const data = await resp.json();
+        showToast(data.cleared ? '已清除此歌覆蓋' : '已記住,重新抓取中', 'fa-solid fa-thumbtack', 2000);
+        reloadCurrentLyrics();   // 快取已由 server 清掉,這次會用新關鍵字重抓
+    } catch (e) {
+        showToast('儲存失敗', 'fa-solid fa-xmark', 2000);
+    }
+}
+
 async function performGetOptions(forceManual = false, force = false) {
     const { title: songTitle, artist: songArtist } = currentSong();
     if (!songTitle) return noSongToast();

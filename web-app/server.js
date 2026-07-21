@@ -132,30 +132,46 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
     db.run(`CREATE TABLE IF NOT EXISTS word_corrections (artist TEXT, title TEXT, word TEXT, hira TEXT, PRIMARY KEY (artist, title, word))`);
     db.run(`CREATE TABLE IF NOT EXISTS sync_offsets (artist TEXT, title TEXT, offset REAL, PRIMARY KEY (artist, title))`);
     db.run(`CREATE TABLE IF NOT EXISTS artist_aliases (alias TEXT PRIMARY KEY, true_name TEXT)`);
+    db.run(`CREATE TABLE IF NOT EXISTS search_overrides (raw_artist TEXT, raw_title TEXT, search_artist TEXT, search_title TEXT, PRIMARY KEY (raw_artist, raw_title))`);
   }
 });
+
+// 平假名/片假名 (日文獨有,中文沒有) —— 用來判斷字串是不是日文
+const hasKana = (s) => /[぀-ヿ]/.test(s || '');
 
 // --- iTunes JP Resolution Cache ---
 const itunesCache = new Map();
 
-async function getResolvedMetadata(title, artist) {
+async function getResolvedMetadata(title, artist, duration) {
   const key = `${title}-${artist}`;
   if (itunesCache.has(key)) return itunesCache.get(key);
 
   // 先寫入原始資料避免重複發送請求
   itunesCache.set(key, { title, artist });
 
+  // 標題已含假名 = 已經是日文,Spotify 沒翻譯,不用還原 —— 硬查日區只會被別的版本
+  // (Live/Remix 常是搜尋第一個 hit) 蓋掉。還原只該處理 Spotify 把日文譯成中文漢字 (無假名) 的情況。
+  if (hasKana(title)) return { title, artist };
+
   try {
     const url = `https://itunes.apple.com/search?term=${encodeURIComponent(title + ' ' + artist)}&country=JP&entity=song&limit=1`;
     const resp = await fetch(url, { timeout: 3000 });
     const data = await resp.json();
     if (data.results && data.results.length > 0) {
+      const hit = data.results[0];
       const result = {
-        title: data.results[0].trackName || title,
-        artist: data.results[0].artistName || artist
+        title: hit.trackName || title,
+        artist: hit.artistName || artist
       };
-      itunesCache.set(key, result); // 覆蓋為日文真實資料
-      return result;
+      // 採用還原的條件二選一:
+      //  (1) 結果含假名 → 確定是日文 (中文歌沒假名,擋掉污染)
+      //  (2) 時長吻合 ±3s → 確定是同一首,不管字是全漢字還是什麼都信任 (補回全漢字日文歌)
+      const hitDur = hit.trackTimeMillis ? hit.trackTimeMillis / 1000 : null;
+      const durOk = !!(duration && hitDur && Math.abs(hitDur - duration) <= 3);
+      if (hasKana(result.title) || hasKana(result.artist) || durOk) {
+        itunesCache.set(key, result);
+        return result;
+      }
     }
   } catch (e) {
     console.error("iTunes API error:", e.message);
@@ -177,7 +193,7 @@ global.handleMediaUpdate = function(rawState) {
     if (rawState.title && rawState.artist) {
       const key = `${rawState.title}-${rawState.artist}`;
       if (!itunesCache.has(key)) {
-         getResolvedMetadata(rawState.title, rawState.artist);
+         getResolvedMetadata(rawState.title, rawState.artist, rawState.duration);
       } else {
          const resolved = itunesCache.get(key);
          rawState.original_title = rawState.title;
@@ -630,6 +646,69 @@ function currentDuration(title, artist) {
   return s.duration;
 }
 
+// 正在播這首歌的來源 app id;只有查詢的就是當前曲目才算數 (比照 currentDuration)
+function currentSource(title, artist) {
+  const s = currentMediaState;
+  if (!s || !s.source) return null;
+  if (s.title !== title || s.artist !== artist) return null;
+  return s.source;
+}
+
+// ponytail: 手動鏡射 media_monitor.py 的 MUSIC_APPS (兩份 4 個字串);那邊改了這邊要跟
+const MUSIC_APPS = ['spotify', 'applemusic', 'itunes', 'zunemusic'];
+function isMusicAppSource(source) {
+  if (!source) return true; // 未知來源當音樂 app,不去噪 (保守)
+  const s = source.toLowerCase();
+  return MUSIC_APPS.some(a => s.includes(a));
+}
+
+// 瀏覽器/影片來源:剝掉影片名常見噪音 (【MV】、(Official Music Video) 之類) 與頻道尾綴。
+// 保守 —— 只剝含明確噪音關鍵字的整塊括號,不拆 Artist - Song。
+const _NOISE_KW = /(mv|pv|official|music\s*video|lyric[s]?|audio|hd|4k|full|live|cover|feat\.?|カラオケ|歌ってみた|フル|字幕)/i;
+function cleanBrowserQuery(title, artist) {
+  const t = (title || '')
+    .replace(/[【［(\[（][^】］)\]）]*[】］)\]）]/g, (m) => _NOISE_KW.test(m) ? '' : m)
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  const a = (artist || '')
+    .replace(/\s*-\s*Topic\s*$/i, '')
+    .replace(/\s*VEVO\s*$/i, '')
+    .replace(/\s*Official\s*$/i, '')
+    .trim();
+  return { title: t || title, artist: a || artist };
+}
+
+// 統一算出查詢用字串。優先序:明確 searchTitle/searchArtist 參數 > 存的 per-song 覆蓋 >
+// 非音樂 app 去噪 > (最後一律) feat/Live/Remastered 剝除 + 歌手別名。
+async function buildSearchQuery(title, artist, searchTitle, searchArtist) {
+  const explicit = !!(searchTitle || searchArtist);
+  let qTitle = searchTitle || title;
+  let qArtist = searchArtist || artist;
+
+  if (!explicit) {
+    const ov = await new Promise((resolve) => {
+      db.get('SELECT search_title, search_artist FROM search_overrides WHERE raw_title=? AND raw_artist=?',
+        [title, artist], (e, row) => resolve(row));
+    });
+    if (ov) {
+      if (ov.search_title) qTitle = ov.search_title;
+      if (ov.search_artist) qArtist = ov.search_artist;
+    } else if (!isMusicAppSource(currentSource(title, artist))) {
+      const c = cleanBrowserQuery(qTitle, qArtist);
+      qTitle = c.title; qArtist = c.artist;
+    }
+  }
+
+  let trueArtist = qArtist;
+  const aliasRow = await new Promise((resolve) => {
+    db.get('SELECT true_name FROM artist_aliases WHERE alias=?', [qArtist], (e, row) => resolve(row));
+  });
+  if (aliasRow && aliasRow.true_name) trueArtist = aliasRow.true_name;
+
+  const cleanTitle = qTitle.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
+  return { qTitle, qArtist, trueArtist, cleanTitle };
+}
+
 // 網易雲 / 酷狗:歌詞與日文讀音提示在同一次請求裡拿到,提示由 Python 端直接寫進 DB
 // python 端被外部網路卡住時 (syncedlyrics 的來源很常這樣),'close' 永遠不會來,
 // 這個 Promise 就永遠不 resolve。給每個子進程一個上限,超時就砍掉當作沒找到。
@@ -835,20 +914,8 @@ app.get('/api/lyrics/fetch', async (req, res) => {
   
   const performFetch = async () => {
     try {
-      const qTitle = searchTitle || title;
-      const qArtist = searchArtist || artist;
-      const cleanTitle = qTitle.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
-      
-      let trueArtist = qArtist;
-      try {
-        const aliasRow = await new Promise((resolve) => {
-          db.get("SELECT true_name FROM artist_aliases WHERE alias=?", [qArtist], (err, row) => resolve(row));
-        });
-        if (aliasRow && aliasRow.true_name) {
-          trueArtist = aliasRow.true_name;
-        }
-      } catch (e) {}
-      
+      const { qTitle, qArtist, trueArtist, cleanTitle } = await buildSearchQuery(title, artist, searchTitle, searchArtist);
+
       let preferredSource = 'NetEase';
       try {
         if (fs.existsSync(SETTINGS_FILE)) {
@@ -1045,20 +1112,7 @@ app.get('/api/lyrics/options', async (req, res) => {
 
 async function searchOptions({ title, artist, searchTitle, searchArtist }) {
   {
-    const qTitle = searchTitle || title;
-    const qArtist = searchArtist || artist;
-    
-    let trueArtist = qArtist;
-    try {
-      const aliasRow = await new Promise((resolve) => {
-        db.get("SELECT true_name FROM artist_aliases WHERE alias=?", [qArtist], (err, row) => resolve(row));
-      });
-      if (aliasRow && aliasRow.true_name) {
-        trueArtist = aliasRow.true_name;
-      }
-    } catch (e) {}
-    
-    const cleanTitle = qTitle.replace(/\(feat\..*?\)|\- Remastered.*|\- Live.*/ig, '').trim();
+    const { qTitle, qArtist, trueArtist, cleanTitle } = await buildSearchQuery(title, artist, searchTitle, searchArtist);
     const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle + ' ' + trueArtist)}`;
     
     let valid_lyrics = [];
@@ -1208,6 +1262,25 @@ app.delete('/api/aliases/:alias', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ success: true });
   });
+});
+
+// per-song 搜尋覆蓋:髒標題 (瀏覽器影片名等) 手動填正確歌名/歌手,下次自動套用。
+// 空字串 = 清除該首覆蓋。存完清歌詞快取,前端隨後重抓即會用新關鍵字。
+app.post('/api/search-override', express.json(), (req, res) => {
+  const { title, artist, searchTitle, searchArtist } = req.body;
+  if (!title || !artist) return res.status(400).json({ error: 'title and artist are required' });
+  const st = (searchTitle || '').trim();
+  const sa = (searchArtist || '').trim();
+  const done = (err, cleared) => {
+    if (err) return res.status(500).json({ error: err.message });
+    db.run('DELETE FROM cache WHERE artist=? AND title=?', [artist, title], () => res.json({ success: true, cleared: !!cleared }));
+  };
+  if (!st && !sa) {
+    db.run('DELETE FROM search_overrides WHERE raw_title=? AND raw_artist=?', [title, artist], (err) => done(err, true));
+  } else {
+    db.run('INSERT OR REPLACE INTO search_overrides (raw_artist, raw_title, search_artist, search_title) VALUES (?, ?, ?, ?)',
+      [artist, title, sa, st], (err) => done(err, false));
+  }
 });
 
 app.post('/api/lyrics/custom', async (req, res) => {

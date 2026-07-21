@@ -4,10 +4,16 @@
 此腳本作為 CLI 供其他語言(或需要獨立執行時)呼叫，主要封裝了 QQMusic 等搜尋邏輯。
 """
 import sys
+import re
 import json
 import logging
 import syncedlyrics
 import requests
+
+# 平假名/片假名 (日文獨有)。iTunes 日區還原只在結果含假名時才採用,
+# 中文歌正確名沒假名,避免被日區隨便一個 hit 帶偏。
+def _has_kana(s):
+    return bool(re.search(r'[぀-ヿ]', s or ''))
 
 # QQ 音樂歌詞由 cn_music.py 的 musicu.fcg 端點處理,這裡不再自行抓 QQ。
 
@@ -122,7 +128,7 @@ def main():
                     if it_results:
                         jp_title = it_results[0].get("trackName", title)
                         jp_artist = it_results[0].get("artistName", artist)
-                        if jp_title != title or jp_artist != artist:
+                        if (jp_title != title or jp_artist != artist) and (_has_kana(jp_title) or _has_kana(jp_artist)):
                             it_queries = generate_queries(jp_title, jp_artist)
                             for p in providers:
                                 for q_title, q_artist in it_queries:
@@ -157,7 +163,7 @@ def main():
                     if results:
                         jp_title = results[0].get("trackName", title)
                         jp_artist = results[0].get("artistName", artist)
-                        if jp_title != title or jp_artist != artist:
+                        if (jp_title != title or jp_artist != artist) and (_has_kana(jp_title) or _has_kana(jp_artist)):
                             query = f"{jp_title} {jp_artist}"
                             lyric = syncedlyrics.search(query, providers=providers)
                             if lyric:
