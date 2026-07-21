@@ -22,27 +22,42 @@
 
 ## 安裝
 
-Windows only。
+目前只能從原始碼執行（安裝檔還沒釋出），需要 Windows 10 或 11。全程用「終端機」打指令，沒寫過程式也能照做——每一步的指令直接整段複製貼上，按 Enter 就好。
 
-1. **裝環境。** Windows 10/11 內建 winget。`.NET 8 SDK` 只有要改靈動島或打包才需要。
+> **怎麼開終端機**：按 `Win + X`，選「終端機」或「Windows PowerShell」。跑到一半視窗看起來卡住不動是正常的，那是在下載東西，等它跑完再打下一步。
+
+1. **裝四個工具。** Kanaric 用到 Git（下載原始碼）、Node.js（主程式）、Python（歌詞與假名處理）、.NET（桌面上那顆浮動的靈動島）。Windows 10/11 內建 `winget`，一行就能裝完，過程中如果跳出使用者帳戶控制視窗，按「是」。
 
    ```bat
    winget install Git.Git OpenJS.NodeJS.LTS Python.Python.3.12
+   ```
+
+   .NET 只有在你要改靈動島的程式碼、或要自己打包安裝檔時才需要，只是想跑起來可以跳過：
+
+   ```bat
    winget install Microsoft.DotNet.SDK.8
    ```
 
-   Python 釘 3.12：fugashi / unidic-lite 太新的版本常沒有預編 wheel。
+   Python 指定 3.12 不是隨便挑的：假名處理用到的 fugashi、unidic-lite 這兩個套件，在更新的 Python 版本上常常沒有現成的安裝包，會變成要你自己編譯，非常麻煩。
 
-2. **開一個新終端機**，PATH 才會生效。`node -v & python --version` 有輸出就對了。
+2. **關掉終端機，重新開一個。** 剛裝好的工具要等新視窗才認得。開好後打這行確認：
 
-3. **Clone。**
+   ```bat
+   node -v & python --version & git --version
+   ```
+
+   三行版本號都印出來就成功了。如果出現「不是內部或外部命令」，代表那個工具沒裝好，回第 1 步重裝。
+
+3. **把原始碼抓下來。** 下面第一行會在你目前的位置建一個 `Kanaric` 資料夾（想放桌面的話，先打 `cd Desktop`），第二行是進到那個資料夾裡面。
 
    ```bat
    git clone https://github.com/bensionfang/Kanaric.git
    cd Kanaric
    ```
 
-4. **建 venv 裝 Python 依賴。** venv 非必須，但 server 只會自動偵測 repo 根目錄的 `venv\`；裝別處就得自己確保 python 在 PATH。
+   **之後每一步都要在這個資料夾裡執行**，中途關掉終端機的話，記得重開後再 `cd` 回來。
+
+4. **裝 Python 需要的套件。** 第一行建一個叫 `venv` 的獨立環境，讓這個專案的套件不會跟你電腦上其他 Python 程式打架；第二行進入它；第三行把 `requirements.txt` 列的套件一次裝好（會跑一兩分鐘）。
 
    ```bat
    python -m venv venv
@@ -50,23 +65,35 @@ Windows only。
    pip install -r requirements.txt
    ```
 
-5. **裝 Node 依賴。**
+   venv 不是強制的，但強烈建議照做：程式只會自動去找專案資料夾裡的 `venv\`，建在別的地方就得自己處理 PATH。
+
+5. **裝 Node.js 需要的套件。** 這行的意思是「進 web-app 資料夾、裝套件、再退回來」，一樣要跑個幾分鐘。
 
    ```bat
    cd web-app && npm install && cd ..
    ```
 
-6. **跑 `dev.bat`。** 等同 `cd web-app && npm run app`：後台 + 儀表板視窗 + 系統匣 + 靈動島一次全開。
+6. **啟動。** 在檔案總管裡對著專案資料夾的 `dev.bat` 點兩下，或在終端機打：
 
-其他進入點，都在 `web-app/` 底下跑：
+   ```bat
+   dev.bat
+   ```
+
+   儀表板視窗會自己開起來，右下角系統匣出現圖示，螢幕上方出現靈動島。接著打開你的音樂播放器（Spotify、YouTube Music 等）放首歌，歌詞就會自己跟上。關掉視窗只是縮到系統匣，要完全結束請從系統匣圖示右鍵離開。
+
+以上都做完後，之後每次要用，只要點 `dev.bat` 就好，前面五步不用再做一次。
+
+### 其他啟動方式
+
+以下指令要先 `cd web-app` 再執行：
 
 ```bash
-npm start        # 只跑網頁後台 http://localhost:5720,不開 Electron 與靈動島
-npm run dev      # 同上,nodemon 熱重載
-npm run dist     # 打包安裝檔,產出在 web-app/release/
+npm start        # 只跑網頁後台 http://localhost:5720,不開桌面視窗與靈動島
+npm run dev      # 同上,改動程式碼會自動重啟
+npm run dist     # 打包成安裝檔,產出在 web-app/release/
 ```
 
-開發模式的歌詞快取、聽歌記錄、設定都寫在 repo 根目錄（`lyrics_data.db`、`settings.json`），不碰已安裝版的 `%APPDATA%/Kanaric/`。
+從原始碼跑的時候，歌詞快取、聽歌記錄、設定都存在專案資料夾裡（`lyrics_data.db`、`settings.json`），跟安裝版的 `%APPDATA%/Kanaric/` 分開，兩邊資料不會互相影響。
 
 ---
 
