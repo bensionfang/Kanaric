@@ -22,51 +22,43 @@
 
 ## 安裝
 
-### 一般使用者（推薦）
+Windows only。
 
-1. 取得 `Kanaric Setup x.x.x.exe` 安裝檔。
-2. 雙擊執行 — 一鍵安裝，無需系統管理員權限，裝完自動啟動並建立桌面/開始選單捷徑。
-   - 安裝檔未簽章，Windows SmartScreen 可能攔截：點「其他資訊」→「仍要執行」。
-3. 所有個人資料（歌詞快取、聽歌記錄、設定）存在 `%APPDATA%/Kanaric/`，解除安裝不會刪除。
+1. **裝環境。** Windows 10/11 內建 winget。`.NET 8 SDK` 只有要改靈動島或打包才需要。
 
-### 開發者（從原始碼執行）
+   ```bat
+   winget install Git.Git OpenJS.NodeJS.LTS Python.Python.3.12
+   winget install Microsoft.DotNet.SDK.8
+   ```
 
-需求：Windows、Node.js 18+、Python 3.10+、.NET 8 SDK（只有要編譯靈動島或打包才需要）。
+   Python 釘 3.12：fugashi / unidic-lite 太新的版本常沒有預編 wheel。
 
-這些要自己先裝。Windows 10/11 內建 winget，一行搞定：
+2. **開一個新終端機**，PATH 才會生效。`node -v & python --version` 有輸出就對了。
 
-```bat
-winget install OpenJS.NodeJS.LTS Git.Git Python.Python.3.12
-winget install Microsoft.DotNet.SDK.8   :: 只有要 npm run dist 或改靈動島才需要
+3. **Clone。**
 
-:: 裝完關掉再開一個新終端機,PATH 才會生效
-node -v & python --version & git --version
-```
+   ```bat
+   git clone https://github.com/bensionfang/Kanaric.git
+   cd Kanaric
+   ```
 
-Python 版本抓 3.12：fugashi / unidic-lite 這類需要編譯的套件，太新的版本常常還沒有預編好的 wheel。
+4. **建 venv 裝 Python 依賴。** venv 非必須，但 server 只會自動偵測 repo 根目錄的 `venv\`；裝別處就得自己確保 python 在 PATH。
 
-```bat
-git clone https://github.com/bensionfang/Kanaric.git
-cd Kanaric
+   ```bat
+   python -m venv venv
+   venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
 
-:: 1. Python 依賴。venv 不是必須,但強烈建議:
-::    server 會自動偵測 repo 根目錄的 venv\,建在別的位置就得自己確保 python 在 PATH。
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
+5. **裝 Node 依賴。**
 
-:: 2. Node 依賴
-cd web-app
-npm install
-cd ..
+   ```bat
+   cd web-app && npm install && cd ..
+   ```
 
-:: 3. 跑起來
-dev.bat
-```
+6. **跑 `dev.bat`。** 等同 `cd web-app && npm run app`：後台 + 儀表板視窗 + 系統匣 + 靈動島一次全開。
 
-`dev.bat` = `cd web-app && npm run app`：Electron 桌面殼，後台 + 儀表板視窗 + 系統匣 + 靈動島一次全開。
-
-其他進入點（都在 `web-app/` 底下跑）：
+其他進入點，都在 `web-app/` 底下跑：
 
 ```bash
 npm start        # 只跑網頁後台 http://localhost:5720,不開 Electron 與靈動島
@@ -74,7 +66,7 @@ npm run dev      # 同上,nodemon 熱重載
 npm run dist     # 打包安裝檔,產出在 web-app/release/
 ```
 
-開發模式下歌詞快取、聽歌記錄、設定都寫在 repo 根目錄（`lyrics_data.db`、`settings.json`），不會碰到已安裝版的 `%APPDATA%/Kanaric/`。
+開發模式的歌詞快取、聽歌記錄、設定都寫在 repo 根目錄（`lyrics_data.db`、`settings.json`），不碰已安裝版的 `%APPDATA%/Kanaric/`。
 
 ---
 
