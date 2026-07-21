@@ -15,6 +15,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
+const { toTraditional } = require('./s2t');   // 簡體歌詞轉繁 (日文歌會跳過,見該檔註解)
 require('dotenv').config();
 
 const app = express();
@@ -1057,7 +1058,7 @@ app.get('/api/lyrics/fetch', async (req, res) => {
       if (bestLyric) {
         const sourceName = finalSource || 'Fallback';
         bestLyric = `[source:${sourceName}]\n${bestLyric}`;
-        bestLyric = autoMarkTitleLines(bestLyric);
+        bestLyric = autoMarkTitleLines(toTraditional(bestLyric));
         await new Promise((resolve, reject) => {
           db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, bestLyric], (err) => {
             if (err) reject(err);
@@ -1347,7 +1348,9 @@ app.post('/api/lyrics/custom', async (req, res) => {
   if (!title || !artist || !lyrics) return res.status(400).json({ error: 'Missing parameters' });
   
   try {
-    const finalLyrics = autoMarkTitleLines(`[source:ManualEdit]\n${lyrics}`);
+    // 這條路徑同時是「套用備選歌詞」的入口 (lyrics-tools.js applyLyricsOption),
+    // 抓回來的簡體歌詞也走這裡,所以一樣要轉繁
+    const finalLyrics = autoMarkTitleLines(toTraditional(`[source:ManualEdit]\n${lyrics}`));
     await new Promise((resolve, reject) => {
       db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, finalLyrics], (err) => {
         if (err) reject(err);

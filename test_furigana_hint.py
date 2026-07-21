@@ -34,3 +34,20 @@ apply_hint(words, 'いく')
 assert hira_of(words, '行く') == 'いく'
 
 print('OK')
+
+# 4. 讀音 = 原文的詞 (unidic 查不到,中文歌整行如此) 不可以被吞掉
+import re
+from furigana_inject import build_ruby_html
+plain = re.sub(r'<[^>]+>', '', build_ruby_html('我們的愛情斷了線', 'x', 'y'))
+for ch in '我們的愛情斷了線':
+    assert ch in plain, (ch, plain)
+
+print('OK')
+
+# 5. 整首沒假名 = 中文歌,原文照抄不注音;日文歌照常注音
+from furigana_inject import process_lrc
+zh = '[00:12.34]我們的愛情像風箏斷了線\n[00:15.00]別問我為什麼還愛妳'
+assert process_lrc('x', 'y', zh) == zh
+assert '<ruby' in process_lrc('x', 'y', '[00:12.34]君の声が聞こえる')
+
+print('OK')

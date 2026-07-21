@@ -48,7 +48,7 @@ gh release create v1.1.0 "web-app/release/Kanaric Setup 1.1.0.exe" \
 tag 沒帶 `v` 或漏推,更新提醒就抓不到新版。安裝檔未簽章,`gh release create` 會直接公開發布,屬於
 「發布公開內容」的動作,不要自動執行,要使用者自己按。
 - C# overlay: auto-launched by `npm run app`; standalone dev run: `DynamicIslandUI/bin/Release/net8.0-windows/DynamicIslandUI.exe` (build with `dotnet build DynamicIslandUI`; requires .NET 8 SDK).
-- 沒有 test runner 或 linter。零星的獨立測試檔直接用直譯器跑:`node test_origin_guard.js` (同源守門)、`python test_pick_session.py`、`python test_furigana_hint.py`。
+- 沒有 test runner 或 linter。零星的獨立測試檔直接用直譯器跑:`node test_origin_guard.js` (同源守門)、`node test_s2t.js` (簡轉繁)、`python test_pick_session.py`、`python test_furigana_hint.py`。
 
 ## Architecture
 
@@ -58,6 +58,7 @@ One Node.js backend, multiple thin clients, with Python scripts as helpers spawn
   - 同源守門是 server.js 的第一個 middleware,`cors()` 已經移除 (開 CORS 等於自己拆掉這道牆)。它同時看 `Origin` 與 `Sec-Fetch-Site`,兩層都必要:`Origin` 只有 fetch/XHR 會帶,`<script src>` 這類不帶,而 `Sec-Fetch-Site` 瀏覽器對所有請求都帶。兩個 header 都沒有 = 非瀏覽器客戶端 (C# 靈動島的 `HttpClient`),放行。WebSocket 的 upgrade 不經過 express middleware,所以 `verifyClient` 要再擋一次。
   - **綁 127.0.0.1 擋不住跨站攻擊**,這是這道守門存在的理由:使用者開著 Kanaric 時瀏覽任一網頁,那個網頁就能打這裡的 API —— 跨站 POST `/api/settings` 把 `llm_base_url` 改成攻擊者的位址,再觸發 `/api/llm-models` 或 `/api/llm-furigana/run`,BYOK 的 API key 就送出去了。`<form>` POST 屬於 simple request,不觸發 preflight,所以光靠 CORS 設定擋不住。
   - 回歸測試:`node test_origin_guard.js` (repo 根目錄,自己帶起一份 server)。動到這段 middleware、`ALLOWED_ORIGINS`、或 WebSocket 的 `verifyClient` 就跑它。
+  - 簡轉繁 (`web-app/s2t.js` 的 `toTraditional()`,opencc-js `cn`→`tw`) 只掛在**外部**歌詞的兩個寫入點:自動抓取存快取前,以及 `/api/lyrics/custom` (它同時是「套用備選歌詞」的入口)。編輯器的 `/api/lyrics/update`、`/api/lyrics/save` 是使用者自己打的字,刻意不轉。**日文歌詞絕不能過這個轉換** (日文漢字大量與簡體同形,`声`→`聲`、`学校`→`學校`),所以有假名就原封不動 —— 見 `furigana_inject.py` 那條同樣的假名分界規則。回歸測試 `node test_s2t.js`;邏輯獨立成一個檔案就是為了讓測試 require 得到而不必啟動 server。
   - 不要為了「手機/別台電腦也能連」把 bind 改寬 —— 那要先做真正的 auth,同源守門對區網另一台機器沒有意義。
 - **Python scripts (repo root)** are stateless workers `server.js` spawns via `child_process`, always through the **`pytools.py` dispatcher** (`spawnPy()` in server.js): `pytools.py monitor|furigana|fallback|cnlyrics|romaji|minimize|seek|media-action|sessions|diff`. In dev it runs `venv python pytools.py <sub>`; in the packaged app the `PYTOOLS_EXE` env var points at the PyInstaller-built `pytools.exe`. The underlying modules:
   - `media_monitor.py` — long-running; polls Windows Media API via `winrt` and emits one JSON line per state change on stdout. `server.js` parses these lines and auto-restarts the process on exit (unless `global.isShuttingDown`).
@@ -65,6 +66,8 @@ One Node.js backend, multiple thin clients, with Python scripts as helpers spawn
     - The monitor re-reads `settings.json` when its mtime changes, so switching source takes effect live — there is no "restart the monitor on settings change" path and none should be added.
     - The empty (no session) payload must keep listing **every** field, because `handleMediaUpdate` merges shallowly (`server.js:146`); an omitted key leaves the previous song's value on screen.
   - `furigana_inject.py` — one-shot; JSON in via stdin, lyrics with furigana out via stdout. Readings come from fugashi/unidic-lite, then get corrected in three layers, each beating the last: `apply_hint()` (romaji hints from `cn_music`, aligned to the tokens with difflib) → `_COMMON_READING` (a tiny table of words *every* source gets wrong, currently just 私 → わたし) → `word_corrections` from the DB (user's manual edits, always final).
+    - **「有沒有假名」是日文歌/中文歌的分界線,兩個地方共用這條規則**:`process_lrc()` 整份沒假名就原文回傳 (中文歌的漢字丟給 fugashi 只會得到亂七八糟的音讀,也順便省掉 `get_hints()` 的網路請求);`web-app/s2t.js` 的簡轉繁同理只在沒假名時動手。
+    - `build_ruby_html()` 裡「讀音 = 原文」的詞 (unidic 查不到的字,中文歌整行都是) 削掉前後綴後 `root_orig` 會變空字串 —— 那個分支必須把 `orig` 原樣 append 回去,否則整個詞會從畫面上消失。這就是舊版「中文歌缺字」的成因,回歸測試在 `test_furigana_hint.py`。
   - `cn_music.py` — client for NetEase / QQMusic / Kugou. One API call per platform yields both the LRC **and** a per-syllable romaji track (NetEase `romalrc`, QQ QRC `contentroma`, Kugou krc `type=0`), which is converted back to kana and used to fix readings unidic-lite gets wrong (e.g. 君 くん → きみ). Only readings that still differ after equivalence-normalization are overridden, since romaji can't distinguish づ/ず or は/わ.
     - **`_SOURCES` order is the hint priority** (first source with any romaji wins), and QQ deliberately sits ahead of Kugou: both are machine-generated, but Kugou tends to agree with unidic-lite's mistakes (both say 私 = わたくし) while QQ gets it right (わたし). QQ's *search* endpoint (`u.y.qq.com`) rate-limits hard and starts returning empty results after a burst — that's expected, it just falls through to Kugou.
     - `_pick_song()` gates every source's search results: the title must match, then artist and duration (±3s) break ties. A candidate is only rejected outright when artist AND duration both disagree — artist names vary too much across platforms (あいみょん is "爱缪" on QQ) to reject on that alone. Duration comes from `currentMediaState` in server.js and is what stops the 147-second preview clips QQ loves to return.

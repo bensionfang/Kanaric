@@ -257,7 +257,9 @@ def build_ruby_html(text, artist, title, hints=()):
             item.pop('llm_prev', None)
 
         if not root_orig:
-            pass # fallback, 不應發生
+            # 讀音 = 原文 (unidic 查不到的字,中文歌整行都是這種),前後綴一削就沒東西剩。
+            # 這裡不補回去的話該詞會整個從畫面上消失 —— 中文歌「缺字」就是這個。
+            html_parts.append(orig)
         elif root_orig == root_hira:
             part_html = f"{prefix}{root_orig}{suffix}"
             html_parts.append(part_html)
@@ -305,6 +307,11 @@ def process_lrc(artist, title, lrc_text, force_llm=False):
     處理整份 LRC 格式的歌詞檔案，逐行轉換為 ruby HTML 格式
     並保留原始的時間標籤。
     """
+    # 整首找不到假名 = 中文歌 (或英文歌),漢字全交給 fugashi 只會得到亂七八糟的音讀。
+    # 提早退出也順便省掉 get_hints 的網路請求。
+    # ponytail: 只看有沒有假名。夾雜一行日文的中文歌會整首被注音,真遇到再改成看比例。
+    if not re.search(r'[぀-ヿ]', lrc_text):
+        return lrc_text
     romaji, llm = get_hints(artist, title, lrc_text, force_llm=force_llm)
     def line_hints(text):
         k = normalize_line(text)
