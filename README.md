@@ -163,7 +163,6 @@ Kanaric/
 │       ├── js/lyrics-tools.js# 歌詞工具（選項彈窗等）
 │       ├── css/island.css    # 靈動島樣式
 │       └── css/style.css     # 全站樣式
-├── DynamicIslandUI/          # 舊版 C# WPF 靈動島（已停用,留著當回退;需要 .NET 8 SDK 才能編）
 ├── pytools.py                # Python 工具統一入口,server.js 以子進程呼叫各子指令
 ├── media_monitor.py          # 常駐:輪詢 Windows Media API,回報播放狀態
 ├── furigana_inject.py        # 假名標註:斷詞注音 + 羅馬音修正 + 使用者修正覆蓋
