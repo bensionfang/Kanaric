@@ -22,7 +22,17 @@
 
 ## 安裝
 
-目前只能從原始碼執行（安裝檔還沒釋出），需要 Windows 10 或 11。全程用「終端機」打指令，沒寫過程式也能照做——每一步的指令直接整段複製貼上，按 Enter 就好。
+需要 Windows 10 或 11。**不需要**自己裝 Python 或 Node.js，安裝檔裡都包好了。
+
+1. 到 [Releases](https://github.com/bensionfang/Kanaric/releases/latest) 下載 `Kanaric Setup x.y.z.exe`。
+2. 點兩下執行。安裝檔沒有花錢買數位簽章，所以 Windows SmartScreen 會跳出藍色的「已保護您的電腦」——按 **「其他資訊」→「仍要執行」**。這是未簽章程式的正常待遇，不是防毒警報。
+3. 裝完會自動開啟。放首歌（Spotify、YouTube Music、瀏覽器都可以），歌詞就會自己跟上。
+
+關掉視窗只是縮到系統匣，要完全結束請從系統匣圖示按右鍵離開。資料（歌詞快取、聽歌記錄、設定）存在 `%APPDATA%\Kanaric\`，解除安裝不會刪掉。
+
+### 從原始碼執行（開發者）
+
+想改程式碼或不想用安裝檔的話走這條。全程用「終端機」打指令，沒寫過程式也能照做——每一步的指令直接整段複製貼上，按 Enter 就好。
 
 > **怎麼開終端機**：按 `Win + X`，選「終端機」或「Windows PowerShell」。跑到一半視窗看起來卡住不動是正常的，那是在下載東西，等它跑完再打下一步。
 
@@ -95,7 +105,7 @@ npm run dist     # 打包成安裝檔,產出在 web-app/release/
 
 ### 開始使用
 
-1. 執行 `dev.bat` 啟動 Kanaric。
+1. 啟動 Kanaric（安裝版：桌面捷徑或開始選單；原始碼版：`dev.bat`）。
 2. 用 Spotify 或 Apple Music 播放任何歌曲。
 3. 儀表板自動顯示歌曲資訊與同步歌詞；日文歌自動標註假名。
 4. 關閉視窗 = 縮到系統匣（不會結束程式）。系統匣圖示：雙擊叫回視窗，右鍵可開啟儀表板、顯示/隱藏靈動島或結束。
@@ -200,7 +210,28 @@ Kanaric/
 `qrc_decrypt.py` 中的 QQ QRC 解密實作移植自 Lyricify 的 `DESHelper.cs`
 （Copyright 2023 XY Wang, WXRIW，Apache License 2.0），已由 C# 改寫為 Python。
 授權全文見 [`third_party/Lyricify-LICENSE-Apache-2.0.txt`](third_party/Lyricify-LICENSE-Apache-2.0.txt)。
+Apache-2.0 相容於 GPLv3，所以那段程式碼可以合法收在本專案裡；該檔案的原始授權標頭請勿移除。
 
 ---
 
-© 2026 Resuaumis. All rights reserved.
+## 授權
+
+Kanaric 採 [GNU General Public License v3.0 或更新版本](LICENSE)。
+
+白話說：你可以自由使用、研究、修改、散布本程式。但只要你把改過的版本散布出去，
+**那份改過的版本也必須以同樣的 GPL 授權開源**，並附上原始碼。想拿去做閉源商品的話，
+這個授權不允許。
+
+```
+Copyright (C) 2026 Resuaumis
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+```

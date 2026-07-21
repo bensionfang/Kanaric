@@ -1,5 +1,11 @@
 # LLM API key (BYOK),絕不進版控
 secrets.json
+# 本機環境變數。目前只有 PORT/DB_PATH/NODE_ENV,但這是最容易誤把 key 提交上去的地方
+.env
+.env.local
+# 使用者的 UI 設定 (視窗位置、快捷鍵、LLM 端點)。預設值寫死在 electron.js,
+# 檔案不存在時 readSettings() 回 {},所以不進版控也不影響全新 clone
+settings.json
 # 本機資料庫 (每台機器各自初始化,不進版控)
 *.db
 *.db-shm

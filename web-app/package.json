@@ -13,7 +13,7 @@
   },
   "keywords": [],
   "author": "Resuaumis",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-or-later",
   "type": "commonjs",
   "dependencies": {
     "body-parser": "^2.2.2",
