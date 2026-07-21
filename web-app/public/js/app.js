@@ -1,5 +1,8 @@
 let lastMediaTitle = "";
 let lastMediaArtist = "";
+// 已經抓過歌詞的 (歌名|||歌手)。與 lastMediaTitle 分開:名字被 iTunes 還原改寫時
+// lastMediaTitle 會變兩次,但歌詞只該抓最後定案的那一次
+let lastLyricsKey = "";
 let parsedLyrics = [];
 let activeLyricIndex = -1;
 let songDurationSeconds = 180; // Estimated or default
@@ -243,7 +246,11 @@ async function pollSystemMedia() {
                     updateOffsetDisplay();
                 }).catch(e => { syncOffset = 0; updateOffsetDisplay(); });
             
-            fetchAndParseLyrics(data.title, data.artist);
+            // 歌詞不在這裡抓 —— iTunes 日文原名還原是非同步的,這一刻的名字可能再過幾秒就變。
+            // 等下面 resolving 為 false 再抓,整首歌只抓一次 (見 server.js handleMediaUpdate)
+            const scrollPane = document.getElementById('lyrics-scroll');
+            if (scrollPane) scrollPane.innerHTML = `<div class="loading-spinner"><i class="fa-solid fa-spinner fa-spin"></i> 正在搜尋歌詞...</div>`;
+            parsedLyrics = [];
             window._lyricsOptions = [];
             const listEl = document.getElementById('lyrics-options-list');
             if (listEl) listEl.innerHTML = '';
@@ -253,10 +260,6 @@ async function pollSystemMedia() {
             if (manualTitleEl) manualTitleEl.value = data.title;
             if (manualArtistEl) manualArtistEl.value = data.artist || '';
 
-            // 開了自動搜尋就直接跑一輪 (轉圈 → 綠色打勾 → 泡泡提醒,與手動按下完全同一套流程)
-            if (localStorage.getItem('auto_lyrics_options') === 'true') {
-                searchLyricsOptions();
-            }
         } else if (!data.title && lastMediaTitle) {
             // Stopped completely
             lastMediaTitle = "";
@@ -268,10 +271,26 @@ async function pollSystemMedia() {
             setMarqueeText(document.getElementById('current-artist'), "--");
             parsedLyrics = [];
             renderLyrics();
+            lastLyricsKey = "";
         }
-        
+
+        // 名字定案 (resolving=false) 才抓歌詞,而且同一個 (歌名, 歌手) 只抓一次。
+        // 換歌與「iTunes 還原把名字改掉」都走這裡,不會重複發請求
+        if (data.title && !data.resolving) {
+            const lyricsKey = `${data.title}|||${data.artist || ''}`;
+            if (lyricsKey !== lastLyricsKey) {
+                lastLyricsKey = lyricsKey;
+                fetchAndParseLyrics(data.title, data.artist);
+                // 開了自動搜尋就直接跑一輪 (轉圈 → 綠色打勾 → 泡泡提醒,與手動按下完全同一套流程)。
+                // 跟抓歌詞綁在一起,才不會用還原前的名字先搜一次
+                if (localStorage.getItem('auto_lyrics_options') === 'true') {
+                    searchLyricsOptions();
+                }
+            }
+        }
+
         // Progress is now handled by the rAF interpolation loop
-        
+
     } catch (err) {
         // Ignore polling errors
     }

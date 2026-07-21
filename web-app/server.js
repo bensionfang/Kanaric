@@ -195,16 +195,22 @@ async function getResolvedMetadata(title, artist, duration) {
   const key = `${title}-${artist}`;
   if (itunesCache.has(key)) return itunesCache.get(key);
 
-  // 先寫入原始資料避免重複發送請求
-  itunesCache.set(key, { title, artist });
+  // 先寫入原始資料避免重複發送請求。pending 代表「查詢還沒回來,名字可能還會變」——
+  // handleMediaUpdate 靠它告訴前端先別抓歌詞,否則會用舊名抓一次、還原後再抓一次
+  itunesCache.set(key, { title, artist, pending: true });
 
   // 標題已含假名 = 已經是日文,Spotify 沒翻譯,不用還原 —— 硬查日區只會被別的版本
   // (Live/Remix 常是搜尋第一個 hit) 蓋掉。還原只該處理 Spotify 把日文譯成中文漢字 (無假名) 的情況。
-  if (hasKana(title)) return { title, artist };
+  // 每條 return 前都要覆寫掉 pending 佔位,不然這首歌的 resolving 會永遠是 true
+  if (hasKana(title)) {
+    itunesCache.set(key, { title, artist });
+    return { title, artist };
+  }
 
   try {
     const url = `https://itunes.apple.com/search?term=${encodeURIComponent(title + ' ' + artist)}&country=JP&entity=song&limit=1`;
-    const resp = await fetch(url, { timeout: 3000 });
+    // 原生 fetch 不認 { timeout },要用 AbortSignal,否則這裡可能卡很久
+    const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
     const data = await resp.json();
     if (data.results && data.results.length > 0) {
       const hit = data.results[0];
@@ -225,7 +231,8 @@ async function getResolvedMetadata(title, artist, duration) {
   } catch (e) {
     console.error("iTunes API error:", e.message);
   }
-  
+
+  itunesCache.set(key, { title, artist });
   return { title, artist };
 }
 
@@ -236,15 +243,34 @@ let songLogged = false;
 let accumulatedMs = 0;
 let lastResumeTime = 0;
 
+// listening_history 的唯一寫入點 (換新歌、暫停後續播兩條計時器路徑都走這裡)。
+// track_history 的閘門只寫在這裡 —— 不要在呼叫端各判斷一次。
+// 判斷放在計時器「觸發時」而不是排程時,使用者播到一半關掉開關就真的不會被記錄。
+global.logListen = function(state) {
+  songLogged = true;
+  if (readSettings().track_history === false) return;
+  db.run(
+    'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
+    [state.artist, state.title, state.album || null, Math.round(state.duration) || 180]
+  );
+};
+
 global.handleMediaUpdate = function(rawState) {
   try {
-    // iTunes 跨區還原攔截器
+    // iTunes 跨區還原攔截器。查詢是非同步的 (handleMediaUpdate 不能等),所以換歌後的
+    // 頭幾百毫秒名字還是原始的、之後才會被換成日文原名。前端看到 title 變就當作換歌重抓
+    // 歌詞,會用兩個不同的鍵各抓一次 (第二次多半撞到來源限流而變成「找不到歌詞」)。
+    // resolving=true 就是叫前端等名字定案再抓,整首歌只抓一次。
+    rawState.resolving = false;
     if (rawState.title && rawState.artist) {
       const key = `${rawState.title}-${rawState.artist}`;
-      if (!itunesCache.has(key)) {
+      const resolved = itunesCache.get(key);
+      if (!resolved) {
          getResolvedMetadata(rawState.title, rawState.artist, rawState.duration);
+         rawState.resolving = true;
+      } else if (resolved.pending) {
+         rawState.resolving = true;
       } else {
-         const resolved = itunesCache.get(key);
          rawState.original_title = rawState.title;
          rawState.original_artist = rawState.artist;
          rawState.title = resolved.title;
@@ -287,25 +313,13 @@ global.handleMediaUpdate = function(rawState) {
         lastResumeTime = Date.now();
         if (playTimer) clearTimeout(playTimer);
         
-        playTimer = setTimeout(() => {
-          songLogged = true;
-          db.run(
-            'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
-            [state.artist, state.title, state.album || null, Math.round(state.duration) || 180]
-          );
-        }, 30000);
-      } 
+        playTimer = setTimeout(() => global.logListen(state), 30000);
+      }
       // 同一首歌暫停後又繼續播放
       else if (!songLogged && !playTimer) {
         lastResumeTime = Date.now();
         const remainingMs = Math.max(0, 30000 - accumulatedMs);
-        playTimer = setTimeout(() => {
-          songLogged = true;
-          db.run(
-            'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
-            [state.artist, state.title, state.album || null, Math.round(state.duration) || 180]
-          );
-        }, remainingMs);
+        playTimer = setTimeout(() => global.logListen(state), remainingMs);
       }
     } else if (!state.is_playing) {
       // 暫停時取消計時，並累加已播放時間
@@ -387,6 +401,8 @@ app.use((req, res, next) => {
     shuffle: !!m.shuffle,
     repeat: m.repeat || 0
   };
+  // 側欄要靠 track_history 決定顯不顯示統計/排行榜,等前端問完 API 才隱藏會閃一下
+  res.locals.settings = readSettings();
   // 備選歌詞按鈕的狀態也一起渲染,否則會先畫成未搜尋、等前端問完 server 才變綠 (閃一下)
   const job = optionJobs.get(jobKey(m.artist, m.title));
   res.locals.optState = {
@@ -427,6 +443,14 @@ app.get('/api/current-media', (req, res) => {
 });
 
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+
+// 讀不到 / 壞掉一律當空物件,呼叫端自己給預設值
+function readSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  } catch (e) {}
+  return {};
+}
 
 app.get('/api/settings', (req, res) => {
   try {
@@ -1399,22 +1423,6 @@ app.get('/api/songs', (req, res) => {
   });
 });
 
-// 4. Record play event
-app.post('/api/play-event', (req, res) => {
-  const { artist, title, album, duration } = req.body;
-  if (!artist || !title) return res.status(400).json({ error: 'Artist and Title required' });
-  const songDuration = duration || 180;
-  
-  db.run(
-    'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
-    [canonicalArtist(artist), title, album || null, songDuration],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true, id: this.lastID });
-    }
-  );
-});
-
 // 5. Stats APIs
 app.get('/api/stats/summary', (req, res) => {
   const query = `
@@ -1594,6 +1602,72 @@ app.get('/api/leaderboard', (req, res) => {
   db.all(query, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
+  });
+});
+
+// 5b. 資料用量與清除。
+// 資料分兩類,清除只碰得到第一類:
+//   可重建 —— cache / romaji_hints / llm_hints,清掉只是下次重抓 (要時間、要網路,不會永久失去)
+//   不可重建 —— word_corrections (使用者手改的假名)、sync_offsets、artist_aliases、
+//              search_overrides。這些是使用者親手打的,任何清除功能都不准碰,只顯示筆數。
+// listening_history 自成一類:可清但清了回不來,前端要二次確認。
+const CLEAR_TARGETS = {
+  history: ['listening_history'],
+  lyrics: ['cache', 'romaji_hints', 'llm_hints'],
+};
+
+// 這個 sqlite3 build 沒編 dbstat,所以用 length() 加總估算。全表掃描在幾萬筆下仍是毫秒級,不必快取
+app.get('/api/db-usage', (req, res) => {
+  const one = (sql) => new Promise((resolve) => {
+    db.get(sql, [], (err, row) => resolve(err ? { rows: 0, bytes: 0 } : {
+      rows: row.rows || 0, bytes: row.bytes || 0
+    }));
+  });
+
+  // 讀音提示兩張表是 Python 端 (db.py) 建的,Python 還沒跑過的全新安裝上不存在 ——
+  // 所以分開查,少一張表只會少算那一份,不會把歌詞的數字一起吃掉
+  Promise.all([
+    one(`SELECT COUNT(*) AS rows, COALESCE(SUM(LENGTH(artist) + LENGTH(title) + LENGTH(lyrics)), 0) AS bytes FROM cache`),
+    one(`SELECT COUNT(*) AS rows, COALESCE(SUM(LENGTH(data)), 0) AS bytes FROM romaji_hints`),
+    one(`SELECT COUNT(*) AS rows, COALESCE(SUM(LENGTH(data)), 0) AS bytes FROM llm_hints`),
+    one(`SELECT COUNT(*) AS rows,
+                COALESCE(SUM(LENGTH(artist) + LENGTH(title) + LENGTH(COALESCE(album, '')) + 12), 0) AS bytes
+         FROM listening_history`),
+    one(`SELECT (SELECT COUNT(*) FROM word_corrections)
+              + (SELECT COUNT(*) FROM sync_offsets)
+              + (SELECT COUNT(*) FROM artist_aliases)
+              + (SELECT COUNT(*) FROM search_overrides) AS rows, 0 AS bytes`),
+  ]).then(([cache, romaji, llm, history, manual]) => {
+    // 對使用者而言「歌詞快取」就是一首歌的全部衍生資料,提示不另外列一項
+    const lyrics = { rows: cache.rows, bytes: cache.bytes + romaji.bytes + llm.bytes };
+    // 實際佔用要含 WAL —— 剛寫入的資料還在 -wal 裡,只看主檔會少算
+    let file = 0;
+    for (const p of [DB_PATH, DB_PATH + '-wal']) {
+      try { file += fs.statSync(p).size; } catch (e) {}
+    }
+    res.json({ file, lyrics, history, manual });
+  });
+});
+
+app.post('/api/db-clear', express.json(), (req, res) => {
+  const tables = CLEAR_TARGETS[req.body && req.body.target];
+  if (!tables) return res.status(400).json({ error: 'Invalid target' });
+
+  db.serialize(() => {
+    // callback 不能省:romaji_hints / llm_hints 是 Python 端建的,Python 還沒跑過的
+    // 全新安裝上不存在。沒 callback 的話 node-sqlite3 會把 "no such table" 丟成
+    // 未捕捉例外,整個 server 就掛了 —— 少一張表當作已經清乾淨即可
+    for (const t of tables) db.run(`DELETE FROM ${t}`, [], () => {});
+    // 記憶體快取沒清的話,已刪的歌詞還是會被吐出來
+    if (req.body.target === 'lyrics') {
+      furiganaCache.clear();
+      itunesCache.clear();
+    }
+    // 不 VACUUM 的話 SQLite 只把頁面標成可重用,檔案不會變小 —— 使用者按清除就是要看到變小
+    db.run('VACUUM', (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, cleared: tables });
+    });
   });
 });
 

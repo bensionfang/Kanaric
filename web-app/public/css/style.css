@@ -318,6 +318,19 @@ button.menu-action {
     color: var(--text-secondary);
 }
 
+/* 資料小節有整句的說明文字,選單繼承下來的 nowrap 會把面板撐出橫向捲軸 */
+#data-section {
+    width: 260px;
+}
+#data-section .hk-label {
+    white-space: normal;
+    line-height: 1.5;
+}
+#data-section .hk-note {
+    opacity: 0.65;
+    font-size: 11px;
+}
+
 /* 只有快捷鍵區改三欄 grid (llm-section 也用 .hk-row,不能動全域):
    名稱 / 眼睛 / 輸入框,每列三欄固定,輸入框起點永遠對齊 */
 #hotkeys-section {

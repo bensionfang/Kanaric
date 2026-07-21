@@ -11,7 +11,7 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Style -->
-    <link rel="stylesheet" href="/css/style.css?v=75">
+    <link rel="stylesheet" href="/css/style.css?v=76">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- 各頁共用:吐司 + 備選歌詞 + 重新載入歌詞 -->
@@ -203,6 +203,42 @@
                         </div>
                     </div>
                     </div>
+                    <div class="menu-sub">
+                    <button class="menu-row menu-action" id="data-toggle" onclick="toggleDataSection(event)">
+                        <span class="menu-label">聆聽紀錄與資料</span>
+                        <i class="fa-solid fa-chevron-right hotkeys-chevron"></i>
+                    </button>
+                    <div class="menu-hotkeys" id="data-section">
+                        <div class="hk-row">
+                            <span class="hk-label">記錄聆聽紀錄</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="setting-track-history" onchange="updateTrackHistory(this.checked)" checked>
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label hk-note">關閉後不再寫入紀錄，側欄的統計數據與排行榜也會一起隱藏。</span>
+                        </div>
+                        <div class="menu-divider"></div>
+                        <div class="hk-row">
+                            <span class="hk-label">歌詞快取 <b id="usage-lyrics">—</b></span>
+                            <button class="hk-reset" onclick="clearDbData('lyrics')">清除</button>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">聆聽紀錄 <b id="usage-history">—</b></span>
+                            <button class="hk-reset" onclick="clearDbData('history')">清除</button>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">手動修正 <b id="usage-manual">—</b></span>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label hk-note">假名修正、時間軸校正等你自己改過的資料，清除功能不會動到。</span>
+                        </div>
+                        <div class="hk-footer">
+                            <span>資料庫檔案 <b id="usage-file">—</b></span>
+                        </div>
+                    </div>
+                    </div>
                     <button class="menu-row menu-action" onclick="startTour()">
                         <span class="menu-label">使用說明</span>
                         <i class="fa-solid fa-chevron-right"></i>
@@ -215,11 +251,15 @@
                     <i class="fa-solid fa-music"></i>
                     <span>歌詞</span>
                 </a>
-                <a href="/stats" class="nav-item <%= activePage === 'stats' ? 'active' : '' %>">
+                <%# 關掉聆聽紀錄就沒東西可統計,兩項一起藏 (class 打在每個 a 上,不包 div ——
+                    .nav-menu 是 flex column,多一層容器會吃掉 gap)。
+                    路由本身留著:直接打網址仍看得到關掉之前的舊資料 %>
+                <% const hideStats = settings.track_history === false ? ' hidden' : '' %>
+                <a href="/stats" class="nav-item nav-stats-item<%= hideStats %> <%= activePage === 'stats' ? 'active' : '' %>">
                     <i class="fa-solid fa-chart-simple"></i>
                     <span>統計數據</span>
                 </a>
-                <a href="/leaderboard" class="nav-item <%= activePage === 'leaderboard' ? 'active' : '' %>">
+                <a href="/leaderboard" class="nav-item nav-stats-item<%= hideStats %> <%= activePage === 'leaderboard' ? 'active' : '' %>">
                     <i class="fa-solid fa-trophy"></i>
                     <span>排行榜</span>
                 </a>

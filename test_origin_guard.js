@@ -71,6 +71,20 @@ async function run() {
   const settings = await (await fetch(BASE + '/api/settings')).json();
   check(settings.llm_base_url !== EVIL, 'settings.json 未被竄改', JSON.stringify(settings.llm_base_url));
 
+  // /api/db-clear 會刪資料且不可復原 —— 跨站呼叫等於任一網頁都能砍掉使用者的聆聽紀錄。
+  // form 版本同樣是 simple request,不觸發 preflight。
+  for (const [label, contentType, body] of [
+    ['JSON', 'application/json', JSON.stringify({ target: 'history' })],
+    ['form (無 preflight)', 'application/x-www-form-urlencoded', 'target=history'],
+  ]) {
+    const r = await fetch(BASE + '/api/db-clear', {
+      method: 'POST',
+      headers: { 'Content-Type': contentType, Origin: 'https://evil.example' },
+      body,
+    });
+    check(r.status === 403, `跨站 POST 清除資料庫 (${label})`, `${r.status} (expected 403)`);
+  }
+
   // WebSocket 的 upgrade 不經過 express middleware,要另外擋 (否則惡意網頁能收播放狀態廣播)
   const WebSocket = require('./web-app/node_modules/ws');
   for (const [label, origin, wantOpen] of [

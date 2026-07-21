@@ -116,7 +116,7 @@
 
         // 子選單直接在設定選單旁展開。三個飛出面板共用同一個定位點,
         // 同時開會疊在一起,所以開新的要把其他的收掉 (手風琴)。
-        const MENU_SECTIONS = ['hotkeys', 'source', 'llm'];
+        const MENU_SECTIONS = ['hotkeys', 'source', 'llm', 'data'];
         function toggleMenuSection(e, key) {
             if (e) e.stopPropagation();
             const sec = document.getElementById(key + '-section');
@@ -134,11 +134,63 @@
                 // 音訊來源:每次展開才掃一次媒體 session,關掉的 app 不會留在清單
                 if (key === 'source') loadMediaSources();
                 if (key === 'llm') loadLlmModels();
+                // 資料用量要掃全表,展開才查 —— 每次開設定選單都算沒必要
+                if (key === 'data') loadDbUsage();
             }
         }
         function toggleHotkeysSection(e) { toggleMenuSection(e, 'hotkeys'); }
         function toggleSourceSection(e) { toggleMenuSection(e, 'source'); }
         function toggleLlmSection(e) { toggleMenuSection(e, 'llm'); }
+        function toggleDataSection(e) { toggleMenuSection(e, 'data'); }
+
+        // -------------------------------------------------------------
+        // 聆聽紀錄與資料
+        // -------------------------------------------------------------
+        function updateTrackHistory(checked) {
+            saveSettingsToServer('track_history', checked);
+            // 側欄 SSR 時就決定好了,這裡只處理「當下這一頁」不用重新整理也會跟著變
+            document.querySelectorAll('.nav-stats-item').forEach(el => el.classList.toggle('hidden', !checked));
+        }
+
+        function fmtBytes(n) {
+            if (!n) return '0 KB';
+            return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+        }
+
+        async function loadDbUsage() {
+            const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+            set('usage-lyrics', '…'); set('usage-history', '…'); set('usage-manual', '…'); set('usage-file', '…');
+            try {
+                const d = await (await fetch('/api/db-usage', { cache: 'no-store' })).json();
+                set('usage-lyrics', `${d.lyrics.rows} 首 · ${fmtBytes(d.lyrics.bytes)}`);
+                set('usage-history', `${d.history.rows} 筆 · ${fmtBytes(d.history.bytes)}`);
+                set('usage-manual', `${d.manual.rows} 筆`);
+                set('usage-file', fmtBytes(d.file));
+            } catch (e) {
+                set('usage-lyrics', '讀取失敗'); set('usage-history', '讀取失敗');
+                set('usage-manual', '—'); set('usage-file', '—');
+            }
+        }
+
+        async function clearDbData(target) {
+            // 聆聽紀錄清了回不來,歌詞快取只是要重抓 —— 文案要讓使用者分得出差別
+            const prompt = target === 'history'
+                ? '確定清除全部聆聽紀錄嗎？\n\n統計數據與排行榜會歸零，這個動作無法復原。'
+                : '確定清除歌詞快取嗎？\n\n之後播到的歌會重新上網抓一次。\n你手動修正過的假名與時間軸校正不會被清掉。';
+            if (!confirm(prompt)) return;
+            try {
+                const r = await fetch('/api/db-clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                if (!r.ok) throw new Error((await r.json()).error || r.status);
+                showToast(target === 'history' ? '聆聽紀錄已清除' : '歌詞快取已清除', 'fa-solid fa-circle-check', 2500);
+                loadDbUsage();
+            } catch (e) {
+                showToast('清除失敗：' + e.message, 'fa-solid fa-triangle-exclamation', 4000);
+            }
+        }
 
         // 供應商 preset:選了預填 Base URL / Model (仍可手改),key 照舊自己貼。
         // 與 server.js LLM_PROVIDERS 同源資料;Ollama 沒 key、自動偵測不會跑,只能靠這裡。
@@ -776,6 +828,8 @@
                     const ilEl = document.getElementById('setting-island-lines');
                     if (ilEl) ilEl.value = data.island_lines;
                 }
+                const thEl = document.getElementById('setting-track-history');
+                if (thEl) thEl.checked = data.track_history !== false;
                 
                 const llmMode = document.getElementById('llm-mode');
                 if (llmMode) llmMode.value = data.llm_furigana || 'off';

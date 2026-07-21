@@ -48,7 +48,7 @@ gh release create v1.1.0 "web-app/release/Kanaric Setup 1.1.0.exe" \
 tag 沒帶 `v` 或漏推,更新提醒就抓不到新版。安裝檔未簽章,`gh release create` 會直接公開發布,屬於
 「發布公開內容」的動作,不要自動執行,要使用者自己按。
 - C# overlay: auto-launched by `npm run app`; standalone dev run: `DynamicIslandUI/bin/Release/net8.0-windows/DynamicIslandUI.exe` (build with `dotnet build DynamicIslandUI`; requires .NET 8 SDK).
-- 沒有 test runner 或 linter。零星的獨立測試檔直接用直譯器跑:`node test_origin_guard.js` (同源守門)、`node test_s2t.js` (簡轉繁)、`python test_pick_session.py`、`python test_furigana_hint.py`。
+- 沒有 test runner 或 linter。零星的獨立測試檔直接用直譯器跑:`node test_origin_guard.js` (同源守門)、`node test_s2t.js` (簡轉繁)、`node test_itunes_resolving.js` (iTunes 原名還原的時序)、`node test_history_toggle.js` (聆聽紀錄開關 + 清除白名單)、`python test_pick_session.py`、`python test_furigana_hint.py` (Python 的要用 `venv/Scripts/python.exe`,系統 python 沒裝 fugashi)。
 
 ## Architecture
 
@@ -80,6 +80,9 @@ One Node.js backend, multiple thin clients, with Python scripts as helpers spawn
 - **`lyrics_data.db`** (repo root, SQLite, WAL mode): tables `cache` (lyrics keyed by artist+title), `listening_history`, `sync_offsets`, `word_corrections` (user furigana overrides), `artist_aliases` (maps Spotify's translated artist names back to originals, e.g. 魚韻 → サカナクション), `romaji_hints` (per-song reading hints from `cn_music`; an empty `{}` is a negative-cache entry meaning "already looked, no source has it"). Path configurable via `DB_PATH` env var. The .db file is gitignored (`*.db`),每台機器各自初始化。
   - **歌手名收斂在 `handleMediaUpdate` 做,只此一處。** 每張表的鍵都是 (artist, title),而不同播放 app 對同一位歌手給不同寫法 (Spotify 給「魚韻」、YouTube 給「サカナクション」),同一首歌就會分裂成兩筆。解法是進 `handleMediaUpdate` 時就用 `artistAliases` Map (開機載入 `artist_aliases` 全表,`/api/aliases` 增刪後同步更新;`handleMediaUpdate` 是同步的,不能在那等 `db.get`) 把名字換成正規名,下游的 cache、listening_history、Python 端讀音提示全部自動一致。**不要在各處寫入點各包一次,也不要為了「分開不同來源」把 source 加進主鍵** —— 實測重複全來自 metadata 字串,加 source 一列都修不掉,反而讓五張表都要改鍵。舊資料用 `scripts/merge_aliases.py` 一次性收斂 (預設 dry-run,`--apply` 才寫入並自動備份)。
   - `listening_history` 另有 `base_title` (virtual generated column,剝掉第一個括號起的尾綴):統計/排行榜一律 GROUP BY 它,讓 `(Live)`/`(feat. …)` 算同一首。**歌詞類的表刻意不加這欄** —— Live 版歌詞本來就不同,必須分開快取。定義同時寫在 server.js 建表處與 `db.py`,改一邊要改兩邊。
+  - **`track_history` 設定 (預設 true) 的閘門只在 `global.logListen`,不要在別處再判斷一次。** `listening_history` 只有這一個寫入點 (換新歌、暫停後續播兩條計時器路徑共用);判斷刻意放在計時器「觸發時」而非排程時,使用者播到一半關掉就真的不會被記錄。關閉時側欄的統計數據/排行榜也一起隱藏 (`.nav-stats-item`,SSR 靠 `res.locals.settings` 決定,不然會閃一下才隱藏),但**路由保留** —— 關掉是「不記錄 / 不礙眼」,不是鎖起來。舊的 `/api/play-event` 是雲端同步時代的遺留、沒有任何呼叫者,已刪除,不要為了「外部 agent 也能回報」加回來。
+  - **清除功能 (`/api/db-clear`) 的白名單寫死在 `CLEAR_TARGETS`,只碰得到可重建的資料。** `cache`/`romaji_hints`/`llm_hints` 清掉只是下次重抓;`word_corrections`、`sync_offsets`、`artist_aliases`、`search_overrides` 是使用者親手打的,**任何清除路徑都不准碰**,`/api/db-usage` 只顯示筆數。清 `lyrics` 要一併清記憶體的 `furiganaCache` 與 `itunesCache`,否則已刪的歌詞還會被吐出來;最後一定要 `VACUUM`,不然檔案不會真的變小。`romaji_hints`/`llm_hints` 是 Python 端 (`db.py`) 建的,**全新安裝上可能不存在** —— 這幾條 `db.run` 的 callback 不能省,沒 callback 的 "no such table" 會被 node-sqlite3 丟成未捕捉例外、整個 server 掛掉。回歸測試 `node test_history_toggle.js`。
+  - 體積實測 (2026-07,393 首歌 / 349 筆紀錄 = 1.7 MB):`cache` 每首約 1.2 KB、`romaji_hints` 每首約 0.9 KB,而 `listening_history` 每筆只有 31 bytes (佔全庫 0.6%)。**要談資料庫大小,施力點是歌詞快取,不是聆聽紀錄。**
 
 ### Desktop packaging (Electron)
 
@@ -105,6 +108,9 @@ GitHub repo 也已改名 `bensionfang/Kanaric`,`server.js` 的 `GITHUB_REPO` 跟
 
 1. `media_monitor.py` (or an edge agent) reports a track change → `handleMediaUpdate` → WebSocket broadcast to all clients.
 2. Lyrics are lazy-loaded: the **web frontend** reacts to the broadcast by calling `GET /api/lyrics/fetch`; the server checks the SQLite cache, applies artist aliases, fetches externally on miss, runs furigana injection, then broadcasts the result — the C# island never fetches on its own.
+   - **`state.resolving` 是「歌名還沒定案」的旗標,前端必須等它變 false 才抓歌詞。** iTunes 日文原名還原 (`getResolvedMetadata`) 是非同步的,`handleMediaUpdate` 不能等,所以換歌後頭幾百毫秒 state 帶的是原始歌名、幾秒後才換成日文原名。前端是靠「title 變了」判斷換歌的,沒有這個旗標就會用兩個不同的鍵各抓一次歌詞 —— 第二次多半撞到來源限流拿到空的,把已經抓對的歌詞蓋成「找不到歌詞」,要重新載入才好。
+   - `itunesCache` 的佔位項帶 `pending: true`,`getResolvedMetadata` **每一條 return 前都要覆寫掉它** (含假名早退、查到、例外三條)。漏掉任何一條,那首歌的 `resolving` 永遠是 true,歌詞就完全不會抓。回歸測試 `node test_itunes_resolving.js`。
+   - 前端 (`app.js`) 用 `lastLyricsKey` 判斷要不要抓,跟 `lastMediaTitle` 分開:換歌時 `lastMediaTitle` 會變兩次 (原名 → 還原後),歌詞只該抓最後定案的那次。自動搜尋備選歌詞也綁在同一個判斷裡,理由相同。
 3. A track is only written to `listening_history` after 30 seconds of accumulated actual playback (pause/resume-aware timer in `server.js`).
 
 ### Furigana editing (web frontend)

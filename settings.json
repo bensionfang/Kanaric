@@ -24,5 +24,6 @@
     "media_source": "auto",
     "llm_base_url": "",
     "llm_model": "",
-    "llm_furigana": "off"
+    "llm_furigana": "off",
+    "track_history": true
 }
