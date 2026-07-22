@@ -804,8 +804,10 @@ button.menu-action i {
     pointer-events: none;
 }
 
+/* 譯文收在內層 span 上而不是那顆 div:div 是 block,可點範圍會拉滿整行寬度,
+   點到右邊空白處也會跳轉。pointer-events 是可繼承屬性,所以 div 從 .lyrics-line 拿到 none */
 .lyrics-line > span,
-.lyrics-line .lyrics-translation {
+.lyrics-line .lyrics-translation > span {
     pointer-events: auto;
     cursor: pointer;
 }
@@ -829,7 +831,10 @@ button.menu-action i {
     cursor: pointer;
 }
 
-.lyrics-line:not(.active):hover rt {
+/* rt 與譯文都自己設了 color,不寫這兩條的話 hover 只會傳下去底線 (text-decoration 會
+   繼承、color 不會),變成「有底線但沒變白」的半套 hover */
+.lyrics-line:not(.active):hover rt,
+.lyrics-line:not(.active):hover .lyrics-translation {
     color: #ffffff;
 }
 
@@ -839,10 +844,25 @@ button.menu-action i {
 
 /* 假名編輯模式:整行的 hover 反白關掉,只有游標指到的漢字亮起來 */
 body.ruby-edit-mode .lyrics-line:not(.active):hover,
-body.ruby-edit-mode .lyrics-line:not(.active):hover rt {
+body.ruby-edit-mode .lyrics-line:not(.active):hover rt,
+body.ruby-edit-mode .lyrics-line:not(.active):hover .lyrics-translation {
     color: var(--lyrics-inactive, rgba(255, 255, 255, 0.5));
     text-decoration: none;
     cursor: default;
+}
+
+/* 編輯模式下真的能點的只有 ruby.editable-ruby:純片假名的 kata-ruby 是字形轉換、不進
+   word_corrections,純文字與譯文更沒東西可改。那些地方要回預設游標,不然整行看起來都可點。
+   選擇器要帶 body.ruby-edit-mode 才蓋得過上面 .lyrics-line > span 的 cursor: pointer */
+body.ruby-edit-mode .lyrics-line > span,
+body.ruby-edit-mode .lyrics-line .lyrics-translation,
+body.ruby-edit-mode .lyrics-line .lyrics-translation > span,
+body.ruby-edit-mode .lyrics-line ruby:not(.editable-ruby) {
+    cursor: default;
+}
+
+body.ruby-edit-mode .lyrics-line ruby.editable-ruby {
+    cursor: pointer;
 }
 
 body.ruby-edit-mode .lyrics-line ruby.editable-ruby:hover,
@@ -876,11 +896,23 @@ body.loop-mode .lyrics-line:hover > span,
     -webkit-box-decoration-break: clone;
 }
 
-body.loop-mode .lyrics-line:hover > span {
+/* 譯文那行也要一起上底色,不然選起來的段落只有日文有綠底。它沒有 rt 要讓位,
+   所以上下 padding 對稱,不沿用上面那組 */
+body.loop-mode .lyrics-line:hover .lyrics-translation > span,
+.lyrics-line.loop-range .lyrics-translation > span {
+    border-radius: 6px;
+    padding: 0.15em 10px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+}
+
+body.loop-mode .lyrics-line:hover > span,
+body.loop-mode .lyrics-line:hover .lyrics-translation > span {
     background: rgba(29, 185, 84, 0.18);
 }
 
-.lyrics-line.loop-range > span {
+.lyrics-line.loop-range > span,
+.lyrics-line.loop-range .lyrics-translation > span {
     background: rgba(29, 185, 84, 0.10);
 }
 
@@ -1230,6 +1262,18 @@ input[type="range"] {
     margin-bottom: 14px;
 }
 
+/* 這一步要框的按鈕不在畫面上時附註原因。導覽不跳過那一步 —— 使用者仍該知道有這個功能 */
+#tour-popover .tour-note {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-left: 2px solid var(--accent-main, #1db954);
+    background: rgba(29, 185, 84, 0.08);
+    border-radius: 0 4px 4px 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-dim);
+}
+
 #tour-popover .tour-footer {
     display: flex;
     align-items: center;
@@ -1282,11 +1326,15 @@ input[type="range"] {
     overflow: hidden;
 }
 .segment-btn {
+    /* min-width:0 不能省:flex 項目預設 min-width:auto,不會縮到比「內容 + 左右 padding」更小。
+       三顆各 20px 左右 padding 就要 159px,而容器固定 143px (要跟右欄的下拉對齊) 又是
+       overflow:hidden —— 最後那顆「右」就被裁掉了。padding 改用比例,由 flex 平分寬度 */
     flex: 1;
+    min-width: 0;
     background: transparent;
     border: none;
     color: var(--text-secondary);
-    padding: 8px 20px;
+    padding: 8px 4px;
     font-size: 13px;
     cursor: pointer;
     transition: var(--transition-smooth);

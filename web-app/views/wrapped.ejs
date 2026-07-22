@@ -222,9 +222,6 @@
             <div style="font-size: 2rem; font-weight: 800;" id="sum-plays">0</div>
           </div>
         </div>
-        <div style="margin-top: 2rem;">
-          <a href="/" style="text-decoration: none;"><button class="btn primary">回到首頁</button></a>
-        </div>
       </div>
     </div>
   </div>
@@ -232,6 +229,8 @@
   <div class="controls">
     <button class="btn" id="btn-prev" style="display: none;">上一步</button>
     <button class="btn primary" id="btn-next">下一步</button>
+    <!-- 最後一張把「下一步」換成「回到首頁」,位置一樣 —— 看完就在原地離開,不用再往回找按鈕 -->
+    <a class="btn primary" id="btn-home" href="/" style="display: none; text-decoration: none;">回到首頁</a>
   </div>
 
   <script>
@@ -240,11 +239,14 @@
     const carousel = document.getElementById('carousel');
     const btnNext = document.getElementById('btn-next');
     const btnPrev = document.getElementById('btn-prev');
+    const btnHome = document.getElementById('btn-home');
 
     function updateNav() {
+      const last = currentSlide === slides.length - 1;
       btnPrev.style.display = currentSlide === 0 ? 'none' : 'block';
-      btnNext.style.display = currentSlide === slides.length - 1 ? 'none' : 'block';
-      
+      btnNext.style.display = last ? 'none' : 'block';
+      btnHome.style.display = last ? 'block' : 'none';
+
       slides.forEach((s, i) => {
         if(i === currentSlide) s.classList.add('active');
         else s.classList.remove('active');

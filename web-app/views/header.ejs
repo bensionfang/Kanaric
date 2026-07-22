@@ -14,7 +14,7 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Style -->
-    <link rel="stylesheet" href="/css/style.css?v=86">
+    <link rel="stylesheet" href="/css/style.css?v=90">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- 各頁共用:吐司 + 備選歌詞 + 重新載入歌詞 -->
@@ -50,14 +50,14 @@
                     <div class="menu-row">
                         <span class="menu-label">顯示中文翻譯</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="setting-translation" onchange="saveSettingsToServer('show_translation', this.checked)">
+                            <input type="checkbox" id="setting-translation" onchange="updateLyricsContentSetting('show_translation', this.checked)">
                             <span class="slider round"></span>
                         </label>
                     </div>
                     <div class="menu-row">
                         <span class="menu-label">片假名標平假名</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="setting-katakana-ruby" onchange="updateKatakanaRuby(this.checked)">
+                            <input type="checkbox" id="setting-katakana-ruby" onchange="updateLyricsContentSetting('katakana_ruby', this.checked)">
                             <span class="slider round"></span>
                         </label>
                     </div>
@@ -340,7 +340,7 @@
                     <span>排行榜</span>
                 </a>
                 <a href="/wrapped" class="nav-item nav-stats-item<%= hideStats %> <%= activePage === 'wrapped' ? 'active' : '' %>">
-                    <i class="fa-solid fa-wand-sparkles"></i>
+                    <i class="fa-solid fa-gift"></i>
                     <span>年度回顧</span>
                 </a>
                 <a href="/editor" class="nav-item <%= activePage === 'editor' ? 'active' : '' %>">

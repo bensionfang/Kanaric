@@ -429,7 +429,9 @@ function renderLyrics() {
     let html = parsedLyrics.map((lyric, index) => {
         let content = `<span>${lyric.text}</span>`;
         if (lyric.translation) {
-            content += `<div class="lyrics-translation">${lyric.translation}</div>`;
+            // 內層再包一顆 span:段落循環的綠底只上在 span 上,好貼著文字而不是整行滿寬。
+            // 直接給這顆 div 上底色會變方塊,而 width:fit-content 又會讓歌詞對齊 (text-align) 失效
+            content += `<div class="lyrics-translation"><span>${lyric.translation}</span></div>`;
         }
         return `<div class="lyrics-line ${isUnsyncedLyrics ? 'active' : ''}" id="lyric-line-${index}" data-time="${lyric.time}">${content}</div>`;
     }).join('');
@@ -877,7 +879,9 @@ function seekTo(sec) {
 
 document.getElementById('lyrics-scroll').addEventListener('click', (e) => {
     if (isRubyEditMode) {
-        const ruby = e.target.closest('ruby');
+        // 只認 editable-ruby:kata-ruby 沒有 data-orig/data-hira,讓它進編輯會存出一筆
+        // word 是 undefined 的 word_corrections
+        const ruby = e.target.closest('ruby.editable-ruby');
         if (ruby && ruby !== currentEditingRuby) startRubyEdit(ruby);
         return;
     }

@@ -660,7 +660,14 @@
             // 平常半透明的元素 (如微調時間軸面板) 在被框住時要強制現形
             document.querySelectorAll('.tour-reveal').forEach(el => el.classList.remove('tour-reveal'));
 
-            const target = step.el ? document.querySelector(step.el) : null;
+            // display:none 的元素 querySelector 仍然找得到,但 getBoundingClientRect 全是 0 ——
+            // 高亮框會縮成左上角一個看不懂的小點。工具列的按鈕可以在設定裡用眼睛藏起來,
+            // 而魔杖沒設 API key 時是 SSR 就整顆不長 (連元素都沒有)。兩種都退回「無目標」那條:
+            // 卡片置中、不畫框,並在說明下面附一行原因。步驟不跳過 —— 使用者仍該知道有這個功能。
+            let target = step.el ? document.querySelector(step.el) : null;
+            const rect0 = target && target.getBoundingClientRect();
+            const targetMissing = !!step.el && !(rect0 && (rect0.width > 0 || rect0.height > 0));
+            if (targetMissing) target = null;
             if (target && step.reveal) target.classList.add('tour-reveal');
             if (target) {
                 // highlight 與說明卡都是 position:fixed(視窗座標),目標在畫面外就會框到螢幕外。
@@ -689,7 +696,12 @@
             }
 
             const isLast = tourIndex === currentTour.length - 1;
-            const stepText = (tourNoSongs && step.emptyText) ? step.emptyText : step.text;
+            let stepText = (tourNoSongs && step.emptyText) ? step.emptyText : step.text;
+            if (targetMissing) {
+                stepText += '<div class="tour-note">這個東西目前不在畫面上。工具列的按鈕可以在設定選單的'
+                    + '「自訂快捷鍵」用眼睛圖示收起來,點回來就會出現;「AI 讀音校正」的魔杖則要先在'
+                    + '「AI 讀音校正」小節填好 API Key 再重新載入頁面。</div>';
+            }
             po.innerHTML = `
                 <div class="tour-title">${step.title}</div>
                 <div class="tour-text">${stepText}</div>
@@ -750,12 +762,13 @@
             saveSettingsToServer('show_furigana', checked);
         }
 
-        // 片假名 ruby 是 server 注音時決定的,不像 show_furigana 有 CSS 可切。
+        // 片假名 ruby 與中文譯文都是 server 產內容時決定的,不像 show_furigana 有 CSS 可切。
         // 靈動島吃 server 廣播的 lyrics_updated 會自己更新,但網頁沒有 WebSocket
         // (只輪詢 /api/current-media),所以這裡自己重抓一次歌詞重畫。
+        // 兩個開關共用這條路徑 —— 少一個就是「切了沒反應,要重整才生效」。
         // 不用 fetchAndParseLyrics:那會先塞「正在搜尋歌詞」的轉圈,切個開關不該閃一下。
-        async function updateKatakanaRuby(checked) {
-            await saveSettingsToServer('katakana_ruby', checked);
+        async function updateLyricsContentSetting(key, checked) {
+            await saveSettingsToServer(key, checked);
             const { title, artist } = currentSong();
             if (!title || typeof parseLrcLyrics !== 'function') return;   // 只有首頁有歌詞面板
             try {
