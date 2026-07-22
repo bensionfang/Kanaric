@@ -78,7 +78,23 @@ async function waitResolved(title, artist, timeoutMs = 6000) {
     );
   }
 
-  // 4. 沒有播放來源時不能卡在 resolving
+  // 4. 瀏覽器來源:影片標題與頻道名進場就洗乾淨 (鍵是 (artist, title),不洗就會跟
+  //    音樂 app 聽的同一首分裂成兩筆)。這是 handleMediaUpdate 的第一步,在 iTunes 還原之前。
+  const yt = {
+    title: 'ダンス・デカダンス／Chevon 【Lyric Video】', artist: 'Chevon-シェボン',
+    album: '', source: 'chrome.exe', position: 1, duration: 233, is_playing: true,
+  };
+  global.handleMediaUpdate(yt);
+  check(yt.title === 'ダンス・デカダンス', '瀏覽器來源:影片標題進場就洗乾淨', yt.title);
+  check(yt.original_title === 'ダンス・デカダンス／Chevon 【Lyric Video】',
+    '瀏覽器來源:原始標題留在 original_title');
+
+  // 音樂 app 的標題一個字都不准動 (Live/Remix 版本資訊必須留著)
+  const sp = { ...track('Lemon (Live)', '米津玄師'), source: 'Spotify.exe' };
+  global.handleMediaUpdate(sp);
+  check(sp.title === 'Lemon (Live)', '音樂 app 來源:標題不去噪', sp.title);
+
+  // 5. 沒有播放來源時不能卡在 resolving
   const empty = { title: '', artist: '', is_playing: false };
   global.handleMediaUpdate(empty);
   check(empty.resolving === false, '無播放來源:resolving=false');

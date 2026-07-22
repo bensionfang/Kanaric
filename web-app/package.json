@@ -41,6 +41,7 @@
       "electron.js",
       "server.js",
       "s2t.js",
+      "browser-query.js",
       "island.js",
       "preload-island.js",
       "views/**",

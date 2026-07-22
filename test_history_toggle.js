@@ -41,7 +41,8 @@ const count = (table) => new Promise((resolve, reject) => {
   probe.get(`SELECT COUNT(*) AS n FROM ${table}`, [], (e, row) => (e ? reject(e) : resolve(row.n)));
 });
 
-const play = (title) => global.logListen({ artist: 'テスト', title, album: null, duration: 200 });
+const play = (title, source) =>
+  global.logListen({ artist: 'テスト', title, album: null, duration: 200, source });
 
 async function waitForServer() {
   for (let i = 0; i < 100; i++) {
@@ -110,7 +111,24 @@ async function run() {
   }
   check(await count('word_corrections') === 1, '被拒的請求沒有動到任何資料');
 
-  // 7. 用量端點的數字要跟真實筆數一致
+  // 7. 瀏覽器來源:抓不到歌詞的不記錄 (YouTube 雜談影片不該混進統計)
+  await new Promise((r) => probe.run("DELETE FROM listening_history", r));
+  await new Promise((r) => probe.run("DELETE FROM cache", r));
+
+  play('雜談影片', 'chrome.exe');
+  await sleep(300);
+  check(await count('listening_history') === 0, '瀏覽器來源 + 沒有歌詞快取 -> 不記錄');
+
+  play('沒歌詞但來自音樂 app', 'Spotify.exe');
+  await sleep(300);
+  check(await count('listening_history') === 1, '音樂 app 來源不受這道閘門影響');
+
+  await new Promise((r) => probe.run("INSERT OR REPLACE INTO cache VALUES ('テスト', '有歌詞的歌', '[00:01.00]歌詞')", r));
+  play('有歌詞的歌', 'chrome.exe');
+  await sleep(300);
+  check(await count('listening_history') === 2, '瀏覽器來源 + 有歌詞快取 -> 照記');
+
+  // 8. 用量端點的數字要跟真實筆數一致
   const usage = await (await fetch(BASE + '/api/db-usage')).json();
   check(usage.history.rows === await count('listening_history'), '/api/db-usage 聆聽紀錄筆數正確',
     `${usage.history.rows}`);

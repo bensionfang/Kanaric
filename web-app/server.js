@@ -15,7 +15,8 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
-const { toTraditional } = require('./s2t');   // 簡體歌詞轉繁 (日文歌會跳過,見該檔註解)
+const { toTraditional, toSimplified } = require('./s2t');   // 簡體歌詞轉繁 (日文歌會跳過,見該檔註解)
+const { cleanBrowserQuery, isMusicAppSource } = require('./browser-query');   // 瀏覽器來源的影片標題去噪
 require('dotenv').config();
 
 const app = express();
@@ -249,6 +250,17 @@ let lastResumeTime = 0;
 global.logListen = function(state) {
   songLogged = true;
   if (readSettings().track_history === false) return;
+  // 瀏覽器來源:抓不到歌詞的就不記錄。YouTube 上聽歌與看雜談影片是同一個 session,
+  // 不擋的話「第1回ぶいすぽスポーツテストを見て…」這種影片會混進統計與排行榜。
+  // 談話性影片幾乎都抓不到歌詞;副作用是在 YouTube 聽的冷門歌 (真的沒有歌詞) 也不會被記錄。
+  if (!isMusicAppSource(state.source)) {
+    return db.get('SELECT 1 FROM cache WHERE artist = ? AND title = ?', [state.artist, state.title],
+      (err, row) => { if (!err && row) writeListen(state); });
+  }
+  writeListen(state);
+};
+
+function writeListen(state) {
   db.run(
     'INSERT INTO listening_history (artist, title, album, duration) VALUES (?, ?, ?, ?)',
     [state.artist, state.title, state.album || null, Math.round(state.duration) || 180],
@@ -256,7 +268,7 @@ global.logListen = function(state) {
     // (開機頭幾秒建表還沒跑完就撞上這裡的話就是 "no such table")
     (err) => { if (err) console.error('logListen 寫入失敗:', err.message); }
   );
-};
+}
 
 global.handleMediaUpdate = function(rawState) {
   try {
@@ -264,12 +276,28 @@ global.handleMediaUpdate = function(rawState) {
     // 頭幾百毫秒名字還是原始的、之後才會被換成日文原名。前端看到 title 變就當作換歌重抓
     // 歌詞,會用兩個不同的鍵各抓一次 (第二次多半撞到來源限流而變成「找不到歌詞」)。
     // resolving=true 就是叫前端等名字定案再抓,整首歌只抓一次。
+    // 瀏覽器來源:影片標題與頻道名進場就洗乾淨,而不是只洗搜尋字串。鍵是 (artist, title),
+    // 不洗的話「Chevon-シェボン / ダンス・デカダンス／Chevon 【Lyric Video】」跟 Spotify 聽的
+    // 同一首會在 cache 與排行榜分裂成兩筆。順序是 去噪 → iTunes 還原 → 別名收斂:
+    // artist_aliases 的鍵是乾淨名,iTunes 查詢也該拿乾淨名去查。
+    if (rawState.title && !isMusicAppSource(rawState.source)) {
+      const c = cleanBrowserQuery(rawState.title, rawState.artist);
+      if (c.title !== rawState.title || c.artist !== rawState.artist) {
+        rawState.original_title = rawState.title;
+        rawState.original_artist = rawState.artist;
+        rawState.title = c.title;
+        rawState.artist = c.artist;
+      }
+    }
+
     rawState.resolving = false;
     if (rawState.title && rawState.artist) {
       const key = `${rawState.title}-${rawState.artist}`;
       const resolved = itunesCache.get(key);
       if (!resolved) {
-         getResolvedMetadata(rawState.title, rawState.artist, rawState.duration);
+         // 瀏覽器來源的時長是影片長度 (含前奏/對白),拿去跟 iTunes 的曲目長度比只會誤判,傳 null
+         getResolvedMetadata(rawState.title, rawState.artist,
+           isMusicAppSource(rawState.source) ? rawState.duration : null);
          rawState.resolving = true;
       } else if (resolved.pending) {
          rawState.resolving = true;
@@ -764,10 +792,14 @@ function injectFurigana(artist, title, lyrics, forceLlm = false, meta = null) {
 }
 
 // 正在播的這首歌的長度 (秒)。搜尋結果撞名/翻唱時拿來當佐證,只有查詢的就是當前曲目才算數。
+// **瀏覽器來源不給時長**:YouTube 的 MV 含前奏/對白/outro,普遍比音源長,而 cn_music._pick_song
+// 在歌手對不上時要求 ±3 秒才收 —— 拿影片長度當證據只會把正確的歌退貨。代價是失去擋 QQ 147 秒
+// preview 的防護,但那道防護對 YouTube 本來就常誤判。
 function currentDuration(title, artist) {
   const s = currentMediaState;
   if (!s || !s.duration) return null;
   if (s.title !== title || s.artist !== artist) return null;
+  if (!isMusicAppSource(s.source)) return null;
   return s.duration;
 }
 
@@ -777,30 +809,6 @@ function currentSource(title, artist) {
   if (!s || !s.source) return null;
   if (s.title !== title || s.artist !== artist) return null;
   return s.source;
-}
-
-// ponytail: 手動鏡射 media_monitor.py 的 MUSIC_APPS (兩份 4 個字串);那邊改了這邊要跟
-const MUSIC_APPS = ['spotify', 'applemusic', 'itunes', 'zunemusic'];
-function isMusicAppSource(source) {
-  if (!source) return true; // 未知來源當音樂 app,不去噪 (保守)
-  const s = source.toLowerCase();
-  return MUSIC_APPS.some(a => s.includes(a));
-}
-
-// 瀏覽器/影片來源:剝掉影片名常見噪音 (【MV】、(Official Music Video) 之類) 與頻道尾綴。
-// 保守 —— 只剝含明確噪音關鍵字的整塊括號,不拆 Artist - Song。
-const _NOISE_KW = /(mv|pv|official|music\s*video|lyric[s]?|audio|hd|4k|full|live|cover|feat\.?|カラオケ|歌ってみた|フル|字幕)/i;
-function cleanBrowserQuery(title, artist) {
-  const t = (title || '')
-    .replace(/[【［(\[（][^】］)\]）]*[】］)\]）]/g, (m) => _NOISE_KW.test(m) ? '' : m)
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-  const a = (artist || '')
-    .replace(/\s*-\s*Topic\s*$/i, '')
-    .replace(/\s*VEVO\s*$/i, '')
-    .replace(/\s*Official\s*$/i, '')
-    .trim();
-  return { title: t || title, artist: a || artist };
 }
 
 // 統一算出查詢用字串。優先序:明確 searchTitle/searchArtist 參數 > 存的 per-song 覆蓋 >
@@ -881,6 +889,19 @@ function fetchCnLyrics({ title, artist, searchTitle, searchArtist, source = 'aut
       return parsed.lyrics ? { lyrics: parsed.lyrics, source: parsed.source } : null;
     }
   });
+}
+
+// 中國三家的搜尋結果標題是簡體,繁體歌名 (告白氣球) 過不了 cn_music._title_matches 的比對,
+// 整首歌就 MISS。但**不能一律轉簡體**:純漢字的日文歌名 (新宝島 -> 新宝岛) 轉了反而查不到。
+// 所以原名先查,全 MISS 且轉換後真的不一樣時才用簡體重試一次 —— 只在既有的失敗路徑上多一次請求。
+async function fetchCnLyricsS2(q) {
+  const first = await fetchCnLyrics(q);
+  if (first && (!Array.isArray(first) || first.length)) return first;
+
+  const sTitle = toSimplified(q.searchTitle);
+  const sArtist = toSimplified(q.searchArtist);
+  if (sTitle === q.searchTitle && sArtist === q.searchArtist) return first;
+  return fetchCnLyrics({ ...q, searchTitle: sTitle, searchArtist: sArtist });
 }
 
 function fetchFallback(title, artist, fetchAll = false) {
@@ -1057,7 +1078,7 @@ app.get('/api/lyrics/fetch', async (req, res) => {
 
       // 網易/酷狗:歌詞與日文讀音提示一次抓回,注音時就不用再打一次網路
       if (preferredSource === 'NetEase' || preferredSource === 'Kugou') {
-        const cnData = await fetchCnLyrics({
+        const cnData = await fetchCnLyricsS2({
           title, artist, searchTitle: cleanTitle, searchArtist: trueArtist, source: preferredSource
         });
         if (cnData && cnData.lyrics) {
@@ -1087,7 +1108,9 @@ app.get('/api/lyrics/fetch', async (req, res) => {
           }
       }
 
-      if (!bestLyric) {
+      // lrclib 連不上 (被牆/離線) 時 fetch 會 throw。不接住的話會跳到最外層的 catch,
+      // 把前面已經拿到的 plainBackup 一起丟掉 —— 有無時間軸的歌詞也比「找不到歌詞」好。
+      if (!bestLyric) try {
           const apiUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(trueArtist)}&track_name=${encodeURIComponent(cleanTitle)}`;
           const lrclibResp = await fetch(apiUrl, {
             headers: { "User-Agent": "Kanaric/1.0 (https://github.com/bensionfang/Kanaric)" }
@@ -1103,8 +1126,10 @@ app.get('/api/lyrics/fetch', async (req, res) => {
               finalSource = 'Lrclib';
             }
           }
+      } catch (e) {
+          console.warn('Lrclib 查詢失敗,略過:', e.message);
       }
-      
+
       if (!bestLyric && !fallbackSearched) {
         const fbData = await fetchFallback(cleanTitle, qArtist);
         if (fbData && fbData.lyrics) {
@@ -1245,7 +1270,7 @@ async function searchOptions({ title, artist, searchTitle, searchArtist }) {
 
     // 網易 / 酷狗 (自家 client,不經過 syncedlyrics)
     try {
-      const cnResults = await fetchCnLyrics({
+      const cnResults = await fetchCnLyricsS2({
         title, artist, searchTitle: cleanTitle, searchArtist: trueArtist, source: 'all'
       });
       if (Array.isArray(cnResults)) {

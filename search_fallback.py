@@ -147,11 +147,16 @@ def main():
     try:
         lyric, source = None, None
         queries = generate_queries(title, artist)
+        # 逐個 provider 問 (而不是把整串丟給 syncedlyrics),才知道歌詞真正來自哪一家 ——
+        # 這個名字會原樣顯示在 UI 的來源標示上。順序沿用 providers (偏好來源排第一)。
         for q_title, q_artist in queries:
             query = f"{q_title} {q_artist}"
-            lyric = syncedlyrics.search(query, providers=providers)
+            for p in providers:
+                lyric = fetch_single_provider(query, p)
+                if lyric:
+                    source = p
+                    break
             if lyric:
-                source = "NetEase"
                 break
         if not lyric:
             try:

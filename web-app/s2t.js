@@ -14,4 +14,15 @@ function toTraditional(text) {
   return text.split('\n').map((line) => (line.includes('#TITLE#') ? convert(line) : line)).join('\n');
 }
 
-module.exports = { toTraditional };
+// 反向:繁 -> 簡,只給「查中國平台」用。中國三家的搜尋結果標題是簡體,cn_music._title_matches
+// 拿正規化字串互相包含來比對,繁體歌名 (告白氣球) 永遠對不上簡體結果 (告白气球) —— 整首歌就 MISS。
+// **不能無條件轉**:日文歌名常是純漢字 (新宝島 -> 新宝岛) 轉了反而查不到,所以呼叫端是
+// 「原名先查、MISS 才用簡體重試」,這裡只負責轉換,有假名一律原樣回傳 (同 toTraditional 的分界)。
+const convertToCn = OpenCC.Converter({ from: 'tw', to: 'cn' });
+
+function toSimplified(text) {
+  if (!text || /[぀-ヿ]/.test(text)) return text;
+  return convertToCn(text);
+}
+
+module.exports = { toTraditional, toSimplified };
