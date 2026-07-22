@@ -14,7 +14,7 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Style -->
-    <link rel="stylesheet" href="/css/style.css?v=85">
+    <link rel="stylesheet" href="/css/style.css?v=86">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- 各頁共用:吐司 + 備選歌詞 + 重新載入歌詞 -->
@@ -44,6 +44,13 @@
                         <span class="menu-label">顯示日文假名</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="setting-furigana" onchange="updateFuriganaSetting(this.checked)" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="menu-row">
+                        <span class="menu-label">顯示中文翻譯</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-translation" onchange="saveSettingsToServer('show_translation', this.checked)">
                             <span class="slider round"></span>
                         </label>
                     </div>
@@ -119,6 +126,13 @@
                             <select id="setting-island-lines" class="menu-select" onchange="saveSettingsToServer('island_lines', parseInt(this.value))">
                                 <option value="1">1 行</option>
                                 <option value="2" selected>2 行</option>
+                            </select>
+                        </div>
+                        <div class="hk-row">
+                            <span class="hk-label">第二行顯示</span>
+                            <select id="setting-island-line2" class="menu-select" onchange="saveSettingsToServer('island_line2', this.value)">
+                                <option value="next" selected>下一句歌詞</option>
+                                <option value="translation">本句翻譯</option>
                             </select>
                         </div>
                         <div class="hk-row">

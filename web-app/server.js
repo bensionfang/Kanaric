@@ -17,6 +17,8 @@ const os = require('os');
 const { spawn } = require('child_process');
 const { toTraditional, toSimplified } = require('./s2t');   // 簡體歌詞轉繁 (日文歌會跳過,見該檔註解)
 const { cleanBrowserQuery, isMusicAppSource } = require('./browser-query');   // 瀏覽器來源的影片標題去噪
+const { autoMarkTitleLines } = require('./title-lines');   // 製作人員/版權列標記 #TITLE#
+const { mergeTranslations } = require('./translations');   // 中文譯文合併 #TRANS# (注音之後才做)
 require('dotenv').config();
 
 const app = express();
@@ -171,6 +173,9 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
     // 全新 DB 上先發 SELECT 會撞 "no such table"
     db.run(`CREATE TABLE IF NOT EXISTS artist_aliases (alias TEXT PRIMARY KEY, true_name TEXT)`, () => loadAliases());
     db.run(`CREATE TABLE IF NOT EXISTS search_overrides (raw_artist TEXT, raw_title TEXT, search_artist TEXT, search_title TEXT, PRIMARY KEY (raw_artist, raw_title))`);
+    // 中文譯文快取 (data 為 JSON: {正規化後的日文行: 譯文};空 {} = 查過但沒有來源附翻譯)。
+    // Python 端 db.py 也會建同一張,改一邊要改兩邊
+    db.run(`CREATE TABLE IF NOT EXISTS lyrics_translations (artist TEXT, title TEXT, data TEXT, PRIMARY KEY (artist, title))`);
   }
 });
 
@@ -518,8 +523,10 @@ global.updateSettings = function (patch) {
   if (global.broadcast) {
     global.broadcast({ type: 'settings_updated', settings: newSettings });
   }
-  // 片假名 ruby 是注音時就決定的,改了設定要重新注音推播,不然要等換歌才看得到
-  if ('katakana_ruby' in patch && currentMediaState.title) {
+  // 這幾個都是「產出內容」而非純樣式,改了要重新推播,不然要等換歌才看得到。
+  // 片假名 ruby 在注音時就決定;譯文在注音之後才併進去;島的第二行來源決定要不要帶譯文。
+  const REBROADCAST_KEYS = ['katakana_ruby', 'show_translation', 'island_line2'];
+  if (REBROADCAST_KEYS.some((k) => k in patch) && currentMediaState.title) {
     rebroadcastLyrics(currentMediaState.artist, currentMediaState.title);
   }
   return newSettings;
@@ -677,65 +684,8 @@ app.get('/api/media-sources', async (req, res) => {
   res.json(result || { current: 'auto', sources: [] });
 });
 
-// 製作人員/職位名。繁簡成對列出,因為中國平台的日文歌詞混用兩種寫法。
-const CREDIT_KEYWORDS = [
-  "作詞", "作词", "作曲", "編曲", "编曲", "製作", "制作", "混音", "演唱", "原唱",
-  "和聲", "和声", "企劃", "企划", "監製", "监制", "發行", "发行", "出品", "統籌", "统筹",
-  "錄音", "录音", "母帶", "母带", "翻譯", "翻译", "編集", "编辑", "校對", "校对",
-  "吉他", "貝斯", "贝斯", "鼓手", "鋼琴", "钢琴", "鍵盤", "键盘", "弦樂", "弦乐", "提琴",
-  "合唱", "伴奏", "配唱", "封面", "設計", "设计", "曲繪", "曲绘", "調校", "调校",
-  "厂牌", "廠牌", "工作室", "鳴謝", "鸣谢",
-  "vocal", "lyric", "music", "arrange", "mix", "mastering", "master", "compose",
-  "produce", "producer", "engineer", "record", "guitar", "bass", "drum", "piano",
-  "strings", "chorus", "keyboard", "synth", "programming"
-];
-
-// 版權聲明行 (「未經著作權人許可不得使用」之類)。這種行通常又長又沒冒號,
-// 過不了上面那套「像不像標籤」的判斷,所以獨立計分:命中夠多個宣告用詞就算。
-function isCopyrightClaim(text) {
-  const words = ["未經", "未经", "許可", "许可", "授權", "授权", "不得", "請勿", "请勿", "使用", "版權", "版权", "翻唱", "轉載", "转载"];
-  const hits = words.filter(w => text.includes(w)).length;
-  return hits >= 3;
-}
-
-function autoMarkTitleLines(lrcText) {
-  if (!lrcText) return lrcText;
-  const lines = lrcText.split('\n');
-  const newLines = [];
-  for (let line of lines) {
-    let stripped = line.trim();
-    if (!stripped) {
-      newLines.push(line);
-      continue;
-    }
-    const match = stripped.match(/^(\[(?:\d+:\d+(?:\.\d+)?)\])+(.+)$/);
-    if (match) {
-      const tags = match[1];
-      let text = match[2].trim();
-      if (!text.startsWith("#TITLE#")) {
-        const lowerText = text.toLowerCase();
-        let isTitle = isCopyrightClaim(text);
-        for (let kw of CREDIT_KEYWORDS) {
-          if (isTitle) break;
-          if (lowerText.includes(kw) && text.length < 40) {
-            // Ensure it's acting like a label
-            const kwRegex = new RegExp(`${kw}\\s+`, 'i');
-            if (/[:：]/.test(text) || kwRegex.test(lowerText) || text.length < kw.length + 5) {
-              isTitle = true;
-            }
-          }
-        }
-        if (isTitle) {
-          text = "#TITLE#" + text;
-        }
-      }
-      newLines.push(`${tags}${text}`);
-    } else {
-      newLines.push(stripped);
-    }
-  }
-  return newLines.join('\n');
-}
+// autoMarkTitleLines 已移到 web-app/title-lines.js (見檔頭 require),
+// 獨立成檔是為了讓 test_title_lines.js 測得到而不必啟動 server。
 
 // 注音一次要開一個 python 進程 (fugashi + unidic 每次重載,打包版還要解壓 exe),
 // 換頁回歌詞頁就得再等一次。同一份歌詞的結果存起來,只有歌詞本身變了才重跑。
@@ -749,8 +699,60 @@ function invalidateFurigana(artist, title) {
   furiganaCache.delete(furiganaKey(artist, title));
 }
 
+// 這一次執行期間已經補抓過譯文的歌。**成功失敗都留著**,不只是 in-flight 去重:
+// 抓失敗時 (沒網路) pytools 不會寫入負快取,鍵一刪就會變成
+// 補抓 -> rebroadcast -> 還是查無資料 -> 再補抓 的無窮迴圈。
+const translationJobs = new Set();
+
+/**
+ * 譯文只在抓歌詞時搭便車存下來,所以改版前就存在快取裡的歌一首都沒有。開了「顯示翻譯」
+ * 卻查無資料時,背景補抓一次再推播。**不可阻塞歌詞顯示** —— 歌詞先出來,譯文晚幾秒補上。
+ *
+ * 負快取 (空 {}) 由 pytools 那邊寫入,所以「查過但沒翻譯」的歌不會每次播都重抓。
+ */
+function ensureTranslations(artist, title) {
+  const key = furiganaKey(artist, title);
+  if (translationJobs.has(key)) return;
+  translationJobs.add(key);
+
+  // 查詢字串一定要過 buildSearchQuery,不能直接拿 cache 的 key 去搜 —— 那些 key 是播放
+  // app 給的寫法,歌手可能是別名 (「神不擲骰子」查無結果,「神はサイコロを振らない」有 29 筆譯文)。
+  // 走 fetchCnLyricsS2 而不是自己 spawn:簡體重試那層邏輯只該有一份。歌詞本身用不到
+  // (cache 裡已經有了),要的是 pytools 順手寫進 lyrics_translations 的那筆。
+  buildSearchQuery(title, artist)
+    .then(({ trueArtist, cleanTitle }) => fetchCnLyricsS2({
+      title, artist, searchTitle: cleanTitle, searchArtist: trueArtist, source: 'all'
+    }))
+    .then(() => rebroadcastLyrics(artist, title));
+}
+
+/** 注音完的 HTML 併上譯文。關閉設定時逐字原樣回傳,開啟但查無資料時觸發背景補抓。 */
+function applyTranslations(artist, title, html) {
+  if (readSettings().show_translation !== true) return Promise.resolve(html);
+  return new Promise((resolve) => {
+    db.get('SELECT data FROM lyrics_translations WHERE artist = ? AND title = ?', [artist, title], (err, row) => {
+      // 建表是非同步的,全新 DB 上這支 SELECT 可能先到 —— 有 callback 就不會炸成未捕捉例外
+      if (err || !row) {
+        if (!err) ensureTranslations(artist, title);
+        return resolve(html);
+      }
+      try {
+        resolve(mergeTranslations(html, JSON.parse(row.data)));
+      } catch (e) {
+        resolve(html);
+      }
+    });
+  });
+}
+
 // meta (選填) 是 out-param:force 重跑時 Python 回報的 LLM 失敗原因放 meta.llmError
 function injectFurigana(artist, title, lyrics, forceLlm = false, meta = null) {
+  return injectFuriganaRaw(artist, title, lyrics, forceLlm, meta)
+    .then((html) => applyTranslations(artist, title, html));
+}
+
+// 譯文刻意不進 furiganaCache:切換「顯示翻譯」就不必重跑 python,快取也不用多一個比對維度
+function injectFuriganaRaw(artist, title, lyrics, forceLlm = false, meta = null) {
   const key = furiganaKey(artist, title);
   // 產出會隨「片假名標平假名」設定不同,所以旗標要一起比對,否則切換設定後會拿到舊 HTML
   const kataRuby = readSettings().katakana_ruby === true;
@@ -1150,7 +1152,7 @@ app.get('/api/lyrics/fetch', async (req, res) => {
       if (bestLyric) {
         const sourceName = finalSource || 'Fallback';
         bestLyric = `[source:${sourceName}]\n${bestLyric}`;
-        bestLyric = autoMarkTitleLines(toTraditional(bestLyric));
+        bestLyric = autoMarkTitleLines(toTraditional(bestLyric), title);
         await new Promise((resolve, reject) => {
           db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, bestLyric], (err) => {
             if (err) reject(err);
@@ -1280,7 +1282,7 @@ async function searchOptions({ title, artist, searchTitle, searchArtist }) {
             artist: qArtist,
             album: '',
             duration: 0,
-            lyrics: autoMarkTitleLines(`[source:${cn.source}]\n${cn.lyrics}`),
+            lyrics: autoMarkTitleLines(`[source:${cn.source}]\n${cn.lyrics}`, title),
             isSynced: /\[\d{2}:\d{2}/.test(cn.lyrics),
             provider: cn.source,
             score: 1500
@@ -1299,7 +1301,7 @@ async function searchOptions({ title, artist, searchTitle, searchArtist }) {
               artist: qArtist,
               album: '',
               duration: 0,
-              lyrics: autoMarkTitleLines(`[source:${fb.source}]\n${fb.lyrics}`),
+              lyrics: autoMarkTitleLines(`[source:${fb.source}]\n${fb.lyrics}`, title),
               isSynced: /\[\d{2}:\d{2}/.test(fb.lyrics),
               provider: fb.source,
               score: fb.source === 'Musixmatch' ? 2000 : 1500
@@ -1323,7 +1325,7 @@ async function searchOptions({ title, artist, searchTitle, searchArtist }) {
           artist: t.artistName || '',
           album: t.albumName || '',
           duration: t.duration || 0,
-          lyrics: autoMarkTitleLines(`[source:Lrclib]\n${best}`),
+          lyrics: autoMarkTitleLines(`[source:Lrclib]\n${best}`, title),
           isSynced: !!t.syncedLyrics,
           provider: 'Lrclib'
         });
@@ -1443,7 +1445,7 @@ app.post('/api/lyrics/custom', async (req, res) => {
   try {
     // 這條路徑同時是「套用備選歌詞」的入口 (lyrics-tools.js applyLyricsOption),
     // 抓回來的簡體歌詞也走這裡,所以一樣要轉繁
-    const finalLyrics = autoMarkTitleLines(toTraditional(`[source:ManualEdit]\n${lyrics}`));
+    const finalLyrics = autoMarkTitleLines(toTraditional(`[source:ManualEdit]\n${lyrics}`), title);
     await new Promise((resolve, reject) => {
       db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, finalLyrics], (err) => {
         if (err) reject(err);
@@ -1673,13 +1675,14 @@ app.get('/api/leaderboard', (req, res) => {
 
 // 5b. 資料用量與清除。
 // 資料分兩類,清除只碰得到第一類:
-//   可重建 —— cache / romaji_hints / llm_hints,清掉只是下次重抓 (要時間、要網路,不會永久失去)
+//   可重建 —— cache / romaji_hints / llm_hints / lyrics_translations,清掉只是下次重抓
+//              (要時間、要網路,不會永久失去)
 //   不可重建 —— word_corrections (使用者手改的假名)、sync_offsets、artist_aliases、
 //              search_overrides。這些是使用者親手打的,任何清除功能都不准碰,只顯示筆數。
 // listening_history 自成一類:可清但清了回不來,前端要二次確認。
 const CLEAR_TARGETS = {
   history: ['listening_history'],
-  lyrics: ['cache', 'romaji_hints', 'llm_hints'],
+  lyrics: ['cache', 'romaji_hints', 'llm_hints', 'lyrics_translations'],
 };
 
 // 這個 sqlite3 build 沒編 dbstat,所以用 length() 加總估算。全表掃描在幾萬筆下仍是毫秒級,不必快取
@@ -1690,12 +1693,13 @@ app.get('/api/db-usage', (req, res) => {
     }));
   });
 
-  // 讀音提示兩張表是 Python 端 (db.py) 建的,Python 還沒跑過的全新安裝上不存在 ——
-  // 所以分開查,少一張表只會少算那一份,不會把歌詞的數字一起吃掉
+  // 提示/譯文那幾張表 Python 端 (db.py) 也會建,順序不保證 —— 所以分開查,
+  // 少一張表只會少算那一份,不會把歌詞的數字一起吃掉
   Promise.all([
     one(`SELECT COUNT(*) AS rows, COALESCE(SUM(LENGTH(artist) + LENGTH(title) + LENGTH(lyrics)), 0) AS bytes FROM cache`),
     one(`SELECT COUNT(*) AS rows, COALESCE(SUM(LENGTH(data)), 0) AS bytes FROM romaji_hints`),
     one(`SELECT COUNT(*) AS rows, COALESCE(SUM(LENGTH(data)), 0) AS bytes FROM llm_hints`),
+    one(`SELECT COUNT(*) AS rows, COALESCE(SUM(LENGTH(data)), 0) AS bytes FROM lyrics_translations`),
     one(`SELECT COUNT(*) AS rows,
                 COALESCE(SUM(LENGTH(artist) + LENGTH(title) + LENGTH(COALESCE(album, '')) + 12), 0) AS bytes
          FROM listening_history`),
@@ -1703,9 +1707,9 @@ app.get('/api/db-usage', (req, res) => {
               + (SELECT COUNT(*) FROM sync_offsets)
               + (SELECT COUNT(*) FROM artist_aliases)
               + (SELECT COUNT(*) FROM search_overrides) AS rows, 0 AS bytes`),
-  ]).then(([cache, romaji, llm, history, manual]) => {
-    // 對使用者而言「歌詞快取」就是一首歌的全部衍生資料,提示不另外列一項
-    const lyrics = { rows: cache.rows, bytes: cache.bytes + romaji.bytes + llm.bytes };
+  ]).then(([cache, romaji, llm, trans, history, manual]) => {
+    // 對使用者而言「歌詞快取」就是一首歌的全部衍生資料,提示與譯文不另外列一項
+    const lyrics = { rows: cache.rows, bytes: cache.bytes + romaji.bytes + llm.bytes + trans.bytes };
     // 實際佔用要含 WAL —— 剛寫入的資料還在 -wal 裡,只看主檔會少算
     let file = 0;
     for (const p of [DB_PATH, DB_PATH + '-wal']) {

@@ -42,6 +42,8 @@
       "server.js",
       "s2t.js",
       "browser-query.js",
+      "title-lines.js",
+      "translations.js",
       "island.js",
       "preload-island.js",
       "views/**",
@@ -70,7 +72,8 @@
     },
     "nsis": {
       "oneClick": true,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Kanaric-Setup-${version}.${ext}"
     }
   },
   "allowScripts": {

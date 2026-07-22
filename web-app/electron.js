@@ -258,9 +258,8 @@ function setupAutoUpdate() {
     refreshTrayMenu();
   });
 
+  // 只在啟動時查一次。app 常駐系統匣不代表要一直輪詢 —— 更新晚一次開機才知道完全可接受
   autoUpdater.checkForUpdates().catch(() => {});
-  // 長時間掛著的使用者也要等得到新版
-  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000);
 
   global.quitAndInstallUpdate = () => {
     quitting = true;

@@ -78,6 +78,8 @@
     <div id="toast" class="toast hidden">
         <i id="toast-icon" class="fa-solid fa-circle-info"></i>
         <span id="toast-message"></span>
+        <!-- 需要動作的吐司 (目前只有更新提醒) 才顯示;showToast 每次都會關掉它 -->
+        <button id="toast-action" class="toast-action hidden"></button>
     </div>
 
     <script>
@@ -362,23 +364,25 @@
 
         // 新版提醒:一個 session 只查一次 (server 端本身也快取 1 小時),
         // 同一個版號只用吐司提示一次,不然每換一次頁 (index/stats/wrapped/editor
-        // 都是整頁重載) 就跳一次會很煩。點吐司開 release 頁,交給使用者自己下載安裝。
+        // 都是整頁重載) 就跳一次會很煩。動作掛在吐司右側的按鈕上,不是整塊吐司 ——
+        // 整塊可點的話,使用者只想關掉提示也會誤觸下載/安裝。
         function checkForUpdate() {
             if (sessionStorage.getItem('updateChecked')) return;
             sessionStorage.setItem('updateChecked', '1');
             fetch('/api/update-check').then(r => r.json()).then(d => {
-                const clickableToast = (text, icon, onClick) => {
-                    showToast(text, icon, 10000);
-                    const toast = document.getElementById('toast');
-                    if (!toast) return;
-                    toast.classList.add('toast-clickable');
-                    toast.onclick = onClick;
+                const actionToast = (text, icon, label, onClick) => {
+                    showToast(text, icon, 10000);   // showToast 會先把上一顆按鈕關掉
+                    const btn = document.getElementById('toast-action');
+                    if (!btn) return;
+                    btn.textContent = label;
+                    btn.classList.remove('hidden');
+                    btn.onclick = onClick;
                 };
 
                 // 桌面版:新版已經自己下載好了,只差重開。這則比「去下載」有用得多,所以不看
                 // updateSeenVersion 的已讀記錄 —— 沒裝之前每次開都該提醒
                 if (d.ready) {
-                    clickableToast(`新版 v${d.ready} 已下載，點擊立即安裝並重新啟動`, 'fa-solid fa-circle-up', async () => {
+                    actionToast(`新版 v${d.ready} 已下載`, 'fa-solid fa-circle-up', '立即安裝', async () => {
                         try {
                             const r = await fetch('/api/update-install', { method: 'POST' });
                             const j = await r.json();
@@ -391,8 +395,8 @@
                 // 打包版會自己在背景下載,叫使用者去手動下載反而是錯的指示 —— 安靜等 ready
                 if (d.autoUpdate) return;
                 localStorage.setItem('updateSeenVersion', d.latest);
-                clickableToast(`有新版 v${d.latest} 可更新,點擊前往下載`, 'fa-solid fa-circle-up',
-                               () => window.open(d.url, '_blank', 'noopener'));
+                actionToast(`有新版 v${d.latest} 可更新`, 'fa-solid fa-circle-up', '前往下載',
+                            () => window.open(d.url, '_blank', 'noopener'));
             }).catch(() => {});
         }
 
@@ -938,6 +942,8 @@
                 }
                 const krEl = document.getElementById('setting-katakana-ruby');
                 if (krEl) krEl.checked = data.katakana_ruby === true;
+                const trEl = document.getElementById('setting-translation');
+                if (trEl) trEl.checked = data.show_translation === true;
                 if (data.auto_lyrics_options !== undefined) {
                     const alEl = document.getElementById('setting-auto-lyrics-options');
                     if (alEl) alEl.checked = data.auto_lyrics_options;
@@ -958,6 +964,8 @@
                     const ilEl = document.getElementById('setting-island-lines');
                     if (ilEl) ilEl.value = data.island_lines;
                 }
+                const il2El = document.getElementById('setting-island-line2');
+                if (il2El) il2El.value = data.island_line2 === 'translation' ? 'translation' : 'next';
                 const thEl = document.getElementById('setting-track-history');
                 if (thEl) thEl.checked = data.track_history !== false;
                 

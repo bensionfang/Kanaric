@@ -75,11 +75,16 @@ bridge.onDocked(d => el.island.classList.toggle('docked', d));
 // ── 狀態 ──
 let lyrics = [], songKey = '', pos = 0, playing = false, lastSync = 0, offset = 0;
 let islandLines = 2, lastLine1 = null, idleTimer = null, wasPlaying = null, wasHasSession = null;
+// 第二行顯示什麼:'next' 下一句歌詞 (預設) / 'translation' 本句翻譯
+let islandLine2 = 'next';
+// 時間戳 -> 譯文。譯文行不進 lyrics[],否則會被當成獨立一句輪播過去
+let translations = {};
 
 function applySettings(s) {
   if (!s) return;
   document.documentElement.classList.toggle('hide-furigana', s.show_furigana === false);
   islandLines = Number(s.island_lines) === 1 ? 1 : 2;
+  islandLine2 = s.island_line2 === 'translation' ? 'translation' : 'next';
   const scale = Math.max(0.6, Math.min(1.6, (Number(s.font_size) || 32) / 32));
   // 島的字比網頁小一截:font_size 32 → 16px。放大就會把整條撐胖,失去「一條細帶」的感覺
   document.documentElement.style.setProperty('--island-fs', Math.round(16 * scale) + 'px');
@@ -183,6 +188,7 @@ function setLyrics(text) {
 
 function parseLrc(text) {
   const out = [];
+  translations = {};
   for (const line of text.split('\n')) {
     const m = line.match(/^((?:\[\d+:\d+(?:\.\d+)?\])+)(.*)$/);
     if (!m) continue;
@@ -190,7 +196,10 @@ function parseLrc(text) {
     if (html.startsWith('#TITLE#')) continue;   // 製作人員列不進島
     for (const tag of m[1].match(/\[\d+:\d+(?:\.\d+)?\]/g) || []) {
       const [mm, ss] = tag.slice(1, -1).split(':');
-      out.push({ t: parseInt(mm) * 60 + parseFloat(ss), html });
+      const t = parseInt(mm) * 60 + parseFloat(ss);
+      // 譯文與原句共用時間戳,收進對照表而不是當成獨立一句
+      if (html.startsWith('#TRANS#')) translations[t] = html.substring(7);
+      else out.push({ t, html });
     }
   }
   return out.sort((a, b) => a.t - b.t);
@@ -200,6 +209,12 @@ function parseLrc(text) {
 function pickLines(i) {
   let line1 = lyrics[i].html;
   let line2 = '';
+  // 第二行選「本句翻譯」時優先用譯文;這首歌沒有譯文就照舊退回「下一句歌詞」,
+  // 不然切了設定卻整片空白,看起來像壞掉
+  if (islandLine2 === 'translation' && line1) {
+    const t = translations[lyrics[i].t];
+    if (t) return [line1, t];
+  }
   if (!line1) {
     if (i + 1 < lyrics.length) {
       line1 = lyrics[i + 1].html;

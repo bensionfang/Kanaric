@@ -37,6 +37,26 @@ def normalize_line(text: str) -> str:
     return _STRIP.sub('', text or '')
 
 
+def _pair_translations(pairs) -> dict:
+    """
+    (日文行, 譯文) 序列 -> {正規化後的日文行: 譯文}。三家來源的對齊方式不同
+    (網易靠時間戳、酷狗/QQ 靠行序),但配對完之後都收斂成同一種形狀,所以只留這一份。
+
+    兩種要丟掉的:
+    - **譯文與原文相同** —— 網易的 tlyric 對沒翻譯的行 (英文副歌、間奏) 會原樣重複,
+      留著會在畫面上變成同一句印兩次。
+    - **正規化後是空的** —— QQ 的譯文軌對製作人員列會給 `//` 這種純標點佔位。
+    """
+    out = {}
+    for jp_line, trans in pairs:
+        key = normalize_line(jp_line)
+        trans = (trans or '').strip()
+        if not key or not trans or not normalize_line(trans) or normalize_line(trans) == key:
+            continue
+        out[key] = trans
+    return out
+
+
 def _loose_eq(query: str, found: str) -> bool:
     """正規化後互相包含就算命中 (歌名有 feat.、歌手名有樂團全稱等雜訊)"""
     q, f = normalize_line(query).lower(), normalize_line(found).lower()
@@ -144,7 +164,13 @@ def _fetch_netease(artist: str, title: str, duration=None) -> dict:
         if key and hira:
             hints[key] = hira
 
-    return {"lyrics": lrc, "hints": hints, "source": "NetEase"}
+    # 譯文:tlyric 是另一份帶時間戳的 LRC,用跟 romalrc 同一套時間戳對齊
+    trans_lrc = _parse_lrc((lyric.get("tlyric") or {}).get("lyric") or '')
+    translations = _pair_translations(
+        (jp_line, trans_lrc[ts]) for ts, jp_line in jp.items() if ts in trans_lrc
+    )
+
+    return {"lyrics": lrc, "hints": hints, "translations": translations, "source": "NetEase"}
 
 
 # krc 是 XOR + zlib 壓縮過的,這把金鑰是公開的固定值
@@ -217,20 +243,30 @@ def _fetch_kugou(artist: str, title: str, duration=None) -> dict:
 
     # language 軌:type=0 羅馬字, type=1 翻譯。行序與主歌詞對齊
     hints = {}
+    translations = {}
     lang_tag = re.search(r'\[language:(.*?)\]', krc)
     if lang_tag:
         lang = json.loads(base64.b64decode(lang_tag.group(1)).decode("utf-8"))
-        roma_rows = next(
-            (t.get("lyricContent") or [] for t in lang.get("content", []) if t.get("type") == 0),
-            []
-        )
-        for (_, jp_line), row in zip(jp_lines, roma_rows):
+
+        def track(type_id):
+            return next(
+                (t.get("lyricContent") or [] for t in lang.get("content", []) if t.get("type") == type_id),
+                []
+            )
+
+        for (_, jp_line), row in zip(jp_lines, track(0)):
             hira = romaji_to_hira(''.join(row))
             key = normalize_line(jp_line)
             if key and hira:
                 hints[key] = hira
 
-    return {"lyrics": _krc_to_lrc(jp_lines), "hints": hints, "source": "Kugou"}
+        # 翻譯軌的每一列本身就是完整一句 (不像羅馬字軌是逐音節切開),但格式同樣是 list
+        translations = _pair_translations(
+            (jp_line, ''.join(row)) for (_, jp_line), row in zip(jp_lines, track(1))
+        )
+
+    return {"lyrics": _krc_to_lrc(jp_lines), "hints": hints,
+            "translations": translations, "source": "Kugou"}
 
 
 def _qrc_lines(text: str) -> list:
@@ -241,6 +277,12 @@ def _qrc_lines(text: str) -> list:
         if m:
             out.append((int(m.group(1)), re.sub(r'\(\d+,\d+\)', '', m.group(2)).strip()))
     return out
+
+
+def _qq_plain_track(resp: str, tag: str) -> str:
+    """取出某一軌的原始內容 (不解密)。譯文軌是明文 LRC,拿到就能直接餵 _parse_lrc"""
+    m = re.search(rf'<{tag}[^>]*><!\[CDATA\[(.*?)\]\]></{tag}>', resp, re.S)
+    return m.group(1).strip() if m else ''
 
 
 def _qq_track(resp: str, tag: str) -> list:
@@ -258,12 +300,16 @@ def _qq_track(resp: str, tag: str) -> list:
 
 
 def _qq_lyrics(song_id) -> dict:
-    """用 QQ 的數字 musicid 取歌詞 + 羅馬字提示"""
-    resp = requests.post(
+    """用 QQ 的數字 musicid 取歌詞 + 羅馬字提示 + 譯文"""
+    r = requests.post(
         "https://c.y.qq.com/qqmusic/fcgi-bin/lyric_download.fcg",
         data={"version": "15", "miniversion": "82", "lrctype": "4", "musicid": str(song_id)},
         headers={"User-Agent": UA, "Referer": "https://y.qq.com/"}, timeout=TIMEOUT,
-    ).text.replace("<!--", "").replace("-->", "")
+    )
+    # 這支端點不回 charset,requests 就猜成 ISO-8859-1。content/contentroma 是 hex ASCII 不受影響,
+    # 但譯文軌 (contentts) 是明文 UTF-8,不指定就整段變亂碼。
+    r.encoding = "utf-8"
+    resp = r.text.replace("<!--", "").replace("-->", "")
 
     jp_lines = _qq_track(resp, "content")
     if not jp_lines:
@@ -276,7 +322,17 @@ def _qq_lyrics(song_id) -> dict:
         if key and hira:
             hints[key] = hira
 
-    return {"lyrics": _krc_to_lrc(jp_lines), "hints": hints, "source": "QQMusic"}
+    # 譯文軌實測是「明文標準 LRC」而非加密 QRC,所以不能走 _qq_track (它只解 QRC 那種
+    # [起始毫秒,長度] 格式)。用時間戳跟主歌詞對齊,同網易 tlyric 的做法。
+    trans_lrc = _parse_lrc(_qq_plain_track(resp, "contentts"))
+    translations = _pair_translations(
+        (jp_line, trans_lrc[round(start_ms / 1000.0, 1)])
+        for start_ms, jp_line in jp_lines
+        if round(start_ms / 1000.0, 1) in trans_lrc
+    )
+
+    return {"lyrics": _krc_to_lrc(jp_lines), "hints": hints,
+            "translations": translations, "source": "QQMusic"}
 
 
 def _fetch_qqmusic(artist: str, title: str, duration=None) -> dict:

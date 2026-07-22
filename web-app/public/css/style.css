@@ -631,7 +631,24 @@ button.menu-action i {
 
 .toast i { color: var(--accent-main); font-size: 16px; }
 
-.toast.toast-clickable { cursor: pointer; }
+/* 吐司右側的動作鈕 (更新提醒)。吐司本體不可點,避免想關掉提示卻誤觸下載 */
+.toast-action {
+    flex-shrink: 0;
+    margin-left: 4px;
+    padding: 5px 12px;
+    border: none;
+    border-radius: 999px;
+    background: var(--accent-main);
+    color: #000;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.2s ease;
+}
+
+.toast-action:hover { filter: brightness(1.15); }
+.toast-action.hidden { display: none; }
 
 .card-header {
     display: flex;

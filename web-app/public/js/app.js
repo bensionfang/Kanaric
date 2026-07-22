@@ -346,6 +346,14 @@ function parseLrcLyrics(lrcText) {
         let match;
         const text = line.replace(/\[\d+:\d+(?:[\.:]\d+)?\]/g, '').trim();
         if (text.startsWith('#TITLE#')) return;
+        // 譯文行 (server 端 mergeTranslations 插的) 掛到上一句歌詞上,不自成一行。
+        // 它與原句共用時間戳,所以下面的 0.05s 合併也接得住,但顯式判斷比較穩 ——
+        // 有些來源的歌詞本身就自帶譯文行,那條路徑仍然要留著。
+        if (text.startsWith('#TRANS#')) {
+            const prev = parsedLyrics[parsedLyrics.length - 1];
+            if (prev) prev.translation = text.substring(7);
+            return;
+        }
         
         timeReg.lastIndex = 0;
         let lineHasTag = false;
@@ -399,7 +407,8 @@ function parseLrcLyrics(lrcText) {
                     prev.translation += ' / ' + current.text;
                 }
             } else {
-                mergedLyrics.push({ time: current.time, text: current.text, translation: null });
+                // translation 要帶過來 —— #TRANS# 行是在上面掛到物件上的,寫死 null 會把它洗掉
+                mergedLyrics.push({ time: current.time, text: current.text, translation: current.translation || null });
             }
         }
         parsedLyrics = mergedLyrics;

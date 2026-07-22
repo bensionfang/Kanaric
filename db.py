@@ -64,6 +64,8 @@ class DatabaseManager:
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS romaji_hints (artist TEXT, title TEXT, data TEXT, PRIMARY KEY (artist, title))''')
         # LLM 讀音提示快取,獨立於 romaji_hints (保住其 {} 負快取語意;這張只存成功結果)
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS llm_hints (artist TEXT, title TEXT, data TEXT, PRIMARY KEY (artist, title))''')
+        # 中文譯文快取 (data 為 JSON: {正規化後的日文行: 譯文})。定義同時寫在 server.js,改一邊要改兩邊
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS lyrics_translations (artist TEXT, title TEXT, data TEXT, PRIMARY KEY (artist, title))''')
         self.conn.commit()
 
     def get_artist_alias(self, alias: str) -> str:
@@ -110,6 +112,25 @@ class DatabaseManager:
         self.cursor.execute(
             "INSERT OR REPLACE INTO romaji_hints VALUES (?, ?, ?)",
             (artist, title, json.dumps(hints, ensure_ascii=False))
+        )
+        self.conn.commit()
+
+    def get_translations(self, artist: str, title: str) -> Optional[dict]:
+        """取得快取的中文譯文。None = 沒抓過,{} = 抓過但沒有來源附翻譯 (負快取,同 romaji_hints)"""
+        self.cursor.execute("SELECT data FROM lyrics_translations WHERE artist=? AND title=?", (artist, title))
+        row = self.cursor.fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row[0])
+        except (ValueError, TypeError):
+            return {}
+
+    def save_translations(self, artist: str, title: str, translations: dict) -> None:
+        """儲存中文譯文。空 dict 也要存,否則每次播這首歌都會重打一次網路"""
+        self.cursor.execute(
+            "INSERT OR REPLACE INTO lyrics_translations VALUES (?, ?, ?)",
+            (artist, title, json.dumps(translations, ensure_ascii=False))
         )
         self.conn.commit()
 

@@ -49,13 +49,25 @@ def main():
         duration = data.get("duration") or None  # 秒;拿來擋同名歌/翻唱
 
         try:
-            if source == "all":
-                results = cn_music.fetch_all(q_artist, q_title, duration)
-                # 讀音提示搭歌詞的便車存起來,注音時就不用再打一次網路
+            # 讀音提示與譯文都搭歌詞的便車存起來,之後就不用再打一次網路。
+            # 兩者分開取第一個有東西的來源 —— 一家可能有羅馬字卻沒翻譯,反之亦然。
+            # 譯文一定要寫入 (沒有就寫空的當負快取),否則 server 的 ensureTranslations
+            # 會判斷成「還沒查過」,每次播這首歌都重抓一輪。
+            def _stash(results):
                 for r in results:
                     if r.get("hints"):
                         db.save_romaji_hints(artist, title, r["hints"])
                         break
+                for r in results:
+                    if r.get("translations"):
+                        db.save_translations(artist, title, r["translations"])
+                        break
+                else:
+                    db.save_translations(artist, title, {})
+
+            if source == "all":
+                results = cn_music.fetch_all(q_artist, q_title, duration)
+                _stash(results)
                 print(json.dumps({
                     "success": True,
                     "results": [{"lyrics": r["lyrics"], "source": r["source"]} for r in results]
@@ -63,7 +75,7 @@ def main():
             else:
                 r = cn_music.fetch(q_artist, q_title, source, duration)
                 if r.get("lyrics"):
-                    db.save_romaji_hints(artist, title, r.get("hints") or {})
+                    _stash([r])
                     print(json.dumps({
                         "success": True, "lyrics": r["lyrics"], "source": r["source"]
                     }, ensure_ascii=False))
