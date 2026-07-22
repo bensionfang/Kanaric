@@ -14,6 +14,9 @@
  * 不需要網路:查不到 / 連不出去都會走到例外那條,一樣要清掉 pending。
  */
 process.env.PORT = process.env.PORT || '5732';
+// 失敗重試的冷卻縮短,測試才不用真的等 60 秒。**不能設成 0** —— 冷卻期間要能穩定回報
+// resolving=false (先用原名放歌詞),設 0 就變成每次更新都重試、永遠不定案。
+process.env.ITUNES_RETRY_MS = process.env.ITUNES_RETRY_MS || '400';
 
 const fs = require('fs');
 const os = require('os');
@@ -98,6 +101,40 @@ async function waitResolved(title, artist, timeoutMs = 6000) {
   const empty = { title: '', artist: '', is_playing: false };
   global.handleMediaUpdate(empty);
   check(empty.resolving === false, '無播放來源:resolving=false');
+
+  // 6. 查詢失敗是暫時的,冷卻後要能重試。
+  //    失敗與「查過了,確定不用還原」如果混為一談,一次 3 秒逾時就會讓那首歌在整個
+  //    process 生命週期都不再嘗試還原,期間抓的歌詞用未還原的名字寫進 cache 與
+  //    listening_history,永久分裂成兩筆 (實測 TUYU / ツユ 各存了四首同樣的歌)。
+    //    ITUNES_RETRY_MS 在檔頭縮短成 400ms,不必真的等 60 秒。
+  const realFetch = global.fetch;
+  let attempts = 0;
+  global.fetch = (url, opts) => {
+    if (String(url).includes('itunes.apple.com')) {
+      attempts++;
+      return Promise.reject(new Error('模擬逾時'));
+    }
+    return realFetch(url, opts);
+  };
+
+  const failedOnce = await waitResolved('Some Translated Title', 'SomeArtist');
+  check(!!failedOnce, '查詢失敗:resolving 仍然會變回 false (不能讓使用者一直等)');
+  check(failedOnce && failedOnce.title === 'Some Translated Title',
+    '查詢失敗:先用原名放歌詞', failedOnce && failedOnce.title);
+  const afterFirst = attempts;
+  check(afterFirst >= 1, '查詢失敗:確實有打過 iTunes', `${afterFirst} 次`);
+
+  // 冷卻期間不能一直重打 —— 媒體監控每 0.1 秒就更新一次,不擋就是請求風暴
+  update('Some Translated Title', 'SomeArtist');
+  update('Some Translated Title', 'SomeArtist');
+  check(attempts === afterFirst, '冷卻期間不重試 (避免請求風暴)', `仍然 ${attempts} 次`);
+
+  // 冷卻過後要能再試一次,而不是把一次逾時當成永久結論
+  await new Promise((r) => setTimeout(r, 500));
+  update('Some Translated Title', 'SomeArtist');
+  check(attempts > afterFirst, '冷卻過後會重試', `${afterFirst} -> ${attempts} 次`);
+
+  global.fetch = realFetch;
 
   console.log(failed === 0 ? '\n全部通過' : `\n${failed} 項失敗`);
   process.exit(failed === 0 ? 0 : 1);

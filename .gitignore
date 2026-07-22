@@ -28,6 +28,8 @@ web-app/release/
 DynamicIslandUI/bin/
 DynamicIslandUI/obj/
 # 執行期產物
+# restore_jp_titles.py 的查詢快取 (被 iTunes 限流時靠它續跑),純本機
+scripts/.itunes_cache.json
 app.pid
 web-app/server_log.txt
 # 個人筆記/截圖/PDF,不進版控

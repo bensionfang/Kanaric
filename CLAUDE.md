@@ -137,6 +137,8 @@ GitHub repo 也已改名 `bensionfang/Kanaric`,`server.js` 的 `GITHUB_REPO` 跟
 
 1. `media_monitor.py` (or an edge agent) reports a track change → `handleMediaUpdate` → WebSocket broadcast to all clients.
 2. Lyrics are lazy-loaded: the **web frontend** reacts to the broadcast by calling `GET /api/lyrics/fetch`; the server checks the SQLite cache, applies artist aliases, fetches externally on miss, runs furigana injection, then broadcasts the result — the C# island never fetches on its own.
+   - **iTunes 查詢「失敗」與「查過了,確定不用還原」不能混為一談。** `getResolvedMetadata` 的失敗路徑寫的是 `{ ..., failedAt }`,`cachedResolution()` 會把過了 `ITUNES_RETRY_MS` (預設 60 秒) 的失敗當成沒查過。舊版失敗也寫成一般結果,一次 3 秒逾時就讓那首歌**整個 process 生命週期**都不再嘗試還原,期間抓的歌詞用未還原的名字寫進 `cache` 與 `listening_history`,永久分裂 (實測 TUYU / ツユ 底下各存了同樣四首歌,排行榜也跟著錯)。冷卻**不能設成 0** —— 媒體監控每 0.1 秒更新一次,不擋就是請求風暴,而且永遠不定案。回歸測試 `node test_itunes_resolving.js` 有一組驗這個 (用 `ITUNES_RETRY_MS` 縮短等待)。
+     - 舊資料用 `scripts/restore_jp_titles.py` 一次性收斂 (預設 dry-run,`--apply` 才寫入並備份)。**它的採用條件刻意比 server.js 嚴**:線上判錯只是一時標錯,批次判錯是合併資料列、不可逆。實測 iTunes JP 會把西洋歌音譯成片假名 (`Juice WRLD` → `ジュース・ワールド`),「含假名」擋不住,所以要「時長 ±3 秒吻合」或「新歌名含**平假名**」兩條之一,其餘列進人工確認清單。
    - **`state.resolving` 是「歌名還沒定案」的旗標,前端必須等它變 false 才抓歌詞。** iTunes 日文原名還原 (`getResolvedMetadata`) 是非同步的,`handleMediaUpdate` 不能等,所以換歌後頭幾百毫秒 state 帶的是原始歌名、幾秒後才換成日文原名。前端是靠「title 變了」判斷換歌的,沒有這個旗標就會用兩個不同的鍵各抓一次歌詞 —— 第二次多半撞到來源限流拿到空的,把已經抓對的歌詞蓋成「找不到歌詞」,要重新載入才好。
    - `itunesCache` 的佔位項帶 `pending: true`,`getResolvedMetadata` **每一條 return 前都要覆寫掉它** (含假名早退、查到、例外三條)。漏掉任何一條,那首歌的 `resolving` 永遠是 true,歌詞就完全不會抓。回歸測試 `node test_itunes_resolving.js`。
    - 前端 (`app.js`) 用 `lastLyricsKey` 判斷要不要抓,跟 `lastMediaTitle` 分開:換歌時 `lastMediaTitle` 會變兩次 (原名 → 還原後),歌詞只該抓最後定案的那次。自動搜尋備選歌詞也綁在同一個判斷裡,理由相同。

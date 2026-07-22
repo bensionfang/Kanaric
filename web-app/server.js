@@ -197,9 +197,22 @@ const hasKana = (s) => /[぀-ヿ]/.test(s || '');
 // --- iTunes JP Resolution Cache ---
 const itunesCache = new Map();
 
+// 查詢失敗後多久可以再試。**失敗與「查過了,確定不用還原」必須分開** —— 混為一談的話,
+// 一次 3 秒逾時就會讓那首歌在整個 process 生命週期都不再嘗試還原,而期間抓的歌詞會用
+// 未還原的名字寫進 cache 與 listening_history,永久分裂成兩筆 (TUYU / ツユ 各存四首)。
+const ITUNES_RETRY_MS = Number(process.env.ITUNES_RETRY_MS) || 60000;
+
+/** 取快取,但把「過了冷卻時間的失敗」當成沒查過,好讓呼叫端重試 */
+function cachedResolution(key) {
+  const hit = itunesCache.get(key);
+  if (hit && hit.failedAt && Date.now() - hit.failedAt >= ITUNES_RETRY_MS) return undefined;
+  return hit;
+}
+
 async function getResolvedMetadata(title, artist, duration) {
   const key = `${title}-${artist}`;
-  if (itunesCache.has(key)) return itunesCache.get(key);
+  const cached = cachedResolution(key);
+  if (cached) return cached;
 
   // 先寫入原始資料避免重複發送請求。pending 代表「查詢還沒回來,名字可能還會變」——
   // handleMediaUpdate 靠它告訴前端先別抓歌詞,否則會用舊名抓一次、還原後再抓一次
@@ -235,9 +248,15 @@ async function getResolvedMetadata(title, artist, duration) {
       }
     }
   } catch (e) {
+    // 逾時/連不出去是暫時性的,標記時間讓冷卻後能重試 (仍然不是 pending —— 這一次就先用
+    // 原名放歌詞,不能讓使用者為了一次網路抖動一直等)
     console.error("iTunes API error:", e.message);
+    const failed = { title, artist, failedAt: Date.now() };
+    itunesCache.set(key, failed);
+    return failed;
   }
 
+  // 查得到但沒有更好的名字 (無結果 / 條件不符) 是確定的結論,永久快取,重試也不會變
   itunesCache.set(key, { title, artist });
   return { title, artist };
 }
@@ -298,7 +317,8 @@ global.handleMediaUpdate = function(rawState) {
     rawState.resolving = false;
     if (rawState.title && rawState.artist) {
       const key = `${rawState.title}-${rawState.artist}`;
-      const resolved = itunesCache.get(key);
+      // 走 cachedResolution 而不是直接 get:上次查詢失敗且已過冷卻時,要當成沒查過再試一次
+      const resolved = cachedResolution(key);
       if (!resolved) {
          // 瀏覽器來源的時長是影片長度 (含前奏/對白),拿去跟 iTunes 的曲目長度比只會誤判,傳 null
          getResolvedMetadata(rawState.title, rawState.artist,
