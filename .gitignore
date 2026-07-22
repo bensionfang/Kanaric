@@ -32,3 +32,5 @@ app.pid
 web-app/server_log.txt
 # 個人筆記/截圖/PDF,不進版控
 docs/
+# 規劃筆記 (含「明確不做的事」),只留本機
+ROADMAP.md
