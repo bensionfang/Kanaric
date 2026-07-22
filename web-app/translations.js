@@ -29,8 +29,28 @@ function normalizeLine(text) {
  * 譯文的 key。**`<rt>` 的內容必須整塊刪掉**,只脫標籤的話「夢<rt>ゆめ</rt>」會變成
  * 「夢ゆめ」,跟原文對不上。
  */
+/**
+ * 譯文同樣是外部來源的字串,而前端/靈動島都是 innerHTML 畫的 —— 不逃逸就是 XSS。
+ * 歌詞本體由 furigana_inject 逃逸 (它要自己產 <ruby>,所以逃逸得在那邊做),譯文這條
+ * 路徑不經過 python,要在這裡自己來。
+ */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' }[c]));
+}
+
 function stripRuby(html) {
-  return (html || '').replace(/<rt[^>]*>.*?<\/rt>/g, '').replace(/<[^>]+>/g, '');
+  return unescapeHtml((html || '').replace(/<rt[^>]*>.*?<\/rt>/g, '').replace(/<[^>]+>/g, ''));
+}
+
+/**
+ * 歌詞本體已被 furigana_inject 逃逸過,而譯文的 key 是 python 端用**未逃逸**的原文算的。
+ * 不解回來的話,含 ' 或 & 的行 (Don't → Don&#x27;t → 正規化成 Donx27t) 永遠對不上,
+ * 而且是靜默失效 —— 這正是 normalizeLine 那段警告講的同一類坑。
+ */
+function unescapeHtml(s) {
+  return String(s).replace(/&(amp|lt|gt|quot|#x27|#39);/g, (_, e) => (
+    { amp: '&', lt: '<', gt: '>', quot: '"', '#x27': "'", '#39': "'" }[e]));
 }
 
 /**
@@ -61,7 +81,7 @@ function mergeTranslations(lrcHtml, transMap) {
     if (!hit) continue;
     // 譯文是簡體 (三家中國平台都是),轉繁在合併時做而不是寫入時 —— 這樣改版前
     // 存進 lyrics_translations 的舊資料也會一起變繁體,同 cache 那四個讀取點的理由。
-    out.push(`${m[1]}#TRANS#${toTraditional(hit)}`);
+    out.push(`${m[1]}#TRANS#${escapeHtml(toTraditional(hit))}`);
     inserted++;
   }
   return inserted ? out.join('\n') : lrcHtml;

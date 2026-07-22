@@ -24,6 +24,9 @@ check('還原 / rt 內容整塊刪掉',
 check('還原 / 多顆 ruby',
   stripRuby("<ruby>噛<rt>か</rt></ruby>み<ruby>締<rt>し</rt></ruby>め"), '噛み締め');
 check('還原 / 沒有 ruby 就原樣', stripRuby('ただの歌詞'), 'ただの歌詞');
+// 歌詞本體是逃逸過的 (furigana_inject),而譯文的 key 是 python 用未逃逸的原文算的 ——
+// 不解回來的話含 ' 或 & 的行永遠對不上,而且是靜默失效
+check('還原 / 實體字串解回原字', stripRuby('Don&#x27;t stop &amp; go'), "Don't stop & go");
 
 // --- mergeTranslations ---
 const TRANS = { '夢ならば': '如果是梦', '未だにあなたのことを夢にみる': '至今仍梦见你' };
@@ -61,6 +64,12 @@ check('合併 / 重複呼叫不疊加', twice, mergeTranslations(lrc, TRANS));
 check('合併 / 多重時間標籤原樣保留',
   mergeTranslations('[00:20.00][01:20.00]夢ならば', TRANS).split('\n')[1],
   '[00:20.00][01:20.00]#TRANS#如果是夢');
+
+// 譯文一樣是外部來源,而前端/靈動島都是 innerHTML 畫的
+const xss = mergeTranslations('[00:01.00]夢ならば',
+  { '夢ならば': '<img src=x onerror=alert(1)>如果是夢' });
+check('合併 / 譯文的標籤被逃逸', xss.includes('<img'), false);
+check('合併 / 逃逸後譯文本身還在', xss.includes('如果是夢'), true);
 
 console.log(`\n${fail === 0 ? '全部通過' : `${fail} 項失敗`} (${pass}/${pass + fail})`);
 process.exit(fail === 0 ? 0 : 1);

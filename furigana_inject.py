@@ -8,6 +8,7 @@ import sys
 import json
 import re
 import os
+import html
 import difflib
 
 # 確保可以匯入同目錄下的模組
@@ -173,6 +174,14 @@ def build_ruby_html(text, artist, title, hints=(), kata_ruby=False):
     if not text.strip():
         return text
 
+    # 歌詞是外部來源的字串,而前端是 innerHTML 畫出來的 —— 不逃逸的話,網易/QQ/酷狗上
+    # 任何人上傳一份帶 <img onerror=…> 的歌詞就能在同源執行腳本 (改 llm_base_url 再觸發
+    # LLM 校正,BYOK 的 key 就送出去了)。逃逸放在分詞「之前」是刻意的:之後才逃逸會把
+    # 自己產生的 <ruby> 標籤一起吃掉。實體字串 (&lt; 這種) 對 fugashi 只是符號,原樣通過;
+    # data-orig 帶實體字串也沒差,前端讀 dataset 時瀏覽器會自動解碼回原字。
+    # hints 是呼叫端用「未逃逸」的原文算好的,所以要放在函式參數之後、分詞之前。
+    text = html.escape(text)
+
     # 使用 fugashi 進行上下文感知的形態素分析
     # 注意：fugashi 會吃掉 token 之間的空白，需要手動還原
     words = []
@@ -282,7 +291,7 @@ def build_ruby_html(text, artist, title, hints=(), kata_ruby=False):
             if item.get('llm_prev'):
                 part_html = part_html.replace(
                     "class='editable-ruby'",
-                    f"class='editable-ruby llm-ruby' data-llm-prev='{item['llm_prev']}'")
+                    f"class='editable-ruby llm-ruby' data-llm-prev='{html.escape(item['llm_prev'])}'")
             html_parts.append(part_html)
             
     return "".join(html_parts)
@@ -320,7 +329,8 @@ def process_lrc(artist, title, lrc_text, force_llm=False, kata_ruby=False):
     # 提早退出也順便省掉 get_hints 的網路請求。
     # ponytail: 只看有沒有假名。夾雜一行日文的中文歌會整首被注音,真遇到再改成看比例。
     if not re.search(r'[぀-ヿ]', lrc_text):
-        return lrc_text
+        # 沒經過 build_ruby_html 就直接回去,逃逸要自己做一次 (見那邊的說明)
+        return html.escape(lrc_text)
     romaji, llm = get_hints(artist, title, lrc_text, force_llm=force_llm)
     def line_hints(text):
         k = normalize_line(text)
@@ -338,19 +348,19 @@ def process_lrc(artist, title, lrc_text, force_llm=False, kata_ruby=False):
         if match:
             tags = match.group(1)
             text = match.group(2).strip()
-            # 避開已標記為 #TITLE# 的製作人員列
+            # 避開已標記為 #TITLE# 的製作人員列 (不注音,但一樣要逃逸)
             if text.startswith("#TITLE#"):
-                ruby_text = text
+                ruby_text = "#TITLE#" + html.escape(text[len("#TITLE#"):])
             else:
                 ruby_text = build_ruby_html(text, artist, title, line_hints(text), kata_ruby)
             new_lines.append(f"{tags}{ruby_text}")
         elif re.match(r'^\[[a-zA-Z]+:.*\]$', line):
             # 保留 LRC 檔案頭部的 Meta 標籤 (如 [ar:Artist])
-            new_lines.append(line)
+            new_lines.append(html.escape(line))
         else:
             # 無時間標籤的純歌詞文字
             if line.startswith("#TITLE#"):
-                ruby_text = line
+                ruby_text = "#TITLE#" + html.escape(line[len("#TITLE#"):])
             else:
                 ruby_text = build_ruby_html(line, artist, title, line_hints(line), kata_ruby)
             new_lines.append(ruby_text)

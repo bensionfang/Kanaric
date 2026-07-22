@@ -30,12 +30,24 @@ function cleanBrowserQuery(title, artist) {
   let prev;
   do { prev = t; t = t.replace(_NOISE_TAIL, '').trim(); } while (t !== prev && t);
 
+  const norm = (s) => s.replace(/[\s\-_.]/g, '').toLowerCase();
+
   // 「歌名／歌手」尾綴。只有尾段真的就是歌手時才剝 —— 歌名本身含 / 的 (「A/B」) 不能砍
   const slash = t.match(/^(.+?)\s*[／/]\s*([^／/]{1,30})$/);
   if (slash && artist) {
-    const norm = (s) => s.replace(/[\s\-_.]/g, '').toLowerCase();
     const tail = norm(slash[2]), a0 = norm(artist);
     if (tail && a0 && (tail.includes(a0) || a0.includes(tail))) t = slash[1].trim();
+  }
+
+  // 「歌手 - 歌名」前綴 (YouTube 最常見的形狀:ヨルシカ - 春泥棒)。前綴真的是歌手時才剝:
+  // 不剝的話快取鍵就是「ヨルシカ - 春泥棒」,跟同一首歌從 Spotify 聽到的「春泥棒」分裂成
+  // 兩筆,排行榜與統計跟著拆開 —— 正是這整套去噪要避免的事。
+  // 判準與上面的 ／歌手 同一條 (正規化後互相包含),對不上就原樣留著,所以歌名本身帶
+  // 連字號的 (怪獣の花唄 - replica -) 不受影響。
+  const dash = t.match(/^(.{1,40}?)\s+[-–—]\s+(.+)$/);
+  if (dash && artist) {
+    const head = norm(dash[1]), a0 = norm(artist);
+    if (head && a0 && (head.includes(a0) || a0.includes(head))) t = dash[2].trim();
   }
 
   const a = (artist || '')

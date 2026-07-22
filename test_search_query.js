@@ -44,6 +44,16 @@ assert.strictEqual(
 // 使用者 DB 裡的實例:【Lyric Video】整塊剝掉,再剝 ／頻道名
 assert.strictEqual(t('ダンス・デカダンス／Chevon 【Lyric Video】', 'Chevon-シェボン'), 'ダンス・デカダンス');
 
+// 「歌手 - 歌名」前綴:前綴真的是歌手才剝 (不剝的話快取鍵會跟音樂 app 的分裂)
+assert.strictEqual(t('ヨルシカ - 春泥棒（OFFICIAL VIDEO）', 'ヨルシカ / n-buna Official'), '春泥棒');
+assert.strictEqual(t('Ado - うっせぇわ', 'Ado'), 'うっせぇわ');
+// 前綴不是歌手 -> 一個字都不准動
+assert.strictEqual(t('Chilli Beans. - rose', '米津玄師'), 'Chilli Beans. - rose');
+// 歌名本身帶連字號的尾綴,剝掉歌手前綴後要完整留著
+assert.strictEqual(t('Vaundy - 怪獣の花唄 - replica -', 'Vaundy'), '怪獣の花唄 - replica -');
+// 沒有歌手資訊時不猜
+assert.strictEqual(t('ヨルシカ - 春泥棒', ''), 'ヨルシカ - 春泥棒');
+
 // 頻道名尾綴
 assert.strictEqual(cleanBrowserQuery('Lemon', '米津玄師 - Topic').artist, '米津玄師');
 assert.strictEqual(cleanBrowserQuery('Lemon', 'AdoVEVO').artist, 'Ado');

@@ -60,3 +60,19 @@ assert '<rt>らーめん</rt>' in build_ruby_html('ラーメン', 'x', 'y', kata
 assert build_ruby_html('ー', 'x', 'y', kata_ruby=True) == 'ー'   # 轉了也一樣就不包
 
 print('OK')
+
+# 7. 歌詞是外部來源的字串,而前端是 innerHTML 畫的 —— 標籤一律逃逸,四條路徑都要。
+#    (日文行走 build_ruby_html、中文歌走 process_lrc 的提早退出、#TITLE# 列、meta 標籤)
+XSS = "<img src=x onerror=alert(1)>"
+assert '<img' not in build_ruby_html(XSS + 'と歌う', 'x', 'y')
+assert '&lt;img' in build_ruby_html(XSS + 'と歌う', 'x', 'y')
+assert '<img' not in process_lrc('x', 'y', '[00:01.00]' + XSS + '我們的愛情')
+assert '<img' not in process_lrc('x', 'y', '[00:01.00]#TITLE#作詞 : ' + XSS + '\n[00:02.00]君の声')
+assert '<img' not in process_lrc('x', 'y', '[ar:' + XSS + ']\n[00:02.00]君の声')
+# #TITLE# 標記本身不能被吃掉,不然前端認不出製作人員列
+assert process_lrc('x', 'y', '[00:01.00]#TITLE#作詞 : n-buna\n[00:02.00]君の声'
+                   ).splitlines()[0] == '[00:01.00]#TITLE#作詞 : n-buna'
+# 逃逸後仍然照常注音 (實體字串對 fugashi 只是符號)
+assert '<rt>うた</rt>' in build_ruby_html(XSS + 'と歌う', 'x', 'y')
+
+print('OK')

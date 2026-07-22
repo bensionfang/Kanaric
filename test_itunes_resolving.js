@@ -102,6 +102,47 @@ async function waitResolved(title, artist, timeoutMs = 6000) {
   global.handleMediaUpdate(empty);
   check(empty.resolving === false, '無播放來源:resolving=false');
 
+  // 5b. 歌手名可不可信。iTunes JP 會把西洋歌手音譯成片假名 (Coldplay → コールドプレイ),
+  //     而片假名也算假名 —— 舊版「結果含假名就收」會把整批西洋歌改名寫進快取鍵與排行榜。
+  //     這裡用假的 iTunes 回應釘住三條判準,不打網路。
+  const savedFetch = global.fetch;
+  const canned = {
+    // 原名純 ASCII + 結果純片假名 + 曲風不是 J-* → 音譯,不准採用
+    'Yellow Coldplay':        ['コールドプレイ', 'Yellow', 'オルタナティブ'],
+    // 原名帶 CJK = 被翻譯過,結果一定是還原 (曲風是「ロック」不是 J-Pop,照樣要收)
+    'Aoi 魚韻':               ['サカナクション', 'Aoi', 'ロック'],
+    // 結果帶平假名 → 音譯不可能長這樣
+    'Puppet natori':          ['なとり', 'Puppet', 'J-Pop'],
+    // 純片假名 + 純 ASCII 原名,跟 Coldplay 同形 —— 只有曲風分得開
+    'Epilogue RETRORIRON':    ['レトロリロン', 'ワンタイムエピローグ', 'J-Pop'],
+    // 羅馬字歌名很容易搜到翻唱版,カラオケ 整筆丟掉 (歌名歌手都有假名,別的閘門攔不住)
+    'Haru Dorobou Yorushika': ['歌っちゃ王', '春泥棒', 'カラオケ'],
+  };
+  global.fetch = (url, opts) => {
+    const u = String(url);
+    if (!u.includes('itunes.apple.com')) return savedFetch(url, opts);
+    const term = decodeURIComponent((u.match(/term=([^&]*)/) || [])[1] || '').replace(/\+/g, ' ');
+    const c = canned[term];
+    const results = c ? [{
+      artistName: c[0], trackName: c[1], primaryGenreName: c[2],
+      trackTimeMillis: 100000,   // 跟 track() 的 233 秒差很遠,確保不是靠時長過關
+    }] : [];
+    return Promise.resolve({ json: () => Promise.resolve({ results }) });
+  };
+
+  for (const [title, artist, wantArtist, wantTitle, label] of [
+    ['Yellow', 'Coldplay', 'Coldplay', 'Yellow', '西洋歌手的片假名音譯不採用'],
+    ['Aoi', '魚韻', 'サカナクション', 'Aoi', '原名帶 CJK:片假名結果照收'],
+    ['Puppet', 'natori', 'なとり', 'Puppet', '結果帶平假名:採用'],
+    ['Epilogue', 'RETRORIRON', 'レトロリロン', 'ワンタイムエピローグ', '純片假名 + J-Pop:採用'],
+    ['Haru Dorobou', 'Yorushika', 'Yorushika', 'Haru Dorobou', 'カラオケ 翻唱整筆丟掉'],
+  ]) {
+    const st = await waitResolved(title, artist);
+    check(st && st.artist === wantArtist && st.title === wantTitle,
+      `歌手還原 / ${label}`, st && `${st.artist} - ${st.title}`);
+  }
+  global.fetch = savedFetch;
+
   // 6. 查詢失敗是暫時的,冷卻後要能重試。
   //    失敗與「查過了,確定不用還原」如果混為一談,一次 3 秒逾時就會讓那首歌在整個
   //    process 生命週期都不再嘗試還原,期間抓的歌詞用未還原的名字寫進 cache 與

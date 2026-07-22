@@ -55,7 +55,14 @@ app.use((req, res, next) => {
     return res.status(403).json({ error: 'Cross-origin requests are not allowed' });
   }
   const site = req.get('Sec-Fetch-Site');
-  if (site && site !== 'same-origin' && site !== 'none') {
+  // 使用者從別的頁面 (README、聊天視窗、書籤以外的任何連結) 點進來是 cross-site 的
+  // 「頂層導覽」—— 擋掉它只會讓人看到一行 JSON 錯誤,而放行不開任何洞:跨站 form POST
+  // 的 dest 也是 document,但方法是 POST,照樣被下面擋住。GET/HEAD 沒有副作用。
+  // 只認 dest 不認 mode:`<img>`/`<script src>` 的 dest 是 image/script,iframe 內嵌是
+  // iframe,只有真正的頂層導覽才會是 document —— mode 再比一次沒有多擋到任何東西。
+  const isTopLevelGet = (req.method === 'GET' || req.method === 'HEAD')
+    && req.get('Sec-Fetch-Dest') === 'document';
+  if (site && site !== 'same-origin' && site !== 'none' && !isTopLevelGet) {
     return res.status(403).json({ error: 'Cross-site requests are not allowed' });
   }
   next();
@@ -194,6 +201,31 @@ const canonicalArtist = (a) => artistAliases.get(a) || a;
 // 平假名/片假名 (日文獨有,中文沒有) —— 用來判斷字串是不是日文
 const hasKana = (s) => /[぀-ヿ]/.test(s || '');
 
+// --- iTunes 的歌手名可不可信 ---
+// iTunes JP 會把西洋歌手音譯成片假名 (Coldplay → コールドプレイ、Juice WRLD → ジュース・ワールド),
+// 而舊版的採用條件是「結果含假名就收」—— 片假名也算假名,所以那批全部會被改名寫進快取鍵與排行榜。
+// 分辨音譯與真的日文原名,靠的不是歌詞也不是時長 (Coldplay / Yellow 是對的歌,時長完全吻合,
+// 只是那份名字是音譯),而是字形:**音譯永遠是純片假名**,帶平假名或漢字就不可能是音譯。
+const KATAKANA_ONLY = /^[ァ-ヴー・\s]+$/;
+const hasHiraganaOrKanji = (s) => /[ぁ-ゟ一-龯々]/.test(s || '');
+const isAscii = (s) => /^[\x00-\x7F]+$/.test(s || '');
+// J-Pop/アニメ 只能當「命中就採用」的正面訊號,反過來不成立 ——
+// 實測 サカナクション 是「ロック」、ずっと真夜中でいいのに。也是「ロック」、LiSA 是「アニメ」。
+const JP_GENRE = /^(J-Pop|J-Rock|アニメ|演歌|歌謡曲|ボーカロイド)/i;
+
+/**
+ * iTunes 回來的歌手名要不要採用。三條依序,猜錯的代價都只是「維持原名」:
+ *  1. 原歌手名帶 CJK (魚韻、綠黃色社會) —— 被翻譯過的特徵,結果一定是還原
+ *  2. 結果帶平假名或漢字 (なとり、藤井 風) —— 音譯不可能長這樣
+ *  3. 結果是純片假名 + 原名純 ASCII —— 只有這裡分不出 レトロリロン 與 コールドプレイ,用曲風賭一把
+ */
+function acceptsItunesArtist(incoming, resolved, genre) {
+  if (!resolved || resolved === incoming) return false;
+  if (!isAscii(incoming)) return true;
+  if (hasHiraganaOrKanji(resolved)) return true;
+  return KATAKANA_ONLY.test(resolved) && JP_GENRE.test(genre || '');
+}
+
 // --- iTunes JP Resolution Cache ---
 const itunesCache = new Map();
 
@@ -233,18 +265,26 @@ async function getResolvedMetadata(title, artist, duration) {
     const data = await resp.json();
     if (data.results && data.results.length > 0) {
       const hit = data.results[0];
-      const result = {
-        title: hit.trackName || title,
-        artist: hit.artistName || artist
-      };
-      // 採用還原的條件二選一:
-      //  (1) 結果含假名 → 確定是日文 (中文歌沒假名,擋掉污染)
-      //  (2) 時長吻合 ±3s → 確定是同一首,不管字是全漢字還是什麼都信任 (補回全漢字日文歌)
-      const hitDur = hit.trackTimeMillis ? hit.trackTimeMillis / 1000 : null;
-      const durOk = !!(duration && hitDur && Math.abs(hitDur - duration) <= 3);
-      if (hasKana(result.title) || hasKana(result.artist) || durOk) {
-        itunesCache.set(key, result);
-        return result;
+      // カラオケ 音源整筆丟掉:羅馬字歌名很容易搜到翻唱版 (Yorushika / Haru Dorobou
+      // 的第一個 hit 是「歌っちゃ王」),而那種結果歌名歌手都有假名,下面的閘門攔不住
+      if (!/カラオケ/.test(hit.primaryGenreName || '')) {
+        const result = {
+          title: hit.trackName || title,
+          artist: hit.artistName || artist
+        };
+        // 歌手不可信 (西洋歌手的片假名音譯) 就只留歌名的還原,不動歌手
+        const artistOk = acceptsItunesArtist(artist, result.artist, hit.primaryGenreName);
+        if (!artistOk) result.artist = artist;
+        // 採用還原的條件三選一:
+        //  (1) 結果歌名含假名 → 確定是日文 (中文歌沒假名,擋掉污染)
+        //  (2) 歌手名通過上面那三條 → 歌名沒假名也值得收 (魚韻 / Aoi → サカナクション)
+        //  (3) 時長吻合 ±3s → 確定是同一首,不管字是全漢字還是什麼都信任 (補回全漢字日文歌)
+        const hitDur = hit.trackTimeMillis ? hit.trackTimeMillis / 1000 : null;
+        const durOk = !!(duration && hitDur && Math.abs(hitDur - duration) <= 3);
+        if (hasKana(result.title) || artistOk || durOk) {
+          itunesCache.set(key, result);
+          return result;
+        }
       }
     }
   } catch (e) {
@@ -579,9 +619,13 @@ const LLM_PROVIDERS = [
   { name: 'OpenAI',     base: 'https://api.openai.com/v1',     prefer: 'gpt-4o-mini',             match: k => k.startsWith('sk-') },
 ];
 
+// 前綴認不出來就**不猜**:BYOK 的前提是 key 只會去使用者指定的地方。舊版認不出時會拿
+// 整份清單依序試,等於把自架端點 / 公司 gateway 的 key 送給 Anthropic、OpenRouter、
+// Groq、Gemini、OpenAI 各一次。認不出來回 null,讓使用者自己填 Base URL 就好。
 async function detectLlmProvider(key) {
   const matched = LLM_PROVIDERS.filter(p => p.match(key));
-  for (const p of (matched.length ? matched : LLM_PROVIDERS)) {
+  if (!matched.length) return null;
+  for (const p of matched) {
     try {
       const headers = { Authorization: `Bearer ${key}` };
       const auth = await fetch(p.auth || (p.base + '/models'), { headers, signal: AbortSignal.timeout(6000) });

@@ -25,6 +25,13 @@ const CASES = [
   ['惡意網站 fetch (Origin 是別人)',       '/api/settings',   { Origin: 'https://evil.example' },                403],
   ['惡意網站 <script src> (只有 SFS)',     '/api/llm-models', { 'Sec-Fetch-Site': 'cross-site' },                403],
   ['同機另一個 port 的頁面 (same-site)',   '/api/llm-models', { 'Sec-Fetch-Site': 'same-site' },                 403],
+  // 從別的頁面點連結進來 = 跨站的頂層導覽。擋掉只會讓使用者看到一行 JSON 錯誤,
+  // 而放行不開洞:跨站 form POST 的 dest 也是 document,但方法是 POST (下一條)
+  ['別的網站點連結進來 (頂層導覽 GET)',    '/',               { 'Sec-Fetch-Site': 'cross-site',
+                                                               'Sec-Fetch-Dest': 'document' },                   200],
+  // 內嵌不是導覽:惡意頁面把後台包進 iframe 一樣要擋掉
+  ['惡意網站 iframe 內嵌',                 '/',               { 'Sec-Fetch-Site': 'cross-site',
+                                                               'Sec-Fetch-Dest': 'iframe' },                     403],
 ];
 
 const EVIL = 'https://evil.example/v1';
@@ -67,6 +74,17 @@ async function run() {
     });
     check(r.status === 403, `攻擊鏈:跨站 POST 竄改 llm_base_url (${label})`, `${r.status} (expected 403)`);
   }
+
+  // 放行頂層導覽的代價要釘住:跨站 <form> 送出去的 dest 也是 document,只有方法不同
+  const formNav = await fetch(BASE + '/api/settings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Dest': 'document',
+    },
+    body: `llm_base_url=${EVIL}`,
+  });
+  check(formNav.status === 403, '跨站 form 導覽 POST 仍被擋', `${formNav.status} (expected 403)`);
 
   const settings = await (await fetch(BASE + '/api/settings')).json();
   check(settings.llm_base_url !== EVIL, 'settings.json 未被竄改', JSON.stringify(settings.llm_base_url));
