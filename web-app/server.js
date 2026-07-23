@@ -8,6 +8,7 @@
  */
 const express = require('express');
 const http = require('http');
+const net = require('net');
 const { WebSocketServer } = require('ws');
 const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
@@ -521,10 +522,6 @@ app.get('/stats', (req, res) => {
 
 app.get('/leaderboard', (req, res) => {
   res.render('leaderboard', { activePage: 'leaderboard' });
-});
-
-app.get('/wrapped', (req, res) => {
-  res.render('wrapped', { activePage: 'wrapped' });
 });
 
 app.get('/editor', (req, res) => {
@@ -2049,6 +2046,26 @@ global.broadcast = function(message) {
 // /api/settings 把 llm_base_url 指向自己的伺服器,再觸發 /api/llm-models 或
 // /api/llm-furigana/run,server 就會把 API key 放進 Authorization header 送出去。
 // 靈動島與網頁前端都走 localhost,不受影響。
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Web Server & WebSocket running on http://localhost:${PORT}`);
+// 純 node (npm start) 沒有 electron 的 findFreePort,5720 被占會直接 EADDRINUSE 崩
+// (而且是 WebSocketServer 那邊先炸)。先探一次:preferred 空就用它,被占就讓 OS 指派。
+// 先探再 listen 一次,避開 bind 後才拋 error 的處理。electron 已先設好空閒 PORT,所以
+// 打包版第一探就中、行為不變。ALLOWED_ORIGINS 要跟著加實際 port,否則同源守門會把
+// dashboard 自己的 /api 當跨站擋掉。
+function findFreePort(preferred) {
+  return new Promise((resolve) => {
+    const t = net.createServer();
+    t.once('error', () => {
+      const t2 = net.createServer();
+      t2.listen(0, '127.0.0.1', () => { const p = t2.address().port; t2.close(() => resolve(p)); });
+    });
+    // ponytail: close→listen 之間有極小 TOCTOU 窗口,單機桌面 app 可忽略 (同 electron.js)
+    t.listen(preferred, '127.0.0.1', () => t.close(() => resolve(preferred)));
+  });
+}
+findFreePort(PORT).then((p) => {
+  ALLOWED_ORIGINS.add(`http://localhost:${p}`);
+  ALLOWED_ORIGINS.add(`http://127.0.0.1:${p}`);
+  server.listen(p, '127.0.0.1', () => {
+    console.log(`Web Server & WebSocket running on http://localhost:${p}`);
+  });
 });

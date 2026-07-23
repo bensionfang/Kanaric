@@ -109,7 +109,7 @@ One Node.js backend, multiple thin clients, with Python scripts as helpers spawn
     - 逃逸點分兩處,**因為歌詞本體要自己產 `<ruby>`,逃逸必須在產標籤之前**:`furigana_inject.py` 在分詞前 `html.escape(text)` (`build_ruby_html`、中文歌的提早退出、`#TITLE#` 列、`[ar:]` meta 列四條路徑都要);譯文不經過 python,由 `translations.js` 的 `escapeHtml()` 自己來。
     - 連帶的坑:譯文的比對鍵是 python 用**未逃逸**的原文算的,所以 `stripRuby()` 要把實體字串解回來 —— 不解的話 `Don't` → `Don&#x27;t` → 正規化成 `Donx27t`,含 `'` 或 `&` 的行永遠對不上譯文,而且是靜默失效。
     - 回歸測試:`python test_furigana_hint.py` 第 7 組、`node test_translations.js`。
-- **`web-app/views/*.ejs` + `web-app/public/`** — web frontend (lyrics editor, leaderboard, stats, "wrapped").
+- **`web-app/views/*.ejs` + `web-app/public/`** — web frontend (lyrics editor, leaderboard, stats).
 - **`lyrics_data.db`** (repo root, SQLite, WAL mode): tables `cache` (lyrics keyed by artist+title), `listening_history`, `sync_offsets`, `word_corrections` (user furigana overrides), `artist_aliases` (maps Spotify's translated artist names back to originals, e.g. 魚韻 → サカナクション), `romaji_hints` (per-song reading hints from `cn_music`; an empty `{}` is a negative-cache entry meaning "already looked, no source has it"). Path configurable via `DB_PATH` env var. The .db file is gitignored (`*.db`),每台機器各自初始化。
   - **歌手名收斂在 `handleMediaUpdate` 做,只此一處。** 每張表的鍵都是 (artist, title),而不同播放 app 對同一位歌手給不同寫法 (Spotify 給「魚韻」、YouTube 給「サカナクション」),同一首歌就會分裂成兩筆。解法是進 `handleMediaUpdate` 時就用 `artistAliases` Map (開機載入 `artist_aliases` 全表,`/api/aliases` 增刪後同步更新;`handleMediaUpdate` 是同步的,不能在那等 `db.get`) 把名字換成正規名,下游的 cache、listening_history、Python 端讀音提示全部自動一致。**不要在各處寫入點各包一次,也不要為了「分開不同來源」把 source 加進主鍵** —— 實測重複全來自 metadata 字串,加 source 一列都修不掉,反而讓五張表都要改鍵。舊資料用 `scripts/merge_aliases.py` 一次性收斂 (預設 dry-run,`--apply` 才寫入並自動備份)。
   - `listening_history` 另有 `base_title` (virtual generated column,剝掉第一個括號起的尾綴):統計/排行榜一律 GROUP BY 它,讓 `(Live)`/`(feat. …)` 算同一首。**歌詞類的表刻意不加這欄** —— Live 版歌詞本來就不同,必須分開快取。定義同時寫在 server.js 建表處與 `db.py`,改一邊要改兩邊。
@@ -120,7 +120,7 @@ One Node.js backend, multiple thin clients, with Python scripts as helpers spawn
 
 ### Desktop packaging (Electron)
 
-`web-app/electron.js` is the desktop shell: it injects env vars (`DATA_DIR`, `DB_PATH`, `LYRICS_DB_PATH`, `LYRICS_SETTINGS_PATH`, `PYTOOLS_EXE`), then `require('./server.js')` in the main process, opens a BrowserWindow on the chosen port, adds a tray icon (close = minimize to tray), and wires the island window (`wireIsland()` → `global.openIsland/closeIsland/isIslandOpen`). **In packaged mode all user data lives in `%APPDATA%/Kanaric/`**; in dev mode (`npm run app`) no paths are overridden, so the repo-root DB/settings are used. Cloud/Render deployment was removed (the old `/api/sync-state` endpoint is gone); the sqlite3/Node version pins for Render GLIBC no longer apply.
+`web-app/electron.js` is the desktop shell: it injects env vars (`DATA_DIR`, `DB_PATH`, `LYRICS_DB_PATH`, `LYRICS_SETTINGS_PATH`, `PYTOOLS_EXE`), then `require('./server.js')` in the main process, opens a BrowserWindow on the chosen port, adds a tray icon (右上角 X = 直接結束 app,不再縮到系統匣;托盤仍留著「結束」與更新安裝入口 + 雙擊顯示視窗), and wires the island window (`wireIsland()` → `global.openIsland/closeIsland/isIslandOpen`). **In packaged mode all user data lives in `%APPDATA%/Kanaric/`**; in dev mode (`npm run app`) no paths are overridden, so the repo-root DB/settings are used. Cloud/Render deployment was removed (the old `/api/sync-state` endpoint is gone); the sqlite3/Node version pins for Render GLIBC no longer apply.
 
 ### 品牌:Kanaric (kana + lyric),作者 Resuaumis
 
