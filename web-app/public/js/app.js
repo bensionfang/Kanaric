@@ -3,6 +3,10 @@ let lastMediaArtist = "";
 // 已經抓過歌詞的 (歌名|||歌手)。與 lastMediaTitle 分開:名字被 iTunes 還原改寫時
 // lastMediaTitle 會變兩次,但歌詞只該抓最後定案的那一次
 let lastLyricsKey = "";
+// 目前畫面上顯示歌詞的「歌曲身分」—— 用原始名字 (original_*),跨 iTunes 還原改名保持一致。
+// 同一首歌因還原/60 秒重試而重抓時,空結果不准蓋掉已顯示的歌詞 (見 fetchAndParseLyrics)。
+let displayedTrackId = "";
+let lyricsFetchSeq = 0;   // 併發/亂序保護:只採用最後一次請求的結果
 let parsedLyrics = [];
 let activeLyricIndex = -1;
 let songDurationSeconds = 180; // Estimated or default
@@ -272,6 +276,7 @@ async function pollSystemMedia() {
             parsedLyrics = [];
             renderLyrics();
             lastLyricsKey = "";
+            displayedTrackId = "";
         }
 
         // 名字定案 (resolving=false) 才抓歌詞,而且同一個 (歌名, 歌手) 只抓一次。
@@ -280,7 +285,9 @@ async function pollSystemMedia() {
             const lyricsKey = `${data.title}|||${data.artist || ''}`;
             if (lyricsKey !== lastLyricsKey) {
                 lastLyricsKey = lyricsKey;
-                fetchAndParseLyrics(data.title, data.artist);
+                // 歌曲身分用原始名字 (Spotify 每次都送同一份,跨還原穩定);還原前後是同一首
+                const trackId = `${data.original_title || data.title}|||${data.original_artist || data.artist || ''}`;
+                fetchAndParseLyrics(data.title, data.artist, trackId);
                 // 開了自動搜尋就直接跑一輪 (轉圈 → 綠色打勾 → 泡泡提醒,與手動按下完全同一套流程)。
                 // 跟抓歌詞綁在一起,才不會用還原前的名字先搜一次
                 if (localStorage.getItem('auto_lyrics_options') === 'true') {
@@ -296,29 +303,40 @@ async function pollSystemMedia() {
     }
 }
 
-async function fetchAndParseLyrics(title, artist) {
+async function fetchAndParseLyrics(title, artist, trackId = "") {
     const scrollPane = document.getElementById('lyrics-scroll');
-    scrollPane.innerHTML = `<div class="loading-spinner"><i class="fa-solid fa-spinner fa-spin"></i> 正在搜尋歌詞...</div>`;
-    parsedLyrics = [];
-    
+    const seq = ++lyricsFetchSeq;
+    // 同一首歌的重抓 (iTunes 還原改名 / 60 秒重試觸發):不清畫面、不換 spinner ——
+    // 換名後的重抓常撞來源限流拿到空的,先清畫面就會把已經抓對的歌詞蓋成「找不到」。
+    // 只有換到別首歌 (trackId 不同) 才顯示搜尋中。
+    const sameTrack = !!trackId && trackId === displayedTrackId;
+    if (!sameTrack) {
+        scrollPane.innerHTML = `<div class="loading-spinner"><i class="fa-solid fa-spinner fa-spin"></i> 正在搜尋歌詞...</div>`;
+        parsedLyrics = [];
+    }
+
+    const stale = () => seq !== lyricsFetchSeq;   // 有更新的請求進來了,這個結果作廢
     try {
         const resp = await fetch(`/api/lyrics/fetch?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);
-        if (resp.ok) {
-            const data = await resp.json();
-            if (data.lyrics) {
-                parseLrcLyrics(data.lyrics);
-                renderLyrics();
-                if (parsedLyrics.length > 0) {
-                    const lastLyricTime = parsedLyrics[parsedLyrics.length - 1].time;
-                    songDurationSeconds = Math.max(120, Math.round(lastLyricTime + 15));
-                }
-            } else {
-                scrollPane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-face-frown"></i><p>找不到此歌曲的歌詞</p></div>`;
+        if (stale()) return;
+        const data = resp.ok ? await resp.json() : null;
+        if (stale()) return;
+        if (data && data.lyrics) {
+            parseLrcLyrics(data.lyrics);
+            renderLyrics();
+            displayedTrackId = trackId;
+            if (parsedLyrics.length > 0) {
+                const lastLyricTime = parsedLyrics[parsedLyrics.length - 1].time;
+                songDurationSeconds = Math.max(120, Math.round(lastLyricTime + 15));
             }
         } else {
+            // 空結果:同一首已在畫面上就保留原歌詞 (暫時性的限流別蓋掉),換首才顯示找不到
+            if (sameTrack) return;
+            displayedTrackId = "";
             scrollPane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-face-frown"></i><p>找不到歌詞</p></div>`;
         }
     } catch (e) {
+        if (stale() || sameTrack) return;
         scrollPane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-triangle-exclamation"></i><p>載入歌詞出錯</p></div>`;
     }
 }
