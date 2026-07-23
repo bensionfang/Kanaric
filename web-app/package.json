@@ -72,6 +72,7 @@
     },
     "nsis": {
       "oneClick": true,
+      "runAfterFinish": false,
       "deleteAppDataOnUninstall": false,
       "artifactName": "Kanaric-Setup-${version}.${ext}"
     }
