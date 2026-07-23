@@ -155,12 +155,10 @@ function createWindow() {
     setTimeout(() => mainWindow && mainWindow.loadURL(`http://localhost:${PORT}`), 500);
   });
 
-  // 關視窗 = 縮到系統匣,不結束 app
-  mainWindow.on('close', (e) => {
-    if (!quitting) {
-      e.preventDefault();
-      mainWindow.hide();
-    }
+  // 右上角 X = 直接結束整個 app (不做縮系統匣的兩段式關閉)。app.quit() 會觸發 before-quit
+  // 的收尾 (kill media monitor、關靈動島)。quitting 旗標防止 quit 過程中重入。
+  mainWindow.on('close', () => {
+    if (!quitting) app.quit();
   });
 }
 
