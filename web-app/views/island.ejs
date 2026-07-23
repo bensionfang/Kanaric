@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Kanaric Island</title>
-<link rel="stylesheet" href="/css/island.css?v=12">
+<link rel="stylesheet" href="/css/island.css?v=13">
 </head>
 <body>
 <div id="island" class="docked">
@@ -27,10 +27,9 @@ const el = {
   m1: document.getElementById('m1'), m2: document.getElementById('m2')
 };
 
-// 量這兩行要多大,請主進程把視窗縮放到剛好包住 —— 島才不會是個固定的大黑框。
-// 寬度量在 #measure (絕對定位) 上,視窗此刻多窄都不影響量到的自然寬度;
-// 高度直接量 #island 自己 (height:auto),所以 ruby 有沒有顯示、幾行、字多大都自動貼合。
-function fitSize(line1, line2, firstEl) {
+// 量一組 (line1,line2) 的藥丸外框寬 (含封面/等化器/gap/padding)。純量測,不動畫面。
+// 寬度量在 #measure (絕對定位) 上,視窗此刻多窄都不影響量到的自然寬度。
+function measurePillW(line1, line2, firstEl) {
   // 字重也要跟著複製:主行是 500,量在預設 400 上會少算幾 px,長句就會被切掉尾巴
   const copyFont = (node, from) => {
     const cs = getComputedStyle(from);
@@ -46,10 +45,27 @@ function fitSize(line1, line2, firstEl) {
   const gap = parseFloat(cs.gap || 12);
   const chrome = el.art.offsetWidth + el.state.offsetWidth + gap * 2
     + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
-  bridge.resize({
-    width: Math.ceil(textW + chrome) + 2,   // +2 避免尾字被四捨五入切掉
-    height: Math.ceil(el.island.offsetHeight)
-  });
+  return Math.ceil(textW + chrome) + 2;   // +2 避免尾字被四捨五入切掉
+}
+
+// 換歌時一次量完全部歌詞行,取最寬 —— 視窗寬度整首定死在這個值 (零閃);逐行切換只動藥丸
+// 的 CSS 寬度、不動視窗。每一句都可能當 line1 或 line2 出現,所以量所有 html 與譯文取最大。
+let songMaxW = 0;
+function computeSongMaxW() {
+  let w = 0;
+  for (const it of lyrics) if (it.html) w = Math.max(w, measurePillW(it.html, '', el.l1));
+  for (const t in translations) w = Math.max(w, measurePillW(translations[t], '', el.l1));
+  songMaxW = w;
+}
+
+// 高度直接量 #island 自己 (height:auto),ruby、行數、字級都自動貼合。
+// windowW 給定時 (歌詞模式) 視窗寬固定為整首最寬,藥丸的 CSS 寬照樣是本行實際寬 → 短行居中、
+// 兩側透明,不留黑空隙。沒給 (歌名/前奏/設定) 就用本行寬,視窗剛好貼合。
+function fitSize(line1, line2, firstEl, growOnly = false, windowW = null) {
+  const pillW = measurePillW(line1, line2, firstEl);
+  // 藥丸寬度用 CSS transition 平滑補間
+  el.island.style.width = pillW + 'px';
+  bridge.resize({ width: windowW != null ? windowW : pillW, height: Math.ceil(el.island.offsetHeight), growOnly });
 }
 
 // preload 只有在 Electron 島視窗裡才存在;用瀏覽器直接開 /island 除錯時降級成空實作
@@ -74,26 +90,38 @@ bridge.onDocked(d => el.island.classList.toggle('docked', d));
 
 // ── 狀態 ──
 let lyrics = [], songKey = '', pos = 0, playing = false, lastSync = 0, offset = 0;
+let lastThumb = null;   // 已套用的封面 —— 縮圖可能換歌後晚一拍才由 media_monitor 補送
 let islandLines = 2, lastLine1 = null, idleTimer = null, wasPlaying = null, wasHasSession = null;
 // 第二行顯示什麼:'next' 下一句歌詞 (預設) / 'translation' 本句翻譯
 let islandLine2 = 'next';
 // 時間戳 -> 譯文。譯文行不進 lyrics[],否則會被當成獨立一句輪播過去
 let translations = {};
 
+let _lastDisplaySettings = null;
 function applySettings(s) {
   if (!s) return;
+  // 島的字級固定(見 island.css 的 --island-fs),不跟主頁 font_size 連動:主頁放大是為了
+  // 細讀,島要永遠保持「一條細帶」。兩者需求相反,綁在一起會互相破壞。
+  // 透明度是純 CSS 變數 (只改底色 alpha),不會重排,永遠先套用。
+  const op = s.island_opacity === undefined ? 1 : Number(s.island_opacity);
+  document.documentElement.style.setProperty('--island-opacity', isNaN(op) ? 1 : op);
+
+  // 只有「影響版面」的設定變了才重排 —— 重排會 lastLine1=null 重播歌詞淡入 + 重量尺寸,
+  // 而重量尺寸會 setBounds 讓透明視窗閃一下。位置類設定 (island_x/y/docked) 存檔也會廣播
+  // settings_updated,不擋的話拖曳一放開島就對自己存的位置做整套重排 → 閃。
+  const disp = `${s.show_furigana}|${s.island_lines}|${s.island_line2}`;
+  if (disp === _lastDisplaySettings) return;
+  _lastDisplaySettings = disp;
+
   document.documentElement.classList.toggle('hide-furigana', s.show_furigana === false);
   islandLines = Number(s.island_lines) === 1 ? 1 : 2;
   islandLine2 = s.island_line2 === 'translation' ? 'translation' : 'next';
-  const scale = Math.max(0.6, Math.min(1.6, (Number(s.font_size) || 32) / 32));
-  // 島的字比網頁小一截:font_size 32 → 16px。放大就會把整條撐胖,失去「一條細帶」的感覺
-  document.documentElement.style.setProperty('--island-fs', Math.round(16 * scale) + 'px');
-  const op = s.island_opacity === undefined ? 1 : Number(s.island_opacity);
-  document.documentElement.style.setProperty('--island-opacity', isNaN(op) ? 1 : op);
   // 行數只在「換行時」才會被套用 (frame() 判到 line1 沒變就提早 return),
   // 所以這裡要自己收掉第二行,並清掉 lastLine1 讓下一幀重畫 (1 → 2 行時把內容補回來)
   if (islandLines === 1) el.l2.classList.add('hidden');
   lastLine1 = null;
+  // 假名開關會改變每行的 ruby 寬度,整首最寬要重算,否則零閃的視窗寬會用到舊值
+  if (lyrics.length) computeSongMaxW();
   // 有歌詞的話下一幀重畫時就會回報尺寸;停在歌名畫面 (前奏/剛換歌) 沒有重畫,自己報一次
   if (!el.song.classList.contains('hidden')) fitSize(el.song.textContent, '', el.song);
 }
@@ -143,7 +171,7 @@ async function onMediaState(m) {
   // 這一段以前不存在也沒差,因為沒 session 就淡出看不見了;現在不淡出,就得自己收乾淨。
   if (!m.title) {
     if (songKey !== '') {
-      songKey = ''; lyrics = []; lastLine1 = null;
+      songKey = ''; lyrics = []; lastLine1 = null; lastThumb = '';
       el.art.style.backgroundImage = '';
       el.song.textContent = '等待播放…';
       el.song.classList.remove('hidden');
@@ -154,12 +182,18 @@ async function onMediaState(m) {
     return;
   }
 
+  // 封面獨立更新,不綁在換歌那一刻:縮圖偶爾換歌後才由 media_monitor 補送 (winrt 非同步),
+  // 只在換歌設一次的話,那一首就整首沒封面。同一首也要吃這個晚到的縮圖。
+  if (m.thumbnail !== undefined && m.thumbnail !== lastThumb) {
+    lastThumb = m.thumbnail;
+    el.art.style.backgroundImage = m.thumbnail ? `url(data:image/png;base64,${m.thumbnail})` : '';
+  }
+
   // resolving = 歌名還沒定案 (iTunes 日文原名還原中),等定案再抓,否則會抓兩次
   const key = (m.artist || '') + '|||' + (m.title || '');
   if (m.resolving || key === songKey) return;
   songKey = key;
   lyrics = []; lastLine1 = null;
-  el.art.style.backgroundImage = m.thumbnail ? `url(data:image/png;base64,${m.thumbnail})` : '';
   showSongName(m.title, m.artist);
 
   const q = new URLSearchParams({ title: m.title, artist: m.artist });
@@ -184,6 +218,7 @@ function showSongName(title, artist) {
 function setLyrics(text) {
   lyrics = parseLrc(text);
   lastLine1 = null;
+  computeSongMaxW();   // 整首最寬先算好,視窗寬度整首定死在這 → 逐行零閃
 }
 
 function parseLrc(text) {
@@ -256,13 +291,16 @@ function frame() {
   if (i < 0) return;
   const [line1, line2] = pickLines(i);
   if (line1 === lastLine1) return;
+  // 上一個狀態也是歌詞行才 grow-only;從前奏歌名 (通常較寬) 切到第一句歌詞要允許縮
+  const fromLyric = lastLine1 !== null && lastLine1 !== 'INTRO';
   lastLine1 = line1;
   el.song.classList.add('hidden');
   paint(el.l1, line1);
   const showLine2 = !!line2 && islandLines === 2;
   if (showLine2) paint(el.l2, line2);
   else el.l2.classList.add('hidden');
-  fitSize(line1, showLine2 ? line2 : '');
+  // 逐行切換:視窗寬固定為整首最寬 (零閃),藥丸靠 CSS 縮到本行寬;高度 grow-only
+  fitSize(line1, showLine2 ? line2 : '', null, fromLyric, songMaxW);
 }
 requestAnimationFrame(frame);
 </script>

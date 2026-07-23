@@ -73,7 +73,7 @@ async def poll_media():
     last_real_pos_time = time.time()
     last_song_id = ""
     current_thumb_b64 = ""
-    last_sent_thumb_id = ""
+    last_sent_thumb_b64 = ""
     media_source = load_media_source()
     settings_mtime = -1.0
 
@@ -104,21 +104,23 @@ async def poll_media():
                 duration_sec = timeline.end_time.total_seconds() if timeline else 0.0
                 is_playing = (playback_info and playback_info.playback_status == 4)
                 
-                # 若歌曲變更，則將專輯封面轉換為 Base64 字串傳遞給 Node.js
+                # 若歌曲變更，將專輯封面轉為 Base64 傳給 Node.js。縮圖是 winrt 的非同步串流,
+                # 換歌當下偶爾還沒就緒 (info.thumbnail 為 None 或讀取失敗) —— 讀到空就下一輪
+                # 繼續試,直到拿到為止,否則那一首整首沒封面 (island 只在收到縮圖時更新)。
                 song_id = f"{title}-{artist}"
                 if song_id != last_song_id:
                     last_song_id = song_id
                     current_thumb_b64 = ""
-                    if info.thumbnail:
-                        try:
-                            stream = await info.thumbnail.open_read_async()
-                            reader = DataReader(stream)
-                            await reader.load_async(stream.size)
-                            buf = bytearray(stream.size)
-                            reader.read_bytes(buf)
-                            current_thumb_b64 = base64.b64encode(buf).decode('utf-8')
-                        except Exception:
-                            pass
+                if not current_thumb_b64 and info.thumbnail:
+                    try:
+                        stream = await info.thumbnail.open_read_async()
+                        reader = DataReader(stream)
+                        await reader.load_async(stream.size)
+                        buf = bytearray(stream.size)
+                        reader.read_bytes(buf)
+                        current_thumb_b64 = base64.b64encode(buf).decode('utf-8')
+                    except Exception:
+                        pass
                 
                 current_time = time.time()
                 if real_pos != last_real_pos:
@@ -148,10 +150,11 @@ async def poll_media():
                     "repeat": repeat_mode
                 }
                 
-                # 節省傳輸大小，只有換歌時傳送一次 Thumbnail
-                if song_id != last_sent_thumb_id:
+                # 縮圖有變才送 (換歌歸零、或稍後補讀到),平常同一首不重送、省流量。
+                # 比對值本身而非 song_id —— 晚一拍才讀到的縮圖才補得出去。
+                if current_thumb_b64 != last_sent_thumb_b64:
                     state["thumbnail"] = current_thumb_b64
-                    last_sent_thumb_id = song_id
+                    last_sent_thumb_b64 = current_thumb_b64
             else:
                 # 沒有可用來源時傳送空狀態。Node 端是淺層合併 (server.js:146),
                 # 欄位漏掉就會留著上一首的值,所以這裡要把每個欄位都寫成空
@@ -168,7 +171,7 @@ async def poll_media():
                     "thumbnail": ""
                 }
                 last_song_id = ""
-                last_sent_thumb_id = ""
+                last_sent_thumb_b64 = ""
             
             # 以 JSON 單行格式輸出，並強制 flush 確保 Node.js 能夠即時讀取到
             state_json = json.dumps(state)
