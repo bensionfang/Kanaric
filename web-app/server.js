@@ -831,10 +831,14 @@ function injectFuriganaRaw(artist, title, lyrics, forceLlm = false, meta = null)
     pyProcess.stdin.end();
     
     let output = '';
+    let errOutput = '';
     pyProcess.stdout.on('data', (data) => { output += data.toString('utf-8'); });
-    
+    pyProcess.stderr.on('data', (data) => { errOutput += data.toString('utf-8'); });
+
     pyProcess.on('close', (code) => {
       console.log('Python script exited with code:', code, 'Output:', output.substring(0, 200));
+      // 打包版 fugashi/unidic 載入失敗時 exe 直接非零退出、stdout 空 —— 沒有這行就完全查不到原因
+      if (errOutput) console.error('furigana stderr:', errOutput);
       try {
         const parsed = JSON.parse(output);
         if (meta && parsed.llm_error) meta.llmError = parsed.llm_error;

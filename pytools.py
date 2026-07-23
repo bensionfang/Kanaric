@@ -19,6 +19,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def main():
     if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
         sys.stdout.reconfigure(encoding='utf-8')
+    # stdin 一樣要救:node 以 UTF-8 寫入含日文的 JSON,但打包 exe 不吃 PYTHONIOENCODING,
+    # 在非 UTF-8 codepage 的機器 (繁中預設 cp950) 會用 locale 解 stdin → 日文變亂碼 →
+    # json.loads 崩 → 假名整個消失。開發機開了 Windows UTF-8 模式所以看不到,cp950 使用者才中。
+    if sys.stdin and sys.stdin.encoding and sys.stdin.encoding.lower() != 'utf-8':
+        sys.stdin.reconfigure(encoding='utf-8')
 
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     args = sys.argv[2:]
