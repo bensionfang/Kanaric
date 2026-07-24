@@ -2,7 +2,7 @@
 // 最關鍵的一條是 normalizeLine 必須與 cn_music.normalize_line 產生完全相同的字串 ——
 // 對不上的話譯文永遠不會出現,而且是靜默失效 (沒有錯誤、沒有 log)。
 const assert = require('assert');
-const { mergeTranslations, normalizeLine, stripRuby } = require('./web-app/translations');
+const { mergeTranslations, normalizeLine, stripRuby, lookupTranslation } = require('./web-app/translations');
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -64,6 +64,29 @@ check('合併 / 重複呼叫不疊加', twice, mergeTranslations(lrc, TRANS));
 check('合併 / 多重時間標籤原樣保留',
   mergeTranslations('[00:20.00][01:20.00]夢ならば', TRANS).split('\n')[1],
   '[00:20.00][01:20.00]#TRANS#如果是夢');
+
+// --- lookupTranslation:歌詞來源把短句併成一行,譯文的鍵卻是逐句的 ---
+// 案例取自實際快取 (back number / 水平線),舊版這幾行全部靜默缺譯文
+const SPLIT = {
+  '水平線が光る朝に': '在地平线浮现出光芒的清晨',
+  'あなたの希望が崩れ落ちて': '你的希望崩塌了',
+  '悲しい声で歌いながら': '用难过的声调吟唱着',
+  'いつしか海に流れ着いて光って': '不知不觉便漂进了大海 发着光',
+};
+check('拆行 / 整行命中優先', lookupTranslation('水平線が光る朝に', SPLIT), '在地平线浮现出光芒的清晨');
+check('拆行 / 全形空白併行',
+  lookupTranslation('水平線が光る朝に　あなたの希望が崩れ落ちて', SPLIT),
+  '在地平线浮现出光芒的清晨 你的希望崩塌了');
+// 「光って」自己不是鍵,要跟前一段合起來才是 —— 貪婪由長到短才吃得到
+check('拆行 / 段落要合併才是鍵',
+  lookupTranslation('悲しい声で歌いながら いつしか海に流れ着いて 光って', SPLIT),
+  '用难过的声调吟唱着 不知不觉便漂进了大海 发着光');
+check('拆行 / 有一段查不到就整行放棄',
+  lookupTranslation('水平線が光る朝に　まったく別の行', SPLIT), null);
+check('拆行 / 單段落查不到就是 null', lookupTranslation('まったく別の行', SPLIT), null);
+check('拆行 / 併行也走簡轉繁與逃逸',
+  mergeTranslations('[00:20.00]水平線が光る朝に　あなたの希望が崩れ落ちて', SPLIT).split('\n')[1],
+  '[00:20.00]#TRANS#在地平線浮現出光芒的清晨 你的希望崩塌了');
 
 // 譯文一樣是外部來源,而前端/靈動島都是 innerHTML 畫的
 const xss = mergeTranslations('[00:01.00]夢ならば',

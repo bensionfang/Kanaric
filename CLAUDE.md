@@ -53,7 +53,7 @@ gh release create v1.1.0 \
 tag 沒帶 `v` 或漏推,純 node 模式的更新提醒也抓不到新版。安裝檔未簽章,`gh release create` 會直接
 公開發布,屬於「發布公開內容」的動作,不要自動執行,要使用者自己按。
 - 靈動島 = Electron 的一個視窗 (`web-app/island.js`),由 `npm run app` 一起帶起,沒有獨立進程也沒有 build 步驟。
-- 沒有 test runner 或 linter。零星的獨立測試檔直接用直譯器跑:`node test_origin_guard.js` (同源守門)、`node test_s2t.js` (簡轉繁)、`node test_search_query.js` (繁轉簡 + 瀏覽器標題去噪)、`node test_title_lines.js` (製作人員/版權列標記)、`node test_translations.js` (中文譯文合併)、`node test_itunes_resolving.js` (iTunes 原名還原的時序)、`node test_history_toggle.js` (聆聽紀錄開關 + 清除白名單)、`node test_backup_restore.js` (備份/還原 + 還原前的驗證守門)、`python test_pick_session.py`、`python test_furigana_hint.py` (Python 的要用 `venv/Scripts/python.exe`,系統 python 沒裝 fugashi)。
+- 沒有 test runner 或 linter。零星的獨立測試檔直接用直譯器跑:`node test_origin_guard.js` (同源守門)、`node test_s2t.js` (簡轉繁)、`node test_search_query.js` (繁轉簡 + 瀏覽器標題去噪)、`node test_title_lines.js` (製作人員/版權列標記)、`node test_translations.js` (中文譯文合併)、`node test_itunes_resolving.js` (iTunes 原名還原的時序)、`node test_history_toggle.js` (聆聽紀錄開關 + 清除白名單)、`node test_backup_restore.js` (備份/還原 + 還原前的驗證守門)、`node test_scroll_zone.js` (歌詞自動捲動的三段判定)、`python test_pick_session.py`、`python test_furigana_hint.py` (Python 的要用 `venv/Scripts/python.exe`,系統 python 沒裝 fugashi)。
 - `ROADMAP.md` (repo 根,**本機檔案,不進版控**) 記著 v1.0.0 之後的規劃與**明確不做的事**。動到「未來要做什麼」的討論先看它,免得重新提案已經否決過的方向 (雲端同步、換 tokenizer、離線辭典、Steam 式強制更新)。clone 下來沒有這個檔屬正常。
   主軸是**歌詞體驗**,不是學日文 —— 翻譯/查詞這類功能要進來,得先過「它讓歌詞更好讀嗎」這一關。
 
@@ -72,6 +72,7 @@ One Node.js backend, multiple thin clients, with Python scripts as helpers spawn
     - 反向的 `toSimplified()` 只給**查中國平台**用:三家的搜尋結果標題是簡體,`cn_music._title_matches` 是正規化後互相包含,繁體歌名 (告白氣球) 永遠對不上簡體結果 (告白气球),整首歌 MISS。**不能無條件轉** —— 純漢字的日文歌名 (新宝島 → 新宝岛) 轉了反而查不到,所以 `fetchCnLyricsS2()` (server.js) 是「原名先查、全 MISS 且轉換後真的不同才用簡體重試一次」,成功路徑零額外請求。快取鍵不受影響:`pytools.py cnlyrics` 的 `searchTitle/searchArtist` 與存 DB 用的 `title/artist` 本來就分開。
   - **中文譯文 (`web-app/translations.js`) 絕對不能存進 `cache`,只能在注音之後才併進廣播內容。** 理由是 `s2t.js` 的簡轉繁與 `furigana_inject.process_lrc` 的注音,**兩個 kana gate 都是「整份有沒有假名」而不是逐行**:譯文混進去會 (a) 不被轉繁 (b) 被 fugashi 標上一堆亂七八糟的音讀。所以譯文獨立存 `lyrics_translations` 表 (與 `romaji_hints`/`llm_hints` 同形,空 `{}` 是負快取),由 `mergeTranslations()` 在 `injectFurigana()` 之後插成 `[同一個時間戳]#TRANS#譯文` 行。
     - **`translations.js` 的 `normalizeLine()` 必須與 `cn_music.normalize_line` 產生逐字相同的字串**,對不上就是靜默失效 (沒有錯誤、沒有 log)。Python 的 `\w` 對 str 是 Unicode 感知的,JS 的 `\w` 只有 `[A-Za-z0-9_]`,所以 JS 那份要明寫 `\p{L}\p{N}\p{M}`。比對前還要 `stripRuby()` 把 `<rt>` 的內容**整塊**刪掉 —— 只脫標籤的話「夢<rt>ゆめ</rt>」會變成「夢ゆめ」,永遠對不上。
+    - **歌詞來源常把兩三個短句併成一行 (中間全形空白),譯文的鍵卻是逐句的** —— 整行比對就整行 MISS,而且靜默。`lookupTranslation()` 因此在整行對不上時把行拆段、由長到短貪婪比對 (段落本身可能要合起來才是一個鍵:`いつしか海に流れ着いて 光って`),**任一段查不到就整行放棄** (只翻半句更難讀)。實測全庫 2612 行缺譯文 173 → 114 行,`米津玄師 / 春雷` 缺 38 → 13、`back number / 水平線` 缺 11 → 0。
     - 合併刻意在 `furiganaCache` **之外**:切換「顯示翻譯」不必重跑 python,快取也不用多一個比對維度 (對照 `kata` 那個旗標)。
     - 譯文只在抓歌詞時搭便車存下來,所以改版前的舊快取一首都沒有。`ensureTranslations()` 會在開了設定卻查無資料時背景補抓一次。**`translationJobs` 成功失敗都留著鍵** —— 抓失敗時 pytools 不會寫負快取,鍵一刪就變成「補抓 → rebroadcast → 還是沒有 → 再補抓」的無窮迴圈。
     - 三家的譯文位置:網易 `tlyric` (自帶時間戳)、酷狗 krc `language` 軌 `type=1` (行序對齊)、QQ `contentts`。**QQ 那條是明文 LRC 而非加密 QRC**,所以走 `_qq_plain_track()` 不走 `_qq_track()`;而且那支端點不回 charset,`requests` 會猜成 ISO-8859-1 把譯文變亂碼,`r.encoding = "utf-8"` 不能拿掉 (主歌詞軌是 hex ASCII 所以看不出問題)。
@@ -156,12 +157,34 @@ GitHub repo 也已改名 `bensionfang/Kanaric`,`server.js` 的 `GITHUB_REPO` 跟
    - 前端 (`app.js`) 用 `lastLyricsKey` 判斷要不要抓,跟 `lastMediaTitle` 分開:換歌時 `lastMediaTitle` 會變兩次 (原名 → 還原後),歌詞只該抓最後定案的那次。自動搜尋備選歌詞也綁在同一個判斷裡,理由相同。
 3. A track is only written to `listening_history` after 30 seconds of accumulated actual playback (pause/resume-aware timer in `server.js`).
 
+### 歌詞自動捲動 (三段規則)
+
+判定在 `web-app/public/js/scroll-zone.js` 的 `scrollZoneAction()` (純函式,獨立成檔是為了測試不必起瀏覽器),
+呼叫點只有 `app.js` 的 `applyAutoScroll()` (換行時)。畫面依活動行位置分三段:**中間帶 (中線 ±15% 高度,下限一行高) 置中**、
+**上半/下半只換高亮不捲動** (行隨換句往下漂,漂進中間帶就恢復逐句置中)、**離開畫面才停手並跳出「恢復同步」按鈕**。
+中間帶**刻意不對稱**:上緣 35%、下緣 90% (下半部只剩最後 10%) —— 上面是「往下漂進同步」的緩衝,下面是「已經偏低了」,不需要那麼長。
+兩邊各保底容得下一行 (`中線 ∓ 一行高`),否則一次換句就可能整個跨過中間帶。
+
+- **置中是黏著狀態 (`autoCenter`),不是每句重算幾何** —— 置中後下一句的中心必定往下偏一行 (行高 + 行距),
+  帶譯文的高行會落在中間帶外,純幾何判定就變成「置中一次又往下漂,最後漂出畫面」。`nextScrollState()` 因此在
+  `autoCenter` 為 true 時直接置中不看幾何,只有使用者自己捲才脫離,漂回中間帶才黏回去。
+- **滾輪/觸控不再停掉同步** —— 手動捲動只掛 `scroll` listener 更新按鈕可見性 (`updateSyncPanel()`) 與解除 `autoCenter`,
+  捲回畫面內按鈕自己消失。刻意不在 scroll 裡置中:使用者手指還在滑時把畫面搶走很難用。
+  **scroll 事件必須配合「最近 1 秒內有手勢」(wheel/touch/pointerdown/keydown) 才算使用者捲動** —— scroll 事件本身分不出誰捲的,
+  移動或縮放視窗、點別的元素造成的重排都會發 scroll,只看 scroll 就會在使用者什麼都沒做時脫離同步、歌詞一句句漂到下半部。
+  自己的平滑捲動另外靠 `programmaticScrollUntil` (scrollend + 500ms 保底) 濾掉,不濾就等於置中完立刻自我解除。
+  視窗 `resize` 時若還在同步模式就重新置中 (行會被重排推偏)。
+- `adjacent` (新行號 = 舊行號 +1) 這個參數要**先於** offscreen 判斷:seek / 換歌 / 重畫的目標行常在畫面外,一律置中,
+  否則點歌詞跳轉會變成「不捲過去還跳出按鈕」。
+- `scrollLocked` 只剩兩個硬鎖來源:編輯假名中 (`startRubyEdit`)、鍵盤上下鍵手動切行 (`handleManualScroll`),都靠 `resumeSync()` 解鎖。
+- 回歸測試 `node test_scroll_zone.js`。
+
 ### Furigana editing (web frontend)
 
 The pen button in the player bar toggles **ruby edit mode** (`toggleRubyEditMode()` in `app.js`, which puts `ruby-edit-mode` on `<body>`). There is no modal — editing happens inline on the lyrics themselves:
 
 - CSS suppresses the normal whole-line hover (the Spotify-style white + underline that means "click to seek") and instead highlights only the hovered `ruby.editable-ruby`.
-- **Click** makes that ruby's `<rt>` `contentEditable` and selects it. Typing romaji converts to kana live (`romajiToHiragana()`). Enter or blur saves, Escape cancels. Auto-scroll is paused during editing (`isUserScrolling = true`) so the line doesn't slide away mid-edit; `resumeSync()` on exit.
+- **Click** makes that ruby's `<rt>` `contentEditable` and selects it. Typing romaji converts to kana live (`romajiToHiragana()`). Enter or blur saves, Escape cancels. Auto-scroll is paused during editing (`scrollLocked = true`) so the line doesn't slide away mid-edit; `resumeSync()` on exit.
 - **Double-click** resets the word to its automatic reading via `POST /api/furigana/reset`, which DELETEs the `word_corrections` row. This is not the same as saving an empty string — an empty correction means "this word has no furigana" and is a stored override.
 - The edit unit is the whole morpheme (`ruby.dataset.orig`), not the single kanji clicked, matching the `word_corrections` primary key `(artist, title, word)`. But one morpheme can render as *several* rubies when okurigana splits it (噛み締め → 噛(か) + 締(し)), so each ruby also carries `data-hs`/`data-hlen`: the offset and length of the slice of the whole-word reading it owns. Clicking edits only that slice in place; on save `finishRubyEdit()` splices it back into `data-hira` before POSTing. Getting this wrong makes clicking one kanji visibly corrupt its neighbour's reading.
 - Both save and reset call `rebroadcastLyrics()` server-side, which re-injects and pushes to every client (web + island) when the edited song is the one playing.

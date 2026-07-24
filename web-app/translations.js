@@ -54,6 +54,36 @@ function unescapeHtml(s) {
 }
 
 /**
+ * 查一行的譯文。整行對不上時再拆段重查 —— 歌詞來源常把兩三個短句併成一行
+ * (中間留全形空白),而譯文的鍵是逐句的:
+ *
+ *   歌詞行  水平線が光る朝に　あなたの希望が崩れ落ちて
+ *   譯文鍵  水平線が光る朝に / あなたの希望が崩れ落ちて   (兩個鍵)
+ *
+ * 實測 59 首有譯文的歌裡 8 首缺行,多數是這個原因 (米津玄師/春雷 40 行缺 38 行)。
+ * 由長到短貪婪比對:段落本身可能還要合起來才是一個鍵 (「いつしか海に流れ着いて 光って」)。
+ * **有任何一段查不到就整行放棄** —— 只翻半句比不翻更難讀。
+ */
+function lookupTranslation(text, transMap) {
+  const whole = transMap[normalizeLine(text)];
+  if (whole) return whole;
+  const parts = text.split(/[\s　]+/).filter(Boolean);
+  if (parts.length < 2) return null;
+  const got = [];
+  let i = 0;
+  while (i < parts.length) {
+    let next = -1;
+    for (let j = parts.length; j > i; j--) {
+      const hit = transMap[normalizeLine(parts.slice(i, j).join(''))];
+      if (hit) { got.push(hit); next = j; break; }
+    }
+    if (next < 0) return null;
+    i = next;
+  }
+  return got.join(' ');
+}
+
+/**
  * 把譯文併進注音後的 LRC。
  * @param {string} lrcHtml   injectFurigana 的輸出
  * @param {object} transMap  {正規化後的日文行: 譯文}。空物件 = 查過但沒有翻譯
@@ -77,7 +107,7 @@ function mergeTranslations(lrcHtml, transMap) {
     const next = (lines[i + 1] || '').trim().match(LINE_RE);
     if (next && next[2].trim().startsWith('#TRANS#')) continue;
 
-    const hit = transMap[normalizeLine(stripRuby(text))];
+    const hit = lookupTranslation(stripRuby(text), transMap);
     if (!hit) continue;
     // 譯文是簡體 (三家中國平台都是),轉繁在合併時做而不是寫入時 —— 這樣改版前
     // 存進 lyrics_translations 的舊資料也會一起變繁體,同 cache 那四個讀取點的理由。
@@ -87,4 +117,4 @@ function mergeTranslations(lrcHtml, transMap) {
   return inserted ? out.join('\n') : lrcHtml;
 }
 
-module.exports = { mergeTranslations, normalizeLine, stripRuby };
+module.exports = { mergeTranslations, normalizeLine, stripRuby, lookupTranslation };

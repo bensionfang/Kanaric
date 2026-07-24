@@ -840,7 +840,7 @@ button.menu-action i {
 }
 
 .lyrics-line.active .lyrics-translation {
-    color: rgba(255, 255, 255, 0.7);
+    color: #ffffff;
 }
 
 /* 假名編輯模式:整行的 hover 反白關掉,只有游標指到的漢字亮起來 */

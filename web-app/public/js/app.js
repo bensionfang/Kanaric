@@ -25,7 +25,9 @@ let isCurrentlyPlaying = false;
 let pendingSeekTarget = null;   // 剛送出 seek,等系統跳到位前先無視回報的位置
 let pendingSeekUntil = 0;
 let syncOffset = 0;
-let isUserScrolling = false;
+let scrollLocked = false;   // 硬鎖自動捲動:編輯假名中 / 鍵盤手動切行中
+let autoCenter = true;      // 逐句置中模式 (黏著):使用者自己捲才脫離,漂回中間帶才黏回去
+let programmaticScrollUntil = 0;   // 這個時間點前的 scroll 事件是自己捲的,不算使用者操作
 
 // 段落循環 (練唱):存 parsedLyrics 的 index,不是秒 —— 歌詞重畫後才有辦法把標記畫回去
 let isLoopMode = false;
@@ -100,17 +102,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-// Detect manual user scrolling
+// 硬鎖自動捲動 (鍵盤上下鍵手動切行、編輯假名時用)。滾輪/觸控不走這裡 ——
+// 手動捲動不再停掉同步,改由 applyAutoScroll 依活動行在畫面上的位置決定 (三段規則)。
 function handleManualScroll() {
-    if (!isUserScrolling) {
-        isUserScrolling = true;
-        const panel = document.getElementById('sync-resume-panel');
-        if (panel) panel.style.display = 'flex';
+    if (!scrollLocked) {
+        scrollLocked = true;
+        setSyncPanel(true);
     }
 }
 
-document.getElementById('lyrics-scroll').addEventListener('wheel', handleManualScroll, { passive: true });
-document.getElementById('lyrics-scroll').addEventListener('touchmove', handleManualScroll, { passive: true });
+function setSyncPanel(show) {
+    const panel = document.getElementById('sync-resume-panel');
+    if (panel) panel.style.display = show ? 'flex' : 'none';
+}
+
+// 活動行是否還在歌詞可視區內
+function isActiveLineVisible() {
+    const pane = document.getElementById('lyrics-scroll');
+    const line = document.getElementById(`lyric-line-${activeLyricIndex}`);
+    if (!pane || !line) return true;
+    const top = line.offsetTop - pane.scrollTop;
+    return top + line.offsetHeight > 0 && top < pane.clientHeight;
+}
+
+// 只做按鈕的可見性判定,不捲動 —— 使用者手指還在滑時把畫面搶走很難用
+function updateSyncPanel() {
+    if (scrollLocked) return setSyncPanel(true);
+    if (activeLyricIndex < 0) return setSyncPanel(false);   // 沒有活動行 (含無時間軸歌詞)
+    setSyncPanel(!isActiveLineVisible());
+}
+
+// 換行時的三段判定:中間帶置中、上下半只換高亮、離開畫面就停手並跳按鈕。
+// autoCenter 是黏著狀態 —— 一旦開始逐句置中就不再看幾何,只有使用者自己捲才會脫離
+// (見 scroll-zone.js 的 nextScrollState:不黏的話置中後每句都會往下漂一行,最後漂出畫面)。
+function applyAutoScroll(prevIndex) {
+    if (scrollLocked) return;   // 按鈕已由 handleManualScroll 顯示
+    const pane = document.getElementById('lyrics-scroll');
+    const line = document.getElementById(`lyric-line-${activeLyricIndex}`);
+    if (!pane || !line) return;
+    const st = nextScrollState(
+        autoCenter, line.offsetTop - pane.scrollTop, line.offsetHeight, pane.clientHeight,
+        prevIndex >= 0 && activeLyricIndex === prevIndex + 1);
+    autoCenter = st.autoCenter;
+    if (st.action === 'center') centerActiveLine();
+    setSyncPanel(st.action === 'offscreen');
+}
+
+// 捲動 (滾輪/觸控/拖捲軸/鍵盤) 只更新按鈕:歌詞捲回畫面內按鈕就自己消失,不必按恢復同步。
+// 使用者捲動 = 脫離逐句置中,之後由 applyAutoScroll 的三段判定決定何時黏回去。
+//
+// **只認「真的有手勢」的 scroll 事件**:scroll 事件的來源分不出是誰捲的,而移動/縮放視窗、
+// 點別的元素造成的重排都會發 scroll —— 光看 scroll 就會在使用者什麼都沒做時脫離同步,
+// 歌詞接著一句句漂到下半部。自己的平滑捲動也另外用 programmaticScrollUntil 濾掉。
+{
+    let scrollRaf = 0;
+    let gestureUntil = 0;
+    const pane = document.getElementById('lyrics-scroll');
+    const markGesture = () => { gestureUntil = performance.now() + 1000; };
+    for (const ev of ['wheel', 'touchstart', 'touchmove', 'pointerdown', 'keydown']) {
+        pane.addEventListener(ev, markGesture, { passive: true });
+    }
+    pane.addEventListener('scrollend', () => { programmaticScrollUntil = 0; });
+    pane.addEventListener('scroll', () => {
+        if (scrollRaf) return;
+        scrollRaf = requestAnimationFrame(() => {
+            scrollRaf = 0;
+            const now = performance.now();
+            if (now < programmaticScrollUntil || now > gestureUntil) return;
+            autoCenter = false;
+            updateSyncPanel();
+        });
+    }, { passive: true });
+    // 視窗大小變了,原本置中的行會偏掉 —— 還在同步模式就重新對正
+    window.addEventListener('resize', () => {
+        if (autoCenter && !scrollLocked) centerActiveLine();
+    });
+}
 
 // 重畫歌詞後 DOM 是全新的、捲軸回到最頂,這時再平滑捲動會從頭滑一大段才追上正在唱的那句。
 // renderLyrics() 會立這個旗標,讓「下一次」置中直接跳過去,之後恢復平滑捲動。
@@ -123,14 +190,16 @@ function centerActiveLine() {
     const pane = document.getElementById('lyrics-scroll');
     if (!currentLine || !pane) return;
     const scrollOffset = currentLine.offsetTop - (pane.clientHeight / 2) + (currentLine.clientHeight / 2);
+    // 自己捲的期間 scroll 事件不算使用者操作 (見 scroll listener)
+    programmaticScrollUntil = performance.now() + 500;
     pane.scrollTo({ top: Math.max(0, scrollOffset), behavior: jumpToActiveLine ? 'auto' : 'smooth' });
     jumpToActiveLine = false;
 }
 
 function resumeSync() {
-    isUserScrolling = false;
-    const panel = document.getElementById('sync-resume-panel');
-    if (panel) panel.style.display = 'none';
+    scrollLocked = false;
+    autoCenter = true;
+    setSyncPanel(false);
     centerActiveLine();
 }// -------------------------------------------------------------
 // Live Sync Logic
@@ -535,6 +604,7 @@ function updatePlaybackProgress(position) {
 function syncLyricsToTime(position) {
     if (parsedLyrics.length === 0 || isUnsyncedLyrics) return;
     
+    const prevIndex = activeLyricIndex;
     let foundIndex = -1;
     for (let i = 0; i < parsedLyrics.length; i++) {
         if (position >= parsedLyrics[i].time) {
@@ -556,9 +626,7 @@ function syncLyricsToTime(position) {
             const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
             if (currentLine) {
                 currentLine.classList.add('active');
-
-                // Only scroll if the user is not manually scrolling
-                if (!isUserScrolling) centerActiveLine();
+                applyAutoScroll(prevIndex);
             }
         }
     }
@@ -996,7 +1064,7 @@ function startRubyEdit(ruby) {
     rt.contentEditable = 'true';
     rt.spellcheck = false;
     // 編輯中別讓自動捲動把字帶走
-    isUserScrolling = true;
+    scrollLocked = true;
 
     rt.focus();
     const range = document.createRange();
