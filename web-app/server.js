@@ -181,6 +181,15 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
     // 全新 DB 上先發 SELECT 會撞 "no such table"
     db.run(`CREATE TABLE IF NOT EXISTS artist_aliases (alias TEXT PRIMARY KEY, true_name TEXT)`, () => loadAliases());
     db.run(`CREATE TABLE IF NOT EXISTS search_overrides (raw_artist TEXT, raw_title TEXT, search_artist TEXT, search_title TEXT, PRIMARY KEY (raw_artist, raw_title))`);
+    // 使用者親手標記「這首各大網站都沒有歌詞」的清單:擋掉 /api/lyrics/fetch 的自動搜尋與重新快取,
+    // 否則刪掉錯的歌詞後,下次播放又會抓到同一首撞名的錯歌詞寫回 cache。屬使用者資料,清除/備份比照 word_corrections。
+    // rejected_hash = 標記當下那份(錯的)歌詞指紋;last_check = 上次背景重查時間。
+    // 之後播放時每隔一陣子重查,搜到「指紋不同」的結果(= 真的被收錄了)就自動解除標記並套用。
+    db.run(`CREATE TABLE IF NOT EXISTS no_lyrics (artist TEXT, title TEXT, rejected_hash TEXT, last_check INTEGER, PRIMARY KEY (artist, title))`, () => {
+      // 上一版沒這兩欄的舊表補欄位 (欄位已存在會報錯,callback 吞掉)
+      db.run('ALTER TABLE no_lyrics ADD COLUMN rejected_hash TEXT', () => {});
+      db.run('ALTER TABLE no_lyrics ADD COLUMN last_check INTEGER', () => {});
+    });
     // 中文譯文快取 (data 為 JSON: {正規化後的日文行: 譯文};空 {} = 查過但沒有來源附翻譯)。
     // Python 端 db.py 也會建同一張,改一邊要改兩邊
     db.run(`CREATE TABLE IF NOT EXISTS lyrics_translations (artist TEXT, title TEXT, data TEXT, PRIMARY KEY (artist, title))`);
@@ -251,10 +260,13 @@ async function getResolvedMetadata(title, artist, duration) {
   // handleMediaUpdate 靠它告訴前端先別抓歌詞,否則會用舊名抓一次、還原後再抓一次
   itunesCache.set(key, { title, artist, pending: true });
 
-  // 標題已含假名 = 已經是日文,Spotify 沒翻譯,不用還原 —— 硬查日區只會被別的版本
-  // (Live/Remix 常是搜尋第一個 hit) 蓋掉。還原只該處理 Spotify 把日文譯成中文漢字 (無假名) 的情況。
-  // 每條 return 前都要覆寫掉 pending 佔位,不然這首歌的 resolving 會永遠是 true
-  if (hasKana(title)) {
+  // 標題**或歌手**已含假名 = 這筆本來就是日文原文、Spotify 沒翻譯,不用還原 ——
+  // 硬查日區只會被別的版本 (Live/Remix 常是第一個 hit) 或同名別曲蓋掉。
+  // Spotify 翻譯時標題與歌手會「一起」變成中文漢字 (魚韻/サカナクション 兩者都被譯),
+  // 所以歌手還帶假名 (秘めごと) 就代表沒被翻譯過 —— 標題 AIAIAI 是原文,不該被 iTunes
+  // 亂配成 愛愛愛 / Kizuna AI。還原只該處理標題與歌手「雙雙無假名」的中譯情況。
+  // 每條 return 前都要覆寫掉 pending 佔位,不然這首歌的 resolving 會永遠是 true。
+  if (hasKana(title) || hasKana(artist)) {
     itunesCache.set(key, { title, artist });
     return { title, artist };
   }
@@ -1121,103 +1133,142 @@ app.post('/api/media-control', express.json(), (req, res) => {
   res.json({ success: true });
 });
 
+// 使用者標記「此歌無歌詞」的整列查詢 (含 rejected_hash / last_check),沒有回 null
+function getNoLyrics(artist, title) {
+  return new Promise((resolve) => {
+    db.get('SELECT rejected_hash, last_check FROM no_lyrics WHERE artist=? AND title=?', [artist, title],
+      (e, row) => resolve(row || null));
+  });
+}
+
+// 歌詞內容指紋:比對「這次搜到的跟標記時那份錯的是不是同一份」。djb2,夠分辨即可,不必密碼學強度
+function hashLyric(s) {
+  let h = 5381;
+  for (let i = 0; i < (s || '').length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return String(h >>> 0);
+}
+
+// 跑完整來源串接,回傳「會寫進 cache 的那份歌詞字串」(轉繁 + 標記製作人員列 + source 標籤),
+// 找不到回空字串。**不寫 cache、不廣播** —— 純搜尋,給 performFetch 與無歌詞背景重查共用。
+async function searchBestLyric(title, artist, searchTitle, searchArtist) {
+  const { qArtist, trueArtist, cleanTitle } = await buildSearchQuery(title, artist, searchTitle, searchArtist);
+
+  let preferredSource = 'NetEase';
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      if (s.preferred_source) preferredSource = s.preferred_source;
+    }
+  } catch (e) {}
+
+  let bestLyric = "";
+  let plainBackup = "";
+  let fallbackSearched = false;
+  let finalSource = "";
+
+  // 網易/酷狗:歌詞與日文讀音提示一次抓回,注音時就不用再打一次網路
+  if (preferredSource === 'NetEase' || preferredSource === 'Kugou') {
+    const cnData = await fetchCnLyricsS2({
+      title, artist, searchTitle: cleanTitle, searchArtist: trueArtist, source: preferredSource
+    });
+    if (cnData && cnData.lyrics) {
+      if (/\[\d{2}:\d{2}/.test(cnData.lyrics)) { bestLyric = cnData.lyrics; finalSource = cnData.source; }
+      else if (!plainBackup) { plainBackup = cnData.lyrics; finalSource = cnData.source; }
+    }
+  }
+
+  if (!bestLyric && preferredSource !== 'Lrclib') {
+    const fbData = await fetchFallback(cleanTitle, qArtist);
+    fallbackSearched = true;
+    if (fbData && fbData.lyrics) {
+      if (/\[\d{2}:\d{2}/.test(fbData.lyrics)) { bestLyric = fbData.lyrics; finalSource = fbData.source; }
+      else { plainBackup = fbData.lyrics; finalSource = fbData.source; }
+    }
+  }
+
+  // lrclib 連不上 (被牆/離線) 時 fetch 會 throw。不接住的話會跳到最外層的 catch,
+  // 把前面已經拿到的 plainBackup 一起丟掉 —— 有無時間軸的歌詞也比「找不到歌詞」好。
+  if (!bestLyric) try {
+    const apiUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(trueArtist)}&track_name=${encodeURIComponent(cleanTitle)}`;
+    const lrclibResp = await fetch(apiUrl, { headers: { "User-Agent": "Kanaric/1.0 (https://github.com/bensionfang/Kanaric)" } });
+    if (lrclibResp.ok) {
+      const data = await lrclibResp.json();
+      // 時長守門:lrclib 只用歌名+歌手字串比對,撞名會回別首歌。回傳帶 duration,
+      // 跟播放中時長差超過 3 秒就當撞名丟掉。瀏覽器來源 currentDuration 回 null,照舊放行。
+      const ourDur = currentDuration(title, artist);
+      const durOff = !!(ourDur && data.duration && Math.abs(data.duration - ourDur) > 3);
+      if (durOff) {
+        console.log('Lrclib 時長不符,判為撞名略過:', data.duration, 'vs', ourDur);
+      } else if (data.syncedLyrics) { bestLyric = data.syncedLyrics; finalSource = 'Lrclib'; }
+      else if (data.plainLyrics && !plainBackup) { plainBackup = data.plainLyrics; finalSource = 'Lrclib'; }
+    }
+  } catch (e) {
+    console.warn('Lrclib 查詢失敗,略過:', e.message);
+  }
+
+  if (!bestLyric && !fallbackSearched) {
+    const fbData = await fetchFallback(cleanTitle, qArtist);
+    if (fbData && fbData.lyrics) {
+      if (/\[\d{2}:\d{2}/.test(fbData.lyrics) || !plainBackup) { bestLyric = fbData.lyrics; finalSource = fbData.source; }
+    }
+  }
+
+  if (!bestLyric && plainBackup) bestLyric = plainBackup;
+  if (!bestLyric) return { lyric: "", source: "" };
+
+  const sourceName = finalSource || 'Fallback';
+  const finalLyric = autoMarkTitleLines(toTraditional(`[source:${sourceName}]\n${bestLyric}`), title);
+  return { lyric: finalLyric, source: sourceName };
+}
+
+// 無歌詞背景重查:搜到「跟標記時那份不同」的非空結果 = 真的被收錄了 → 解除標記、寫快取、廣播套用。
+const NOLYRICS_RECHECK_MS = Number(process.env.NOLYRICS_RECHECK_MS) || 7 * 24 * 3600 * 1000;
+const recheckInFlight = new Set();   // 避免同一首同時被多次播放觸發重複搜尋
+async function recheckNoLyrics(artist, title, rejectedHash) {
+  const key = `${artist}|||${title}`;
+  if (recheckInFlight.has(key)) return;
+  recheckInFlight.add(key);
+  try {
+    const { lyric, source } = await searchBestLyric(title, artist);
+    if (lyric && hashLyric(lyric) !== (rejectedHash || '')) {
+      // 出現不同結果:自動解除標記 + 寫快取 + 廣播(前端會即時換上)
+      await new Promise((r) => db.run('DELETE FROM no_lyrics WHERE artist=? AND title=?', [artist, title], r));
+      await new Promise((r) => db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, lyric], r));
+      const injected = await injectFurigana(artist, title, lyric);
+      // 寫回 cache + 廣播:靈動島 (有 WebSocket) 即時換上;網頁下次播放/重載時自然帶出。
+      if (global.broadcast) global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
+      console.log('無歌詞重查:找到新歌詞,已自動套用', artist, '-', title, `(${source})`);
+    }
+  } catch (e) {
+    console.warn('無歌詞重查失敗:', e.message);
+  } finally {
+    recheckInFlight.delete(key);
+  }
+}
+
 app.get('/api/lyrics/fetch', async (req, res) => {
   const { title, artist, force, searchTitle, searchArtist } = req.query;
   if (!title || !artist) return res.status(400).json({ error: 'Title and artist are required' });
-  
+
+  // 標記為無歌詞的:直接回空,不搜尋也不寫快取 (force 重載也照擋)。
+  // 但每隔 NOLYRICS_RECHECK_MS 背景重查一次:真的被收錄了 (搜到不同結果) 就自動解除並套用。
+  // 手動的備選歌詞搜尋 (/api/lyrics/options) 不受此擋,使用者仍可主動去找。
+  const nl = await getNoLyrics(artist, title);
+  if (nl) {
+    const now = Date.now();
+    if (now - (nl.last_check || 0) > NOLYRICS_RECHECK_MS) {
+      db.run('UPDATE no_lyrics SET last_check=? WHERE artist=? AND title=?', [now, artist, title]);  // 先記時,避免每次播都觸發
+      recheckNoLyrics(artist, title, nl.rejected_hash);   // 背景跑,不 await;有結果會自己廣播
+    }
+    if (global.broadcast) global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: "" });
+    return res.json({ lyrics: "", source: 'no_lyrics' });
+  }
+
   const performFetch = async () => {
     try {
-      const { qTitle, qArtist, trueArtist, cleanTitle } = await buildSearchQuery(title, artist, searchTitle, searchArtist);
+      const { lyric: bestLyric, source: sourceName } = await searchBestLyric(title, artist, searchTitle, searchArtist);
 
-      let preferredSource = 'NetEase';
-      try {
-        if (fs.existsSync(SETTINGS_FILE)) {
-          const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-          if (s.preferred_source) preferredSource = s.preferred_source;
-        }
-      } catch (e) {}
-
-      let bestLyric = "";
-      let isLrclib = false;
-      let plainBackup = "";
-      let fallbackSearched = false;
-      let finalSource = "";
-
-      // 網易/酷狗:歌詞與日文讀音提示一次抓回,注音時就不用再打一次網路
-      if (preferredSource === 'NetEase' || preferredSource === 'Kugou') {
-        const cnData = await fetchCnLyricsS2({
-          title, artist, searchTitle: cleanTitle, searchArtist: trueArtist, source: preferredSource
-        });
-        if (cnData && cnData.lyrics) {
-          if (/\[\d{2}:\d{2}/.test(cnData.lyrics)) {
-            bestLyric = cnData.lyrics;
-            finalSource = cnData.source;
-          } else if (!plainBackup) {
-            plainBackup = cnData.lyrics;
-            finalSource = cnData.source;
-          }
-        }
-      }
-
-      if (!bestLyric && preferredSource !== 'Lrclib') {
-          const fbData = await fetchFallback(cleanTitle, qArtist);
-          fallbackSearched = true;
-          if (fbData && fbData.lyrics) {
-              const fbIsSynced = /\[\d{2}:\d{2}/.test(fbData.lyrics);
-              if (fbIsSynced) {
-                  bestLyric = fbData.lyrics;
-                  isLrclib = false;
-                  finalSource = fbData.source;
-              } else {
-                  plainBackup = fbData.lyrics;
-                  finalSource = fbData.source;
-              }
-          }
-      }
-
-      // lrclib 連不上 (被牆/離線) 時 fetch 會 throw。不接住的話會跳到最外層的 catch,
-      // 把前面已經拿到的 plainBackup 一起丟掉 —— 有無時間軸的歌詞也比「找不到歌詞」好。
-      if (!bestLyric) try {
-          const apiUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(trueArtist)}&track_name=${encodeURIComponent(cleanTitle)}`;
-          const lrclibResp = await fetch(apiUrl, {
-            headers: { "User-Agent": "Kanaric/1.0 (https://github.com/bensionfang/Kanaric)" }
-          });
-          if (lrclibResp.ok) {
-            const data = await lrclibResp.json();
-            if (data.syncedLyrics) {
-              bestLyric = data.syncedLyrics;
-              isLrclib = true;
-              finalSource = 'Lrclib';
-            } else if (data.plainLyrics && !plainBackup) {
-              plainBackup = data.plainLyrics;
-              finalSource = 'Lrclib';
-            }
-          }
-      } catch (e) {
-          console.warn('Lrclib 查詢失敗,略過:', e.message);
-      }
-
-      if (!bestLyric && !fallbackSearched) {
-        const fbData = await fetchFallback(cleanTitle, qArtist);
-        if (fbData && fbData.lyrics) {
-          const fbIsSynced = /\[\d{2}:\d{2}/.test(fbData.lyrics);
-          if (fbIsSynced || !plainBackup) {
-            bestLyric = fbData.lyrics;
-            isLrclib = false;
-            finalSource = fbData.source;
-          }
-        }
-      }
-      
-      if (!bestLyric && plainBackup) {
-          bestLyric = plainBackup;
-      }
-      
-      // Save to DB under ORIGINAL title/artist
       if (bestLyric) {
-        const sourceName = finalSource || 'Fallback';
-        bestLyric = `[source:${sourceName}]\n${bestLyric}`;
-        bestLyric = autoMarkTitleLines(toTraditional(bestLyric), title);
         await new Promise((resolve, reject) => {
           db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, bestLyric], (err) => {
             if (err) reject(err);
@@ -1230,7 +1281,7 @@ app.get('/api/lyrics/fetch', async (req, res) => {
         }
         return res.json({ lyrics: injected, source: sourceName });
       }
-      
+
       if (global.broadcast) {
         global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: "" });
       }
@@ -1546,6 +1597,59 @@ app.post('/api/lyrics/save', express.json(), async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// 刪除某首歌的快取歌詞。只碰可重抓的 cache —— word_corrections/sync_offsets 那些
+// 使用者親手打的不動。一併清記憶體的 furiganaCache/itunesCache,否則已刪的歌詞會被
+// 再吐回來 (與 /api/db-clear 清 lyrics 時同款處理)。回歸測試 node test_lyrics_delete.js。
+app.post('/api/lyrics/delete', express.json(), (req, res) => {
+  const { title, artist } = req.body;
+  if (!title || !artist) return res.status(400).json({ error: 'title and artist are required' });
+  db.run('DELETE FROM cache WHERE artist=? AND title=?', [artist, title], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    invalidateFurigana(artist, title);
+    itunesCache.delete(`${title}-${artist}`);
+    if (global.broadcast) {
+      global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: "" });
+    }
+    res.json({ success: true, deleted: this.changes });
+  });
+});
+
+// 標記/取消標記「此歌無歌詞」。marked=true 同時把現有(錯的)快取清掉,下次播放也不再自動搜尋。
+// marked=false 只是解除標記,之後就恢復自動搜尋。屬使用者資料,清除白名單碰不到。
+app.post('/api/lyrics/no-lyrics', express.json(), (req, res) => {
+  const { title, artist, marked } = req.body;
+  if (!title || !artist) return res.status(400).json({ error: 'title and artist are required' });
+  if (marked) {
+    // 先把現有(錯的)快取指紋記下來,之後背景重查靠它分辨「還是同一份錯的」還是「真的收錄了」
+    db.get('SELECT lyrics FROM cache WHERE artist=? AND title=?', [artist, title], (e, row) => {
+      const rejected = row && row.lyrics ? hashLyric(row.lyrics) : '';
+      db.run('INSERT OR REPLACE INTO no_lyrics (artist, title, rejected_hash, last_check) VALUES (?, ?, ?, ?)',
+        [artist, title, rejected, Date.now()], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        // 一併清掉錯的快取與記憶體,畫面立刻退回「找不到歌詞」
+        db.run('DELETE FROM cache WHERE artist=? AND title=?', [artist, title], () => {
+          invalidateFurigana(artist, title);
+          itunesCache.delete(`${title}-${artist}`);
+          if (global.broadcast) global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: "" });
+          res.json({ success: true, marked: true });
+        });
+      });
+    });
+  } else {
+    db.run('DELETE FROM no_lyrics WHERE artist=? AND title=?', [artist, title], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, marked: false });
+    });
+  }
+});
+
+// 查某首是否被標記為無歌詞 (編輯器載入時決定按鈕狀態)
+app.get('/api/lyrics/no-lyrics', async (req, res) => {
+  const { title, artist } = req.query;
+  if (!title || !artist) return res.status(400).json({ error: 'title and artist are required' });
+  res.json({ marked: !!(await getNoLyrics(artist, title)) });
 });
 
 // 3. Get all cached songs

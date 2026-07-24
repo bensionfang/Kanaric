@@ -523,12 +523,12 @@
             { page: '/',       el: '#desktop-toggle-btn', title: '桌面靈動島', text: '開啟一個永遠置頂的懸浮歌詞條，切到別的視窗也看得到歌詞，適合一邊工作一邊聽歌。再按一次關閉，它也會跟著 Kanaric 一起結束。島可以直接拖著走，拖到螢幕最上緣會自動吸附；在島上單擊一下可以在「貼齊頂端」與「浮在下面一點」之間切換。歌詞行數、第二行要顯示下一句還是本句翻譯、透明度、鎖定位置、重置位置、開機自動顯示都在設定選單的「靈動島」小節。' },
             { page: '/',       el: '#offset-panel', reveal: true, title: '微調時間軸', text: '歌詞跟音樂對不上時用這裡校正。歌詞太晚出現就按「−」讓它提早，太早出現就按「+」讓它延遲，一次 0.1 秒；點中間的數字可以歸零。每首歌的偏移量會各自記住，下次播同一首自動套用，桌面靈動島也會跟著校正。平常它是半透明的，滑鼠移過去才會變清楚，也可以用快捷鍵調整（預設方向鍵左右）。' },
             { page: '/',       el: 'a.nav-item[href="/editor"]', title: '歌詞編輯器', text: '找不到歌詞、時間軸不準？歌詞編輯器可以手動修正。點「下一步」帶你進去看看。' },
-            { page: '/editor', el: '.stats-dashboard-grid > .dashboard-card:first-child', title: '選擇歌曲',
-              text: '聽過的歌都存在這裡，可用歌名或歌手搜尋，點選後載入歌詞開始編輯。這裡已經先幫你載入第一首當範例。',
-              emptyText: '聽過的歌會存在這裡，可用歌名或歌手搜尋。你的資料庫目前還是空的——播放任何一首歌超過 30 秒，它就會被記錄下來並出現在這份清單裡。' },
-            { page: '/editor', el: '.stats-dashboard-grid > .dashboard-card:nth-child(2)', title: '編輯歌詞',
-              text: '直接修改每句歌詞與時間戳。右上角可以設定歌手別名、尋找更多來源或貼上自訂歌詞，改完記得按「儲存修改」。',
-              emptyText: '選了歌之後，這裡可以直接修改每句歌詞與時間戳。右上角可以設定歌手別名、尋找更多歌詞來源或貼上自訂歌詞，改完按「儲存修改」。等你聽過幾首歌再回來看看。' },
+            { page: '/editor', el: '.editor-grid > .dashboard-card:first-child', title: '選擇歌曲',
+              text: '聽過的歌都存在這裡，可用歌名或歌手搜尋，點選後載入歌詞開始編輯。也可以直接按「編輯正在播放的歌」載入現在在放的那首——連還沒被快取的歌也能編。這裡已經先幫你載入第一首當範例。',
+              emptyText: '聽過的歌會存在這裡，可用歌名或歌手搜尋。清單還是空的沒關係——按「編輯正在播放的歌」就能直接載入現在在放的那首來編。' },
+            { page: '/editor', el: '.editor-grid > .dashboard-card:nth-child(2)', title: '編輯歌詞',
+              text: '直接修改每句歌詞與時間戳，改完按最右邊的儲存鈕（磁碟片圖示）。右上角一排圖示鈕，滑鼠移上去會顯示名稱：刪除歌詞、標記為無歌詞、設定歌手別名、尋找更多歌詞、貼上自訂歌詞、儲存。「尋找更多歌詞」跟播放頁的備選歌詞一樣，展開就能挑別的來源套用。「標記為無歌詞」是給那種各站都沒收錄、老是抓到別首同名歌的冷門歌用的——標了就不再自動亂抓，日後真的被收錄會自動幫你換上。',
+              emptyText: '選了歌之後，這裡可以直接修改每句歌詞與時間戳。右上角一排圖示鈕（移上去看名稱）：刪除、標記無歌詞、歌手別名、尋找更多歌詞、貼上自訂歌詞、儲存。先去聽幾首歌，或按上一步的「編輯正在播放的歌」。' },
             { page: '/editor', el: null,             title: '完成！',     text: '就是這些！開始享受你的音樂吧。想重看說明，隨時從左上角選單點「使用說明」。' }
         ];
         // 「AI 讀音校正」問號的迷你導覽:沿用同一套 tour 機制,只換步驟內容。
@@ -763,8 +763,8 @@
         }
 
         // 片假名 ruby 與中文譯文都是 server 產內容時決定的,不像 show_furigana 有 CSS 可切。
-        // 靈動島吃 server 廣播的 lyrics_updated 會自己更新,但網頁沒有 WebSocket
-        // (只輪詢 /api/current-media),所以這裡自己重抓一次歌詞重畫。
+        // 網頁現在有 WS 聽 lyrics_updated,但那是被動的 —— 切設定得先主動重抓一次,server 才會
+        // 用新設定重產內容 (重產完的廣播才有東西可聽)。所以這裡照舊自己抓一次重畫。
         // 兩個開關共用這條路徑 —— 少一個就是「切了沒反應,要重整才生效」。
         // 不用 fetchAndParseLyrics:那會先塞「正在搜尋歌詞」的轉圈,切個開關不該閃一下。
         async function updateLyricsContentSetting(key, checked) {
@@ -827,10 +827,20 @@
             });
         };
 
+        // 字級數字框:一點進去就清空讓人直接打;沒改就跳出時回填原本的數字 (不套用、不變預設)
+        function fontsizeFocus(el) {
+            el.dataset.prev = el.value;
+            el.value = '';
+        }
+        function fontsizeBlur(el) {
+            if (el.value.trim() === '') { el.value = el.dataset.prev; return; }
+            updateFontSize(el.value);   // 會 clamp 20–100 並回寫欄位
+        }
+
         function updateFontSize(val) {
             let num = parseInt(val);
-            if (isNaN(num)) num = 22;
-            num = Math.max(14, Math.min(60, num));
+            if (isNaN(num)) num = 26;
+            num = Math.max(20, Math.min(100, num));
             
             document.documentElement.style.setProperty('--lyrics-fs', num + 'px');
             localStorage.setItem('fontsize', num);
@@ -939,7 +949,7 @@
                 else b.classList.remove('active');
             });
             
-            const savedFs = localStorage.getItem('fontsize') || 22;
+            const savedFs = localStorage.getItem('fontsize') || 26;
             const fsSlider = document.getElementById('setting-fontsize');
             if (fsSlider) fsSlider.value = savedFs;
             const fsInput = document.getElementById('fontsize-input');

@@ -117,6 +117,8 @@ async function waitResolved(title, artist, timeoutMs = 6000) {
     'Epilogue RETRORIRON':    ['レトロリロン', 'ワンタイムエピローグ', 'J-Pop'],
     // 羅馬字歌名很容易搜到翻唱版,カラオケ 整筆丟掉 (歌名歌手都有假名,別的閘門攔不住)
     'Haru Dorobou Yorushika': ['歌っちゃ王', '春泥棒', 'カラオケ'],
+    // 歌手帶假名 = 沒被翻譯過:即使 iTunes 對同名歌回別首 (AIAIAI→Kizuna AI),也不該還原
+    'AIAIAI 秘めごと':         ['Kizuna AI', '愛愛愛', 'アニメ'],
   };
   global.fetch = (url, opts) => {
     const u = String(url);
@@ -136,6 +138,7 @@ async function waitResolved(title, artist, timeoutMs = 6000) {
     ['Puppet', 'natori', 'なとり', 'Puppet', '結果帶平假名:採用'],
     ['Epilogue', 'RETRORIRON', 'レトロリロン', 'ワンタイムエピローグ', '純片假名 + J-Pop:採用'],
     ['Haru Dorobou', 'Yorushika', 'Yorushika', 'Haru Dorobou', 'カラオケ 翻唱整筆丟掉'],
+    ['AIAIAI', '秘めごと', '秘めごと', 'AIAIAI', '歌手帶假名:同名撞歌不還原 (不變成 愛愛愛/Kizuna AI)'],
   ]) {
     const st = await waitResolved(title, artist);
     check(st && st.artist === wantArtist && st.title === wantTitle,

@@ -71,8 +71,8 @@
                     <div class="menu-row">
                         <span class="menu-label">歌詞文字大小</span>
                         <div class="menu-fontsize">
-                            <input type="range" min="14" max="60" value="22" id="setting-fontsize" oninput="updateFontSize(this.value)">
-                            <input type="number" id="fontsize-input" value="22" min="14" max="60" onchange="updateFontSize(this.value)" class="styled-input-number">
+                            <input type="range" min="20" max="100" value="26" id="setting-fontsize" oninput="updateFontSize(this.value)">
+                            <input type="number" id="fontsize-input" value="26" min="20" max="100" onfocus="fontsizeFocus(this)" onblur="fontsizeBlur(this)" onkeydown="if(event.key==='Enter')this.blur()" class="styled-input-number">
                         </div>
                     </div>
                     <div class="menu-row">

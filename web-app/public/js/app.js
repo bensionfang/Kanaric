@@ -1,3 +1,8 @@
+// 空狀態幽默句,各挑一句隨機顯示 (renderLyrics / fetchAndParseLyrics 各用一組)
+const WAITING_MSGS = ['耳朵準備好了，音樂呢？', '按下播放，我就開工。', '安靜得有點過分，放首歌吧。'];
+const NO_LYRICS_MSGS = ['這首歌把歌詞藏起來了。', '翻遍全網，還是撲了個空。', '歌詞放假去了，改天再來。'];
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
 let lastMediaTitle = "";
 let lastMediaArtist = "";
 // 已經抓過歌詞的 (歌名|||歌手)。與 lastMediaTitle 分開:名字被 iTunes 還原改寫時
@@ -26,6 +31,8 @@ let isUserScrolling = false;
 let isLoopMode = false;
 let loopA = null;
 let loopB = null;
+let medianLineGap = 4;   // 全曲行間隔中位數 (parseLrcLyrics 算),loopEndTime 用它估間奏
+const LOOP_TAIL_FACTOR = 1.6;   // ponytail: B 之後容一句拖長音的倍數,幾首歌試了再調
 
 document.addEventListener('DOMContentLoaded', () => {
     // 用 server 渲染的播放狀態開場 (footer.ejs 的 window.__initialMedia),
@@ -40,6 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Start polling the system media every 100ms for smooth updates
     setInterval(pollSystemMedia, 100);
+    connectLyricsSocket();   // 另聽 lyrics_updated,讓同一首歌的歌詞變動 (背景重查等) 即時上畫面
     
     // High-frequency rAF loop for smooth lyrics interpolation
     function syncLoop() {
@@ -127,6 +135,27 @@ function resumeSync() {
 }// -------------------------------------------------------------
 // Live Sync Logic
 // -------------------------------------------------------------
+// 網頁靠輪詢 /api/current-media 更新,平常換歌才抓歌詞。但「無歌詞背景重查自動套用」
+// 這種同一首歌的歌詞變動不會換歌 —— 輪詢不會重抓。所以另開一條 WebSocket 專聽 server 的
+// lyrics_updated:是目前顯示這首、且內容非空,就即時重畫 (跟靈動島同一個廣播)。
+function connectLyricsSocket() {
+    let ws;
+    const connect = () => {
+        try { ws = new WebSocket(`ws://${location.host}`); } catch (e) { setTimeout(connect, 3000); return; }
+        ws.onmessage = (ev) => {
+            let msg;
+            try { msg = JSON.parse(ev.data); } catch (e) { return; }
+            if (msg.type !== 'lyrics_updated' || !msg.lyrics) return;   // 空的交給既有抓取流程,不在這清畫面
+            if (msg.title !== lastMediaTitle || msg.artist !== lastMediaArtist) return;   // 只認目前顯示的那首
+            parseLrcLyrics(msg.lyrics);
+            renderLyrics();
+        };
+        ws.onclose = () => setTimeout(connect, 3000);
+        ws.onerror = () => { try { ws.close(); } catch (e) {} };
+    };
+    connect();
+}
+
 async function pollSystemMedia() {
     try {
         const resp = await fetch('/api/current-media', { cache: 'no-store' });
@@ -333,7 +362,7 @@ async function fetchAndParseLyrics(title, artist, trackId = "") {
             // 空結果:同一首已在畫面上就保留原歌詞 (暫時性的限流別蓋掉),換首才顯示找不到
             if (sameTrack) return;
             displayedTrackId = "";
-            scrollPane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-face-frown"></i><p>找不到歌詞</p></div>`;
+            scrollPane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-face-frown"></i><p>${pick(NO_LYRICS_MSGS)}</p></div>`;
         }
     } catch (e) {
         if (stale() || sameTrack) return;
@@ -431,6 +460,20 @@ function parseLrcLyrics(lrcText) {
         }
         parsedLyrics = mergedLyrics;
     }
+
+    // 段落循環用:相鄰行間隔的中位數 = 「一句大約多長」,估尾段間奏。
+    // 只取正的間隔 (unsynced 的 -1 或同時間戳的 0 都跳過),沒有就用預設保底。
+    const gaps = [];
+    for (let i = 1; i < parsedLyrics.length; i++) {
+        const d = parsedLyrics[i].time - parsedLyrics[i - 1].time;
+        if (d > 0) gaps.push(d);
+    }
+    if (gaps.length) {
+        gaps.sort((a, b) => a - b);
+        medianLineGap = gaps[Math.floor(gaps.length / 2)];
+    } else {
+        medianLineGap = 4;
+    }
 }
 
 function renderLyrics() {
@@ -439,7 +482,7 @@ function renderLyrics() {
         if (lastMediaTitle) {
             pane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-music"></i><p>純音樂，無人聲歌詞</p></div>`;
         } else {
-            pane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-music"></i><p>等待播放...</p></div>`;
+            pane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-music"></i><p>${pick(WAITING_MSGS)}</p></div>`;
         }
         return;
     }
@@ -844,11 +887,15 @@ function restoreLoopRange() {
     } catch (e) {}
 }
 
-// 循環到哪裡:B 唱完 = 下一句開頭;B 已是最後一句就唱到歌曲結束
+// 循環到哪裡:B 唱完 = 下一句開頭;B 已是最後一句就唱到歌曲結束。
+// 間奏防護:B 到下一句若遠超一句長 (= 尾段間奏),提早在「B + 一句長」跳回,不整段間奏跟著循環。
 function loopEndTime() {
+    const b = parsedLyrics[loopB];
     const next = parsedLyrics[loopB + 1];
-    if (next) return next.time;
-    return window.currentMediaDuration > 0 ? window.currentMediaDuration : songDurationSeconds;
+    const hardEnd = next ? next.time
+        : (window.currentMediaDuration > 0 ? window.currentMediaDuration : songDurationSeconds);
+    const cap = b.time + medianLineGap * LOOP_TAIL_FACTOR;
+    return hardEnd > cap ? cap : hardEnd;
 }
 
 function pickLoopLine(line) {

@@ -1,79 +1,88 @@
 <%- include('header') %>
 
-<div class="page-header">
+<div class="page-header animate-fade-in">
     <div>
         <h1>歌詞編輯器 (LRC Editor)</h1>
         <div class="subtitle">手動修正時間軸，儲存後立即同步到桌面版</div>
     </div>
 </div>
 
-<div class="stats-dashboard-grid">
-    <div class="dashboard-card" style="flex: 1; display: flex; flex-direction: column;">
-        <div class="card-header">
-            <h3>選擇歌曲</h3>
+<div class="editor-grid animate-fade-in">
+    <!-- 選擇歌曲 -->
+    <div class="dashboard-card editor-pane">
+        <div class="card-header"><h3>選擇歌曲</h3></div>
+        <button id="load-playing-btn" class="nav-btn editor-fullbtn" onclick="loadPlayingSong()" style="margin-top:0;"><i class="fa-solid fa-music"></i> 編輯正在播放的歌</button>
+        <div class="editor-search-row">
+            <input type="text" id="title-search" class="editor-input" placeholder="搜尋歌名...">
+            <input type="text" id="artist-search" class="editor-input" placeholder="搜尋歌手...">
         </div>
-        <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-            <input type="text" id="title-search" placeholder="搜尋歌名..." style="flex: 1; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 8px 12px; border-radius: 4px; font-family: inherit; font-size: 14px;">
-            <input type="text" id="artist-search" placeholder="搜尋歌手..." style="flex: 1; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 8px 12px; border-radius: 4px; font-family: inherit; font-size: 14px;">
-        </div>
-        <select id="song-select" size="10" style="width: 100%; flex: 1; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 10px; border-radius: 4px; font-family: monospace;">
+        <select id="song-select" size="10" class="editor-select">
             <option disabled>載入中...</option>
         </select>
     </div>
 
-    <div class="dashboard-card" style="flex: 2;">
-        <div class="card-header" style="display: flex; flex-direction: row !important; justify-content: space-between; align-items: center; gap: 15px; border-bottom: none; padding-bottom: 0;">
-            <div id="editor-title" style="font-size: 20px; font-weight: bold; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">請選擇歌曲...</div>
-            <div style="display: flex; gap: 12px; flex-shrink: 0;">
-                <button id="alias-btn" class="ctrl-btn" style="height: 38px; padding: 0 16px; font-size: 14px; width: auto; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--panel-border); border-radius: 6px;" onclick="openAliasModal()" disabled><i class="fa-solid fa-users"></i> 設定歌手別名</button>
-                <button id="advanced-btn" class="ctrl-btn" style="height: 38px; padding: 0 16px; font-size: 14px; width: auto; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--panel-border); border-radius: 6px;" onclick="openEditorOptionsModal()" disabled><i class="fa-solid fa-magnifying-glass-plus"></i> 尋找更多歌詞</button>
-                <button id="save-btn" class="ctrl-btn primary" style="height: 38px; padding: 0 20px; font-size: 14px; font-weight: 600; width: auto; border-radius: 6px;" disabled>儲存修改</button>
+    <!-- 編輯區 -->
+    <div class="dashboard-card editor-pane">
+        <div class="editor-toolbar">
+            <div id="editor-title" class="editor-title">請選擇歌曲...</div>
+            <div class="editor-actions">
+                <button id="delete-btn" class="editor-tool-btn danger" data-tip="刪除歌詞" onclick="deleteCurrentSong()" disabled><i class="fa-solid fa-trash"></i></button>
+                <button id="nolyrics-btn" class="editor-tool-btn" data-tip="標記為無歌詞" onclick="toggleNoLyrics()" disabled><i class="fa-solid fa-ban"></i></button>
+                <button id="alias-btn" class="editor-tool-btn" data-tip="設定歌手別名" onclick="openAliasModal()" disabled><i class="fa-solid fa-users"></i></button>
+                <div class="lyrics-opt-wrap">
+                    <button id="advanced-btn" class="editor-tool-btn" data-tip="尋找更多歌詞" onclick="toggleEditorOptions()" disabled><i class="fa-solid fa-list"></i></button>
+                    <!-- 比照播放頁的備選歌詞浮層,只是往下展開、綁目前編輯的那首 -->
+                    <div id="editor-options-panel" class="lyrics-opt-panel editor-opt-panel">
+                        <div class="lyrics-opt-head">
+                            <span><i class="fa-solid fa-list"></i> 尋找更多歌詞</span>
+                            <button class="lyrics-opt-refresh" onclick="editorGetOptions()" title="重新抓取備選歌詞"><i class="fa-solid fa-rotate-right"></i></button>
+                        </div>
+                        <div class="lyrics-opt-search">
+                            <input type="text" id="manual-search-title" placeholder="自訂歌名…">
+                            <input type="text" id="manual-search-artist" placeholder="自訂歌手…">
+                        </div>
+                        <button class="lyrics-opt-search-btn" onclick="editorManualSearch()"><i class="fa-solid fa-search"></i> 以自訂關鍵字搜尋</button>
+                        <div id="editor-options-list"></div>
+                    </div>
+                </div>
+                <button id="paste-btn" class="editor-tool-btn" data-tip="貼上自訂歌詞" onclick="openCustomLyricsModal()" disabled><i class="fa-solid fa-paste"></i></button>
+                <button id="save-btn" class="editor-tool-btn save" data-tip="儲存修改" disabled><i class="fa-solid fa-floppy-disk"></i></button>
             </div>
         </div>
-        <div id="lrc-editor-container" style="width: 100%; height: 500px; background: var(--bg-main); border: 1px solid var(--panel-border); padding: 15px; border-radius: 4px; overflow-y: auto;">
-            <div style="color: var(--text-secondary); text-align: center; margin-top: 200px;">在左側選擇一首歌以開始編輯...</div>
+        <div id="lrc-editor-container" class="editor-lrc-container">
+            <div class="editor-placeholder">在左側選擇一首歌以開始編輯...</div>
         </div>
     </div>
-    
-    <!-- [NEW] 對照區面板 -->
-    <div class="dashboard-card" id="ref-card" style="flex: 1; display: none; flex-direction: column;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid var(--panel-border); margin-bottom: 10px;">
-            <h3 style="margin: 0; font-size: 16px;"><i class="fa-solid fa-book-open"></i> 對照區</h3>
-            <button class="lrc-btn del" onclick="closeRefPanel()" style="font-size: 18px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer;"><i class="fa-solid fa-xmark"></i></button>
+
+    <!-- 對照區面板 -->
+    <div class="dashboard-card editor-pane" id="ref-card" style="display: none;">
+        <div class="card-header ref-header">
+            <h3><i class="fa-solid fa-book-open"></i> 對照區</h3>
+            <button class="editor-icon-btn" onclick="closeRefPanel()"><i class="fa-solid fa-xmark"></i></button>
         </div>
-        <div id="ref-diff-container" style="flex: 1; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 10px; border-radius: 4px; overflow-y: auto; font-family: monospace; font-size: 13px;"></div>
+        <div id="ref-diff-container" class="editor-ref-container"></div>
     </div>
 </div>
 
-<!-- Editor Advanced Options Modal -->
-<div id="editor-options-modal" class="modal-overlay hidden">
-    <div class="modal-content" style="padding: 20px; position: relative;">
-        <button onclick="closeEditorOptionsModal()" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer; transition: color 0.3s;"><i class="fa-solid fa-xmark"></i></button>
-        <h3><i class="fa-solid fa-magnifying-glass-plus"></i> 尋找更多歌詞</h3>
-        <div class="modal-actions" style="display:flex; flex-direction:column; gap: 15px; margin-top: 15px;">
-            <div style="padding-top: 5px;">
-                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
-                    <h4 style="margin: 0; font-size: 14px;"><i class="fa-solid fa-list"></i> 取得備選歌詞</h4>
-                    <button onclick="editorGetOptions()" class="nav-btn" style="padding: 4px 8px; font-size: 12px;"><i class="fa-solid fa-rotate-right"></i> 重新抓取備選歌詞</button>
-                </div>
-                
-                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;">
-                    <div style="display: flex; gap: 8px;">
-                        <input type="text" id="manual-search-title" placeholder="自訂搜尋歌名..." style="flex: 1; min-width: 0; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 6px; border-radius: 4px; font-family: inherit; font-size: 13px;">
-                        <input type="text" id="manual-search-artist" placeholder="自訂搜尋歌手..." style="flex: 1; min-width: 0; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 6px; border-radius: 4px; font-family: inherit; font-size: 13px;">
-                    </div>
-                    <button onclick="editorManualSearch()" class="nav-btn" style="width: 100%; justify-content: center; padding: 8px; font-size: 13px;"><i class="fa-solid fa-search"></i> 以自訂關鍵字搜尋</button>
-                </div>
+<!-- 貼上自訂歌詞:獨立出來的小視窗 -->
+<div id="custom-lyrics-modal" class="modal-overlay hidden">
+    <div class="modal-content editor-modal" style="position: relative;">
+        <button onclick="closeCustomLyricsModal()" class="editor-icon-btn editor-modal-close"><i class="fa-solid fa-xmark"></i></button>
+        <h3><i class="fa-solid fa-paste"></i> 貼上自訂歌詞</h3>
+        <p class="editor-modal-desc">貼上 LRC 格式或純文字歌詞,載入後可直接在編輯器修改再儲存。</p>
+        <textarea id="editor-custom-text" class="editor-input editor-textarea" placeholder="貼上 LRC 格式或純文字歌詞..."></textarea>
+        <button onclick="editorCustomLyrics()" class="nav-btn editor-fullbtn"><i class="fa-solid fa-check"></i> 載入到編輯器</button>
+    </div>
+</div>
 
-                <div id="editor-options-list" style="margin-top: 10px; max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;"></div>
-            </div>
-
-
-            <div style="border-top: 1px solid var(--panel-border); padding-top: 15px;">
-                <h4 style="margin-bottom: 10px; font-size: 14px;"><i class="fa-solid fa-paste"></i> 貼上自訂歌詞</h4>
-                <textarea id="editor-custom-text" placeholder="貼上 LRC 格式或純文字歌詞..." style="width:100%; height:80px; margin-bottom:10px; background: var(--bg-main); border: 1px solid var(--panel-border); padding: 8px; color: var(--text-color); border-radius: 4px; resize: none;"></textarea>
-                <button onclick="editorCustomLyrics()" class="nav-btn" style="width: 100%; justify-content: center;"><i class="fa-solid fa-check"></i> 載入自訂歌詞到編輯器</button>
-            </div>
+<!-- 共用確認視窗:取代原生 confirm(),套專案風格 -->
+<div id="confirm-modal" class="modal-overlay hidden">
+    <div class="modal-content editor-modal editor-confirm">
+        <h3 id="confirm-title"><i class="fa-solid fa-triangle-exclamation"></i> 確認</h3>
+        <p id="confirm-message" class="editor-modal-desc editor-confirm-msg"></p>
+        <div class="editor-confirm-actions">
+            <button id="confirm-cancel" class="nav-btn">取消</button>
+            <button id="confirm-ok" class="confirm-btn ok">確認</button>
         </div>
     </div>
 </div>
@@ -81,7 +90,7 @@
 <!-- Alias Management Modal -->
 <div id="alias-modal" class="modal-overlay hidden">
     <div class="modal-content" style="padding: 20px; position: relative; max-width: 500px; margin: 50px auto;">
-        <button onclick="closeAliasModal()" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; color: var(--text-secondary); font-size: 18px; cursor: pointer; transition: color 0.3s;"><i class="fa-solid fa-xmark"></i></button>
+        <button onclick="closeAliasModal()" class="editor-icon-btn editor-modal-close"><i class="fa-solid fa-xmark"></i></button>
         <h3><i class="fa-solid fa-users"></i> 歌手別名管理</h3>
         <p style="font-size: 13px; color: var(--text-secondary); margin-top: 5px; margin-bottom: 15px;">遇到被 Spotify 翻譯亂改名字的歌手？在這裡設定真名對應，系統會自動在背景使用真名幫你搜尋歌詞。</p>
         
@@ -90,15 +99,202 @@
         </div>
         
         <div style="display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--panel-border); padding-top: 15px; flex-wrap: wrap;">
-            <input type="text" id="new-alias" placeholder="Spotify 上的別名..." style="flex: 1; min-width: 0; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 8px; border-radius: 4px; font-size: 13px;">
+            <input type="text" id="new-alias" class="editor-input" placeholder="Spotify 上的別名...">
             <i class="fa-solid fa-arrow-right" style="color: var(--text-secondary);"></i>
-            <input type="text" id="new-true-name" placeholder="正確的真名..." style="flex: 1; min-width: 0; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--panel-border); padding: 8px; border-radius: 4px; font-size: 13px;">
-            <button onclick="addAlias()" class="ctrl-btn primary" style="width: auto; flex-shrink: 0; height: 34px; padding: 0 15px;"><i class="fa-solid fa-plus"></i> 新增</button>
+            <input type="text" id="new-true-name" class="editor-input" placeholder="正確的真名...">
+            <button onclick="addAlias()" class="ctrl-btn primary editor-save" style="flex-shrink: 0;"><i class="fa-solid fa-plus"></i> 新增</button>
         </div>
     </div>
 </div>
 
 <style>
+    /* ---- 版面:歌單窄 | 編輯寬 | 對照(開啟才出現第三欄) ---- */
+    .editor-grid {
+        display: grid;
+        grid-template-columns: minmax(220px, .9fr) 2.4fr;
+        gap: 24px;
+        margin-bottom: 40px;
+        align-items: start;
+    }
+    .editor-grid.with-ref {
+        grid-template-columns: minmax(220px, .9fr) 2.4fr minmax(240px, .9fr);
+    }
+    @media (max-width: 1100px) {
+        .editor-grid, .editor-grid.with-ref { grid-template-columns: 1fr; }
+    }
+    .editor-pane { padding: 24px; gap: 16px; }
+
+    /* ---- 搜尋列 + 歌曲清單 ---- */
+    .editor-search-row { display: flex; gap: 8px; }
+    .editor-select {
+        width: 100%;
+        min-height: 420px;
+        background: var(--bg-main);
+        color: var(--text-primary);
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        padding: 6px;
+        font-family: inherit;
+        font-size: 14px;
+        outline: none;
+    }
+    .editor-select:focus { border-color: var(--accent-main); }
+    .editor-select option { padding: 8px 10px; border-radius: 6px; }
+    /* Chromium 對 option:checked 上色支援有限,能上就上 (天花板見 plan) */
+    .editor-select option:checked { background: var(--accent-main); color: #fff; }
+
+    /* ---- 共用輸入 ---- */
+    .editor-input {
+        flex: 1;
+        min-width: 0;
+        background: var(--bg-main);
+        color: var(--text-primary);
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        padding: 9px 12px;
+        font-family: inherit;
+        font-size: 14px;
+        transition: border-color .2s ease;
+        outline: none;
+    }
+    .editor-input:focus { border-color: var(--accent-main); }
+    .editor-input::placeholder { color: var(--text-dim); }
+    .editor-textarea {
+        width: 100%;
+        height: 320px;
+        resize: vertical;
+        margin-bottom: 10px;
+        font-size: 13px;
+        line-height: 1.6;
+        white-space: pre;   /* 每句歌詞一行,不自動換行 (太長改水平捲) */
+        overflow: auto;
+    }
+
+    /* ---- 編輯區工具列 ---- */
+    .editor-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--panel-border);
+    }
+    .editor-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1 1 160px;
+        min-width: 120px;
+    }
+    /* flex-shrink 不能設 0:設 0 時這個 box 會撐成全部按鈕一列的寬度、
+       內部的 flex-wrap 永遠不觸發,窄視窗就整排爆出卡片外。允許縮 + 靠右換行 */
+    .editor-actions {
+        display: flex; gap: 6px; flex-wrap: wrap;
+        flex: 1 1 auto; justify-content: flex-end;
+    }
+    /* 工具列改成扁平 icon 鈕,懸停由全站 [data-tip]::before 冒出文字 (跟播放頁一致) */
+    .editor-tool-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        width: 34px; height: 34px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 16px;
+        border-radius: 6px;
+        transition: color .2s ease, background .2s ease;
+    }
+    .editor-tool-btn:hover:not(:disabled) { color: var(--text-primary); background: var(--panel-hover); }
+    .editor-tool-btn:disabled { opacity: .35; cursor: not-allowed; }
+    .editor-tool-btn.danger { color: #ff6b7a; }
+    .editor-tool-btn.danger:hover:not(:disabled) { color: #ff6b7a; background: rgba(255, 107, 122, .1); }
+    .editor-tool-btn.save { color: var(--accent-main); }
+    .editor-tool-btn.save:hover:not(:disabled) { color: var(--accent-hover); background: rgba(29, 185, 84, .12); }
+    .editor-tool-btn.active { color: var(--accent-main); }   /* 備選按鈕:有結果時亮綠 */
+    .editor-tool-btn.nolyrics-on { color: #ffa726; }   /* 已標記無歌詞:琥珀色 */
+    .editor-tool-btn.nolyrics-on:hover:not(:disabled) { color: #ffa726; background: rgba(255, 167, 38, .12); }
+
+    /* 備選浮層在編輯器往「下」開 (播放頁往上);其餘沿用全站 .lyrics-opt-panel */
+    .editor-opt-panel { top: calc(100% + 10px); bottom: auto; }
+    #editor-options-list { margin-top: 6px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    /* 要贏過全站 .ctrl-btn.primary 的 40x40 方形 (否則「儲存修改」文字會爆框),
+       所以選擇器帶滿三個 class 提高特異度 */
+    .ctrl-btn.primary.editor-save {
+        width: auto; height: 38px; padding: 0 22px;
+        border-radius: 8px; font-size: 14px; font-weight: 600; white-space: nowrap;
+    }
+
+    /* ---- 貼上自訂歌詞 / 確認彈窗 ---- */
+    .editor-modal { padding: 22px; }
+    .editor-confirm { width: 420px; max-width: 90%; }
+    .editor-confirm-msg { white-space: pre-line; }   /* 保留訊息裡的換行,不必自己塞 <br> */
+    .editor-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+    .editor-confirm-actions .nav-btn { padding: 8px 18px; }
+    .confirm-btn {
+        padding: 8px 18px; border: none; border-radius: 8px;
+        font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer;
+        transition: background .2s ease;
+    }
+    .confirm-btn.ok { background: var(--accent-main); color: #fff; }
+    .confirm-btn.ok:hover { background: var(--accent-hover); }
+    .confirm-btn.ok.danger { background: #ff4757; }
+    .confirm-btn.ok.danger:hover { background: #ff3344; }
+    .editor-modal-desc { font-size: 13px; color: var(--text-secondary); margin: 8px 0 14px; }
+    .editor-fullbtn { width: 100%; justify-content: center; margin-top: 10px; }
+    .opt-ref-btn { flex-shrink: 0; align-self: center; }
+    .opt-empty { color: var(--text-dim); text-align: center; padding: 16px; font-size: 13px; }
+
+    /* ---- 歌詞編輯容器 / 對照容器 ---- */
+    .editor-lrc-container {
+        width: 100%;
+        min-height: 480px;
+        max-height: 62vh;
+        background: var(--bg-main);
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        padding: 16px;
+        overflow-y: auto;
+    }
+    .editor-placeholder { color: var(--text-dim); text-align: center; padding: 120px 20px; font-size: 14px; }
+    .card-header.ref-header {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--panel-border);
+        padding-bottom: 12px;
+    }
+    .editor-ref-container {
+        background: var(--bg-main);
+        color: var(--text-primary);
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        padding: 14px;
+        overflow-y: auto;
+        min-height: 440px;
+        max-height: 62vh;
+        font-family: monospace;
+        font-size: 13px;
+    }
+
+    /* ---- 圖示鈕(對照關閉 / modal 關閉) ---- */
+    .editor-icon-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 18px;
+        line-height: 1;
+        padding: 4px;
+        border-radius: 6px;
+        transition: color .2s ease, background .2s ease;
+    }
+    .editor-icon-btn:hover { color: var(--text-primary); background: var(--panel-hover); }
+    .editor-modal-close { position: absolute; top: 14px; right: 14px; }
+
     .lrc-row {
         display: flex;
         gap: 10px;
@@ -162,30 +358,92 @@
     const saveBtn = document.getElementById('save-btn');
     const advancedBtn = document.getElementById('advanced-btn');
     const aliasBtn = document.getElementById('alias-btn');
+    const deleteBtn = document.getElementById('delete-btn');
+    const pasteBtn = document.getElementById('paste-btn');
+    const noLyricsBtn = document.getElementById('nolyrics-btn');
 
     let currentArtist = "";
     let currentTitle = "";
     let lastFetchedSong = "";
     
-    function openEditorOptionsModal() {
-        const modal = document.getElementById('editor-options-modal');
-        modal.classList.remove('hidden');
-        modal.classList.add('show');
-        
-        const currentSongKey = currentTitle + "|" + currentArtist;
-        if (lastFetchedSong !== currentSongKey) {
-            editorGetOptions();
-        }
+    function toggleEditorOptions() {
+        const panel = document.getElementById('editor-options-panel');
+        if (panel.classList.contains('show')) { closeEditorOptions(); return; }
+        openEditorOptions();
     }
 
-    function closeEditorOptionsModal() {
-        const modal = document.getElementById('editor-options-modal');
+    function openEditorOptions() {
+        const panel = document.getElementById('editor-options-panel');
+        panel.classList.add('show');
+        if (typeof keepPanelInView === 'function') keepPanelInView(panel);   // 靠右緣時推回可視範圍 (lyrics-tools.js)
+        const key = currentTitle + "|" + currentArtist;
+        if (lastFetchedSong !== key) editorGetOptions();
+    }
+
+    function closeEditorOptions() {
+        document.getElementById('editor-options-panel').classList.remove('show');
+    }
+
+    // 點浮層外面 / Esc 收起 (比照 lyrics-tools.js 的備選歌詞浮層)
+    document.addEventListener('click', (e) => {
+        const panel = document.getElementById('editor-options-panel');
+        if (!panel || !panel.classList.contains('show')) return;
+        if (e.target.closest('.lyrics-opt-wrap')) return;   // 按鈕與浮層自身不算「外面」
+        closeEditorOptions();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeEditorOptions();
+    });
+
+    // 備選歌詞按鈕的狀態:閒置(清單圖示) / 搜尋中(轉圈) / 有結果(打勾+綠)
+    function setOptBtnState(state, count) {
+        if (state === 'searching') { advancedBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; advancedBtn.classList.add('active'); }
+        else if (state === 'ready' && count) { advancedBtn.innerHTML = '<i class="fa-solid fa-check"></i>'; advancedBtn.classList.add('active'); }
+        else { advancedBtn.innerHTML = '<i class="fa-solid fa-list"></i>'; advancedBtn.classList.remove('active'); }
+    }
+
+    function openCustomLyricsModal() {
+        const modal = document.getElementById('custom-lyrics-modal');
+        document.getElementById('editor-custom-text').value = '';
+        modal.classList.remove('hidden');
+        modal.classList.add('show');
+    }
+
+    function closeCustomLyricsModal() {
+        const modal = document.getElementById('custom-lyrics-modal');
         modal.classList.remove('show');
         setTimeout(() => modal.classList.add('hidden'), 300);
     }
 
+    // 套專案風格的確認視窗,回傳 Promise<boolean> 取代原生 confirm()
+    let _confirmResolve = null;
+    function confirmDialog(message, { okText = '確認', danger = false } = {}) {
+        const modal = document.getElementById('confirm-modal');
+        document.getElementById('confirm-message').textContent = message;   // textContent:歌名不必逃逸、\n 靠 white-space:pre-line
+        const ok = document.getElementById('confirm-ok');
+        ok.textContent = okText;
+        ok.classList.toggle('danger', danger);
+        modal.classList.remove('hidden');
+        modal.classList.add('show');
+        return new Promise((resolve) => { _confirmResolve = resolve; });
+    }
+    function _closeConfirm(val) {
+        const modal = document.getElementById('confirm-modal');
+        modal.classList.remove('show');
+        setTimeout(() => modal.classList.add('hidden'), 300);
+        if (_confirmResolve) { _confirmResolve(val); _confirmResolve = null; }
+    }
+    document.getElementById('confirm-ok').onclick = () => _closeConfirm(true);
+    document.getElementById('confirm-cancel').onclick = () => _closeConfirm(false);
+    document.getElementById('confirm-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'confirm-modal') _closeConfirm(false);   // 點遮罩 = 取消
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('confirm-modal').classList.contains('show')) _closeConfirm(false);
+    });
+
     function applyLyricsToEditor(lyrics) {
-        closeEditorOptionsModal();
+        closeEditorOptions();
         fetch('/api/lyrics/update', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -198,11 +456,12 @@
     }
 
     function loadToReference(refLyrics, refProvider) {
-        closeEditorOptionsModal();
+        closeEditorOptions();
         const refCard = document.getElementById('ref-card');
         const diffContainer = document.getElementById('ref-diff-container');
         refCard.style.display = 'flex';
-        diffContainer.innerHTML = '<div style="color:var(--text-secondary); text-align:center; padding: 20px;">載入並比對中...</div>';
+        document.querySelector('.editor-grid').classList.add('with-ref');
+        diffContainer.innerHTML = '<div class="editor-placeholder">載入並比對中...</div>';
 
         // Extract current lyrics from the editor
         const rows = editorContainer.querySelectorAll('.lrc-row');
@@ -248,12 +507,15 @@
 
     function closeRefPanel() {
         document.getElementById('ref-card').style.display = 'none';
+        document.querySelector('.editor-grid').classList.remove('with-ref');
         document.getElementById('ref-diff-container').innerHTML = '';
     }
 
     function editorCustomLyrics() {
         const text = document.getElementById('editor-custom-text').value.trim();
-        if (text) applyLyricsToEditor(text);
+        if (!text) return;
+        closeCustomLyricsModal();
+        applyLyricsToEditor(text);
     }
 
     function editorManualSearch() {
@@ -274,8 +536,9 @@
         document.getElementById('manual-search-artist').value = sArtist;
 
         const listEl = document.getElementById('editor-options-list');
-        listEl.innerHTML = '<div style="color:var(--text-secondary); text-align:center;">搜尋中...</div>';
-        
+        listEl.innerHTML = '<div class="opt-empty"><i class="fa-solid fa-spinner fa-spin"></i> 搜尋中...</div>';
+        setOptBtnState('searching');
+
         try {
             const queryParams = new URLSearchParams({
                 title: currentTitle,
@@ -289,38 +552,33 @@
             listEl.innerHTML = '';
             if (data.options && data.options.length > 0) {
                 data.options.forEach(opt => {
-                    const itemDiv = document.createElement('div');
-                    itemDiv.className = 'lrc-row';
-                    itemDiv.style.flexDirection = 'column';
-                    itemDiv.style.alignItems = 'stretch';
-                    itemDiv.style.padding = '10px';
-                    itemDiv.innerHTML = `
-                        <div style="display: flex; width: 100%; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                            <div style="flex: 1; min-width: 0; text-align: left;">
-                                <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.title}</div>
-                                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${opt.artist}${opt.album ? ' [' + opt.album + ']' : ''}</div>
-                            </div>
-                            <div style="display:flex; flex-direction:column; align-items:flex-end; flex-shrink: 0; margin-left: 10px;">
-                                <div style="padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${opt.isSynced ? 'background: rgba(76, 175, 80, 0.15); color: #4caf50;' : 'background: rgba(158, 158, 158, 0.15); color: #9e9e9e;'}">
-                                    ${opt.isSynced ? 'LRC' : 'TXT'}
-                                </div>
-                                <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; opacity: 0.8;">${opt.provider || 'Unknown'}</div>
-                            </div>
+                    // 整列可點 = 覆寫歌詞 (比照播放頁);右側書本鈕 = 載入對照 (編輯器獨有)
+                    const row = document.createElement('div');
+                    row.className = 'opt-row';
+                    row.title = '點此覆寫編輯器歌詞';
+                    row.innerHTML = `
+                        <div class="opt-meta">
+                            <div class="opt-title opt-scroll"><span>${opt.title}</span></div>
+                            <div class="opt-sub opt-scroll"><span>${opt.artist}${opt.album ? ' [' + opt.album + ']' : ''}</span></div>
                         </div>
-                        <div style="display: flex; gap: 8px;">
-                            <button class="nav-btn apply-btn" style="flex: 1; justify-content: center; font-size: 12px; padding: 6px;"><i class="fa-solid fa-check"></i> 覆寫歌詞</button>
-                            <button class="nav-btn ref-btn" style="flex: 1; justify-content: center; font-size: 12px; padding: 6px;"><i class="fa-solid fa-book-open"></i> 載入對照</button>
+                        <div class="opt-tags">
+                            <div class="opt-badge ${opt.isSynced ? 'synced' : 'plain'}">${opt.isSynced ? 'LRC' : 'TXT'}</div>
+                            <div class="opt-provider">${opt.provider || 'Unknown'}</div>
                         </div>
+                        <button class="editor-icon-btn opt-ref-btn" title="載入到對照區比對"><i class="fa-solid fa-book-open"></i></button>
                     `;
-                    itemDiv.querySelector('.apply-btn').onclick = () => { applyLyricsToEditor(opt.lyrics); };
-                    itemDiv.querySelector('.ref-btn').onclick = () => { loadToReference(opt.lyrics, opt.provider); };
-                    listEl.appendChild(itemDiv);
+                    row.onclick = () => applyLyricsToEditor(opt.lyrics);
+                    row.querySelector('.opt-ref-btn').onclick = (e) => { e.stopPropagation(); loadToReference(opt.lyrics, opt.provider); };
+                    listEl.appendChild(row);
                 });
+                setOptBtnState('ready', data.options.length);
             } else {
-                listEl.innerHTML = '<div style="color:var(--text-secondary); text-align:center;">找不到備選歌詞</div>';
+                listEl.innerHTML = '<div class="opt-empty"><i class="fa-solid fa-face-frown"></i> 找不到備選歌詞</div>';
+                setOptBtnState('idle');
             }
         } catch (e) {
-            listEl.innerHTML = '<div style="color:var(--text-secondary); text-align:center;">搜尋失敗</div>';
+            listEl.innerHTML = '<div class="opt-empty">搜尋失敗</div>';
+            setOptBtnState('idle');
         }
     }
 
@@ -493,26 +751,74 @@
 
     function loadRawLyrics() {
         editorTitle.innerText = `${currentTitle} - ${currentArtist}`;
-        editorContainer.innerHTML = '<div style="color: var(--text-secondary); text-align: center; margin-top: 200px;">載入中...</div>';
+        editorContainer.innerHTML = '<div class="editor-placeholder">載入中...</div>';
+        // 換歌:收起備選浮層並把按鈕退回閒置,結果不沿用上一首
+        closeEditorOptions();
+        lastFetchedSong = "";
+        setOptBtnState('idle');
         saveBtn.disabled = true;
         advancedBtn.disabled = true;
         aliasBtn.disabled = true;
+        deleteBtn.disabled = true;
+        pasteBtn.disabled = true;
+        noLyricsBtn.disabled = true;
         fetch(`/api/lyrics/raw?title=${encodeURIComponent(currentTitle)}&artist=${encodeURIComponent(currentArtist)}&plain=true`)
             .then(res => res.json())
             .then(data => {
                 editorContainer.innerHTML = '';
+                pasteBtn.disabled = false;   // 選了歌就能貼上(即使原本沒歌詞)
+                noLyricsBtn.disabled = false;   // 選了歌就能標記/取消無歌詞
                 if (data.lyrics) {
                     parseAndRenderLRC(data.lyrics);
                     saveBtn.disabled = false;
                     advancedBtn.disabled = false;
                     aliasBtn.disabled = false;
+                    deleteBtn.disabled = false;   // 有快取才能刪
                 } else {
-                    editorContainer.innerHTML = '<div style="color: var(--text-secondary); text-align: center; margin-top: 200px;">此歌曲沒有歌詞資料</div>';
+                    editorContainer.innerHTML = '<div class="editor-placeholder">此歌曲沒有歌詞資料</div>';
                     saveBtn.disabled = true;
                     advancedBtn.disabled = false;
                     aliasBtn.disabled = false;
                 }
+                refreshNoLyricsState();   // 若已標記無歌詞,更新按鈕與提示
             });
+    }
+
+    function setNoLyricsBtn(marked) {
+        noLyricsBtn.classList.toggle('nolyrics-on', marked);
+        noLyricsBtn.dataset.tip = marked ? '取消無歌詞標記' : '標記為無歌詞';
+    }
+
+    async function refreshNoLyricsState() {
+        if (!currentTitle) return;
+        try {
+            const q = new URLSearchParams({ title: currentTitle, artist: currentArtist });
+            const { marked } = await fetch(`/api/lyrics/no-lyrics?${q}`).then(r => r.json());
+            setNoLyricsBtn(marked);
+            if (marked) {
+                editorContainer.innerHTML = '<div class="editor-placeholder">已標記為「無歌詞」,播放時不再自動搜尋。<br>日後被收錄會自動換上;也可按上方 🚫 手動取消。</div>';
+                saveBtn.disabled = true;
+                deleteBtn.disabled = true;
+            }
+        } catch (e) {}
+    }
+
+    async function toggleNoLyrics() {
+        if (!currentTitle) return;
+        const willMark = !noLyricsBtn.classList.contains('nolyrics-on');
+        if (willMark && !(await confirmDialog(`把「${currentTitle} - ${currentArtist}」標記為無歌詞?\n會清掉目前的歌詞、之後播放不再自動搜尋。\n日後真的被收錄了會自動幫你換上,不用自己回來取消。`, { okText: '標記' }))) return;
+        noLyricsBtn.disabled = true;
+        try {
+            await fetch('/api/lyrics/no-lyrics', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: currentTitle, artist: currentArtist, marked: willMark })
+            });
+            loadRawLyrics();   // 重載:標記後顯示提示、取消後回到可搜尋狀態
+        } catch (e) {
+            alert('操作失敗');
+            noLyricsBtn.disabled = false;
+        }
     }
 
     songSelect.addEventListener('change', (e) => {
@@ -522,12 +828,32 @@
         loadRawLyrics();
     });
 
+    // 直接載入正在播放的歌 (不必先在清單裡找;沒被快取過的歌也能編)
+    async function loadPlayingSong() {
+        try {
+            const data = await fetch('/api/current-media', { cache: 'no-store' }).then(r => r.json());
+            if (!data || !data.title) {
+                if (typeof showToast === 'function') showToast('目前沒有播放任何歌曲', 'fa-solid fa-circle-exclamation', 2000);
+                return;
+            }
+            currentArtist = data.artist || '';
+            currentTitle = data.title;
+            // 清單裡有這首就順手選起來 (純顯示,沒有也沒關係)
+            for (const opt of songSelect.options) {
+                try { const v = JSON.parse(opt.value); if (v.title === currentTitle && v.artist === currentArtist) { songSelect.value = opt.value; break; } } catch (e) {}
+            }
+            loadRawLyrics();
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('讀取播放狀態失敗', 'fa-solid fa-xmark', 2000);
+        }
+    }
+
 
 
     saveBtn.addEventListener('click', () => {
-        saveBtn.innerText = "儲存中...";
+        saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
         saveBtn.disabled = true;
-        
+
         const rows = editorContainer.querySelectorAll('.lrc-row');
         let newLrcLines = [];
         
@@ -557,13 +883,39 @@
         })
         .then(res => res.json())
         .then(data => {
-            saveBtn.innerText = "已儲存！";
+            saveBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+            saveBtn.dataset.tip = '已儲存！';
             setTimeout(() => {
-                saveBtn.innerText = "儲存修改";
+                saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i>';
+                saveBtn.dataset.tip = '儲存修改';
                 saveBtn.disabled = false;
             }, 2000);
         });
     });
+
+    async function deleteCurrentSong() {
+        if (!currentTitle || !currentArtist) return;
+        if (!(await confirmDialog(`確定刪除「${currentTitle} - ${currentArtist}」的快取歌詞?\n手動修過的假名、時間軸微調不受影響,下次播放會重新抓取。`, { okText: '刪除', danger: true }))) return;
+        deleteBtn.disabled = true;
+        try {
+            const res = await fetch('/api/lyrics/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: currentTitle, artist: currentArtist })
+            });
+            if (!res.ok) throw new Error('delete failed');
+            // 重整歌曲清單並清空編輯區
+            allSongs = await fetch('/api/songs').then(r => r.json());
+            renderSongList(titleSearch.value, artistSearch.value);
+            editorContainer.innerHTML = '<div class="editor-placeholder">已刪除,選另一首繼續編輯</div>';
+            editorTitle.innerText = '';
+            currentTitle = ''; currentArtist = '';
+            saveBtn.disabled = true; advancedBtn.disabled = true; aliasBtn.disabled = true; pasteBtn.disabled = true; noLyricsBtn.disabled = true;
+        } catch (e) {
+            alert('刪除失敗');
+            deleteBtn.disabled = false;
+        }
+    }
 
     function openAliasModal() {
         const modal = document.getElementById('alias-modal');
@@ -622,8 +974,8 @@
         });
     }
 
-    function deleteAlias(alias) {
-        if (!confirm(`確定要刪除「${alias}」的別名設定嗎？`)) return;
+    async function deleteAlias(alias) {
+        if (!(await confirmDialog(`確定要刪除「${alias}」的別名設定嗎?`, { okText: '刪除', danger: true }))) return;
         fetch(`/api/aliases/${encodeURIComponent(alias)}`, { method: 'DELETE' })
             .then(res => res.json())
             .then(() => loadAliases());
