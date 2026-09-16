@@ -864,11 +864,10 @@ test('ensureYouTubeTab claims the active YouTube tab when popup sender and store
   ]);
 });
 
-test('loaded bundle retains preferred owner forwarding', () => {
+test('loaded bundle retains non-committing owner discovery', () => {
   const bundle = fs.readFileSync(require.resolve('../dist/service-worker.js'), 'utf8');
-  assert.ok(bundle.includes('async function ensureYouTubeTab(api = chrome, preferredTab = null)'));
-  assert.ok(bundle.includes('async function startKaraoke(sender = null)'));
-  assert.ok(bundle.includes('const tab = await ensureYouTubeTab(chrome, sender?.tab);'));
+  assert.ok(bundle.includes('async function ensureYouTubeTab(api = chrome, preferredTab = null, { commit = true } = {})'));
+  assert.ok(bundle.includes('ensureYouTubeTab(chrome, null, { commit: false })'));
 });
 
 test('ensureYouTubeTab requires an existing YouTube owner tab', async () => {

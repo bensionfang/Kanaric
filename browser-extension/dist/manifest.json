@@ -2,6 +2,8 @@
   "manifest_version": 3,
   "name": "Kanaric YouTube Karaoke",
   "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq7ElgqlNfH+FdzTzAA6aoLcEiYwIYaVD6vH6FKYPkF+0sZAaNBmajm6BU7b1av6lA1Kx2br2GvbOmynDZ5f3mUYSVhAldQRVtOP9+CFyBMwxzsf2Eu2OCf3+y4T3Gt2daGumUKhq00Z2u3M/rfcoTbW5hIwpF9gNd9PFn0nVbx8Vuv4Tlr2qPmLwaBnrdR/7ATbtPk2wIw6JP7EEBZdFoLQZwsnA3RPn1nhpEtADrBHDeU+x57Wkzrw9JA/NWUCGfMKa5u0BXpwtqNARDt4PkLb8weI1diLH/egJY5iJDKywJWsV6bIhsXBtqJVKizS6UOrREawjsAtKgI5KpYYGDwIDAQAB",
+  "minimum_chrome_version": "116",
   "description": "讓 Kanaric 控制一個專用 YouTube 歌唱分頁。",
   "action": {
     "default_title": "Kanaric YouTube Karaoke",
@@ -17,6 +19,6 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["storage", "tabs", "activeTab", "scripting", "tabCapture", "offscreen"],
+  "permissions": ["storage", "tabs", "activeTab", "scripting", "tabCapture", "offscreen", "nativeMessaging"],
   "host_permissions": ["https://www.youtube.com/*", "http://127.0.0.1/*"]
 }

@@ -386,7 +386,7 @@ const karaokeFooterSource = fs.readFileSync(require.resolve('../web-app/views/fo
 const karaokeLyricsModalSource = fs.readFileSync(require.resolve('../web-app/views/modals/lyrics-options.ejs'), 'utf8');
 const commonSource = fs.readFileSync(require.resolve('../web-app/public/js/common.js'), 'utf8');
 const compactGateSource = karaokeModeSource.match(
-    /function createKaraokeCompactStartGate\([\s\S]*?\n\}\n\nfunction createKaraokeWindowBlocker/
+    /function createKaraokeCompactStartGate\([\s\S]*?\r?\n\}\r?\n\r?\nfunction createKaraokeWindowBlocker/
 )?.[0] || '';
 assert.match(compactGateSource, /startCollapsed/, '首唱 native path 必須只呼叫 atomic startCollapsed');
 assert.doesNotMatch(compactGateSource, /bridge\.start\(/, '首唱不得退回 start 後再等 timer');

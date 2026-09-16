@@ -12,36 +12,32 @@
   var require_popup = __commonJS({
     "src/popup.js"(exports, module) {
       function formatConnectionStatus(state, error = "") {
-        return error ? `${state}: ${error}` : state;
+        const labels = {
+          connecting: "\u9023\u63A5\u4E2D",
+          connected: "\u5DF2\u9023\u63A5",
+          disconnected: "App \u672A\u555F\u52D5",
+          error: "App \u672A\u555F\u52D5"
+        };
+        const label = labels[state] || state || "App \u672A\u555F\u52D5";
+        return error ? `${label}: ${error}` : label;
       }
       function initPopup() {
-        const baseUrlInput = document.getElementById("baseUrl");
-        const tokenInput = document.getElementById("token");
         const connectButton = document.getElementById("connect");
         const statusText = document.getElementById("status");
         const setStatus = (state, error = "") => {
           statusText.textContent = formatConnectionStatus(state, error);
         };
-        chrome.storage.local.get(["baseUrl", "token", "connectionState", "connectionError"]).then((stored) => {
-          if (stored.baseUrl) baseUrlInput.value = stored.baseUrl;
-          if (stored.token) tokenInput.value = stored.token;
+        chrome.storage.local.get(["connectionState", "connectionError"]).then((stored) => {
           if (stored.connectionState) setStatus(stored.connectionState, stored.connectionError || "");
         });
         chrome.storage.onChanged.addListener((changes) => {
           if (changes.connectionState) setStatus(changes.connectionState.newValue, changes.connectionError?.newValue || "");
         });
         connectButton.addEventListener("click", async () => {
-          const baseUrl = baseUrlInput.value.trim();
-          const token = tokenInput.value.trim();
-          if (!baseUrl || !token) {
-            setStatus("error", "\u8ACB\u8F38\u5165\u672C\u6A5F\u7DB2\u5740\u8207 Token");
-            return;
-          }
           connectButton.disabled = true;
           setStatus("connecting");
           try {
-            await chrome.storage.local.set({ baseUrl, token });
-            const result = await chrome.runtime.sendMessage({ type: "start_karaoke" });
+            const result = await chrome.runtime.sendMessage({ type: "connect_karaoke_app" });
             if (!result?.ok) setStatus("error", result?.error || "connection failed");
           } catch (error) {
             setStatus("error", error.message);
