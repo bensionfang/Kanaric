@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', function () {
     let botIdx = -1;      // 下槽
     let firstTime = Infinity;   // 第一句真歌詞的時間 = 前奏結束 = 資訊卡收掉的時機
     let fetchSeq = 0;
+    let fitRaf = 0;
 
     // ── 播放狀態 (自己內插,理由同 app.js:廣播一秒才一則) ──
     let pos = 0;
@@ -154,6 +155,38 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     const byIdx = (i) => (i >= 0 ? document.getElementById(`kline-${i}`) : null);
+
+    // 上下槽永遠維持同字級、各一列。先回到 CSS 最大字級量自然寬度,再一起縮到
+    // 較長那句放得下；只在換槽/縮放時做,不進逐幀填色的熱路徑。
+    function fitVisibleLines() {
+        fitRaf = 0;
+        const visible = [...new Set([byIdx(topIdx), byIdx(botIdx)].filter(Boolean))];
+        if (!visible.length) return;
+
+        visible.forEach((el) => { el.style.fontSize = ''; });
+        const maxPx = parseFloat(getComputedStyle(visible[0]).fontSize);
+        const measurements = visible.map((el) => {
+            const style = getComputedStyle(el);
+            const natural = el.querySelector('.kbase')?.scrollWidth || 0;
+            const available = linesEl.clientWidth
+                - (parseFloat(style.marginLeft) || 0)
+                - (parseFloat(style.marginRight) || 0);
+            return { natural, available };
+        });
+        const size = karaokeFitFontSize(maxPx, measurements);
+        if (size === null) return;
+        visible.forEach((el) => { el.style.fontSize = `${size}px`; });
+    }
+
+    function scheduleLineFit() {
+        cancelAnimationFrame(fitRaf);
+        fitRaf = requestAnimationFrame(fitVisibleLines);
+    }
+
+    window.addEventListener('resize', scheduleLineFit);
+    document.addEventListener('fullscreenchange', scheduleLineFit);
+    document.fonts?.ready.then(scheduleLineFit);
+
     // 填色只動疊在上面那層。**karaokeSplit / karaokePaint / karaokeClear 三個都要收到
     // 同一顆元素** —— 它們把字元 span 與「正在唱的那顆」memo 在 root.__kc / root.__kcNow 上,
     // 傳不同的根等於各記各的,清除就清不到。
@@ -202,6 +235,7 @@ document.addEventListener('DOMContentLoaded', function () {
         topIdx = s.top;
         botIdx = s.bottom;
         curIdx = s.index;
+        scheduleLineFit();
     }
 
     /**
@@ -292,9 +326,15 @@ document.addEventListener('DOMContentLoaded', function () {
             document.getElementById('ki-title').textContent = title;
             document.getElementById('ki-artist').textContent = artist;
             setStatus('正在搜尋歌詞...', 'fa-solid fa-spinner fa-spin');
+            const requestedOffsetKey = offsetSongKey(title, artist);
+            const applyLoadedOffset = (value) => {
+                if (offsetSongKey(title, artist) !== requestedOffsetKey) return;
+                syncOffset = value;
+                window.karaokePaintOffset();
+            };
             fetch(`/api/lyrics/offset?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`)
-                .then(r => r.json()).then(o => { syncOffset = o.offset || 0; window.karaokePaintOffset(); })
-                .catch(() => { syncOffset = 0; window.karaokePaintOffset(); });
+                .then(r => r.json()).then(o => applyLoadedOffset(o.offset || 0))
+                .catch(() => applyLoadedOffset(0));
             // 還在介紹頁時不要載 MV (`karaokeStart` 會補一次)
             if (started) karaokeOnSongChange(title, artist);
             nowEl.textContent = `現在播放:${title}${artist ? ' — ' + artist : ''}`;
@@ -374,6 +414,12 @@ document.addEventListener('DOMContentLoaded', function () {
             if (msg.state) applyState(msg.state);
             return;
         }
+        const liveOffset = offsetFromMessage(offsetSongKey(title, artist), msg);
+        if (liveOffset !== null) {
+            syncOffset = liveOffset;
+            paintOffset();
+            return;
+        }
         if (msg.type !== 'lyrics_updated' || !msg.lyrics) return;
         if (msg.title !== title || msg.artist !== artist) return;
         setLyrics(msg.lyrics);
@@ -418,7 +464,15 @@ document.addEventListener('DOMContentLoaded', function () {
     // 字幕早晚 = 這首歌的 sync offset,跟首頁共用同一筆 (存 DB)。填色與換行都吃
     // frame() 的 `pos - syncOffset`,所以改完不必自己重畫,下一幀就對了。
     const offsetEl = document.getElementById('kbar-offset');
-    let saveOffsetTimer = null;
+    const saveOffsetLater = createOffsetSaver((payload) => {
+        fetch('/api/lyrics/offset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            keepalive: true,
+        }).catch(() => {});
+    });
+    window.addEventListener('pagehide', saveOffsetLater.flush);
 
     function paintOffset() {
         const ms = Math.round(syncOffset * 1000);
@@ -427,15 +481,7 @@ document.addEventListener('DOMContentLoaded', function () {
     window.karaokePaintOffset = paintOffset;
 
     function saveOffset() {
-        if (!title) return;
-        clearTimeout(saveOffsetTimer);
-        saveOffsetTimer = setTimeout(() => {
-            fetch('/api/lyrics/offset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, artist, offset: syncOffset }),
-            }).catch(() => {});
-        }, 500);
+        saveOffsetLater(title, artist, syncOffset);
     }
 
     window.karaokeAdjustOffset = function (delta) {
@@ -449,6 +495,19 @@ document.addEventListener('DOMContentLoaded', function () {
         paintOffset();
         saveOffset();
     };
+
+    function offsetKeydown(e) {
+        if (!started) return;
+        const delta = karaokeOffsetHotkey(e,
+            localStorage.getItem('hk-advance') || 'ArrowLeft',
+            localStorage.getItem('hk-delay') || 'ArrowRight');
+        if (delta === null) return;
+        e.preventDefault();
+        karaokeAdjustOffset(delta);
+        showBar();
+    }
+    window.karaokeOffsetKeydown = offsetKeydown;
+    document.addEventListener('keydown', offsetKeydown);
 
     let barTimer = null;
     let overBar = false;

@@ -77,6 +77,37 @@ function karaokeSlots(lines, posSec, hint, countInSec) {
 }
 
 /**
+ * 上下槽共用的單列字級。measurements 每筆都是同一句在 maxPx 下的自然寬度與可用寬度。
+ * DOM 尚未排好時回 null,讓呼叫端保留 CSS 字級。
+ */
+function karaokeFitFontSize(maxPx, measurements) {
+    if (!Number.isFinite(maxPx) || maxPx <= 0 || !measurements || !measurements.length) return null;
+    let scale = 1;
+    for (const m of measurements) {
+        if (!m || !Number.isFinite(m.natural) || m.natural <= 0
+            || !Number.isFinite(m.available) || m.available <= 0) return null;
+        scale = Math.min(scale, m.available / m.natural);
+    }
+    return Math.max(0.1, Math.floor(maxPx * scale * 10) / 10);
+}
+
+function karaokeOffsetHotkey(e, advance, delay) {
+    if (!e || typeof e.key !== 'string') return null;
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return null;
+    let key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+    if (key === ' ') key = 'Space';
+    let prefix = '';
+    if (e.ctrlKey) prefix += 'Ctrl+';
+    if (e.altKey) prefix += 'Alt+';
+    if (e.shiftKey && e.key.length > 1) prefix += 'Shift+';
+    key = prefix + key;
+    if (key === advance) return -0.1;
+    if (key === delay) return 0.1;
+    return null;
+}
+
+/**
  * 這一句唱完的時間。有逐字資料就用最後一個折線點 (毫秒是相對於這一句的時間戳),
  * 沒有就退回時間戳本身 (= 舊行為)。
  *
@@ -118,4 +149,7 @@ function lastReal(lines) {
     return -1;
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { karaokeSlots, KARAOKE_COUNT_IN_SEC, KARAOKE_GAP_SEC, KARAOKE_SWAP_MAX_SEC };
+if (typeof module !== 'undefined' && module.exports) module.exports = {
+    karaokeSlots, karaokeFitFontSize, karaokeOffsetHotkey,
+    KARAOKE_COUNT_IN_SEC, KARAOKE_GAP_SEC, KARAOKE_SWAP_MAX_SEC,
+};

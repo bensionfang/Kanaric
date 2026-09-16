@@ -136,6 +136,7 @@ document.addEventListener('DOMContentLoaded', function () {
         for (const k of Object.keys(window)) {
             try { if (typeof window[k] === 'function') popup[k] = window[k]; } catch (e) {}
         }
+        d.addEventListener('keydown', window.karaokeOffsetKeydown);
 
         popup.focus();
     }

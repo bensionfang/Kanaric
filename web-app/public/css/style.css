@@ -2971,8 +2971,8 @@ body.karaoke-page.bar-visible #karaoke-bar { transform: translateX(-50%); opacit
    它的容器盒是 .kline 的 *padding box*,加 padding 會讓上面那層比 .kbase 多偏一段,
    兩種顏色又錯開 (就是先前 ::before 那個坑的另一種形狀)。margin 改的是整顆 .kline,兩層一起動。 */
 /* **align-self 讓 .kline 縮成貼合文字的寬度** (flex 項目的 cross size 從 stretch 變 fit-content),
-   倒數那五個點才能用 `left: 0` 貼在第一個字的左邊。文字太長時仍然被容器夾住、照常換行,
-   而 .kbase / .kover 都是這顆盒子裡的 block,寬度一致 = 斷行一致 (那是重影那個坑的前提)。 */
+   倒數那五個點才能用 `left: 0` 貼在第一個字的左邊。長句由 karaoke-mode.js 讓上下槽
+   共用縮小後的字級,不換行；.kbase / .kover 繼承同一字級,兩層座標不會漂。 */
 .kline.slot-top { order: 0; align-self: flex-start; text-align: left; margin-left: 16%; }
 .kline.slot-bottom { order: 1; align-self: flex-end; text-align: right; margin-right: 16%; }
 .kline {
@@ -2981,6 +2981,7 @@ body.karaoke-page.bar-visible #karaoke-bar { transform: translateX(-50%); opacit
     font-weight: 700;
     line-height: 1.35;
     margin-bottom: 0.12em;
+    white-space: nowrap;
 }
 .kline rt { font-size: 0.45em; transform: translateY(-2px); }
 body.hide-furigana .kline rt { display: none; }
@@ -2997,7 +2998,7 @@ body.hide-furigana .kline rt { display: none; }
    (連帶好處:不必再用 background-clip: text,那個會關掉次像素抗鋸齒。) */
 .kbase, .kover {
     display: block;
-    white-space: pre-wrap;
+    white-space: nowrap;
     paint-order: stroke fill;
 }
 .kbase, .kbase rt { color: #fff; -webkit-text-stroke: 0.06em #000; }

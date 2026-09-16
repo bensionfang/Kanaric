@@ -21,6 +21,9 @@
             <span>控制列上的 <b>獨立視窗</b> 會把整條遙控器搬到另一扇小視窗 ——
                 字幕機投在電視上、遙控器留在筆電這邊,調字幕早晚或換 MV 都不必動到主畫面。
                 再按一次 (或關掉那扇窗) 就收回來。</span></li>
+        <li><b>唱的時候可直接校正字幕</b>
+            <span>沿用「自訂快捷鍵」裡的歌詞早晚按鍵；預設 <b>←</b> 讓字幕提早、<b>→</b> 讓字幕延後，
+                每次 100ms，Kanaric 會替每首歌分開記住。</span></li>
         <li><b>按「開始」會自動全螢幕</b>
             <span>這首歌跳回開頭並開始播,期間靈動島先收起來。按 <b>ESC</b> 或控制列最右邊的
                 <b>退出</b> 回到這一頁,同時把播放暫停。</span></li>
@@ -139,10 +142,11 @@
 
 <script src="/js/karaoke.js?v=4"></script>
 <script src="/js/lrc-parse.js?v=1"></script>
-<script src="/js/karaoke-slots.js?v=4"></script>
+<script src="/js/offset-sync.js?v=3"></script>
+<script src="/js/karaoke-slots.js?v=5"></script>
 <script src="/js/karaoke-mv.js?v=11"></script>
-<script src="/js/karaoke-mode.js?v=15"></script>
+<script src="/js/karaoke-mode.js?v=19"></script>
 <%# 一定要排在 karaoke-mode.js 之後:它的 DOMContentLoaded 先把 .lyrics-opt-wrap 搬進
     #kbar-tools,拆窗才會連備選歌詞的浮層一起帶走 %>
-<script src="/js/karaoke-remote.js?v=6"></script>
+<script src="/js/karaoke-remote.js?v=7"></script>
 <%- include('footer') %>

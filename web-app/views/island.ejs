@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/css/island.css?v=21">
 <!-- 逐字卡拉OK填色:與歌詞區、行動版共用同一份實作 -->
 <script src="/js/karaoke.js?v=2"></script>
+<script src="/js/offset-sync.js?v=3"></script>
 </head>
 <body>
 <div id="island" class="docked">
@@ -377,7 +378,8 @@ function connect() {
     } else if (msg.type === 'settings_updated') {
       applySettings(msg.settings);
     } else if (msg.type === 'sync_offset_updated') {
-      offset = msg.offset || 0;
+      const liveOffset = offsetFromMessage(songKey, msg);
+      if (liveOffset !== null) offset = liveOffset;
     }
   };
   ws.onclose = () => { el.song.textContent = '伺服器斷線'; setTimeout(connect, 3000); };

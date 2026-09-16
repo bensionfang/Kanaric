@@ -352,12 +352,16 @@ function applyMediaState(data) {
             setMarqueeText(document.getElementById('current-title'), data.title);
             setMarqueeText(document.getElementById('current-artist'), data.artist || 'Unknown Artist');
             
+            const requestedOffsetKey = offsetSongKey(data.title, data.artist);
+            const applyLoadedOffset = (value) => {
+                if (offsetSongKey(lastMediaTitle, lastMediaArtist) !== requestedOffsetKey) return;
+                syncOffset = value;
+                updateOffsetDisplay();
+            };
             fetch('/api/lyrics/offset?title=' + encodeURIComponent(data.title) + '&artist=' + encodeURIComponent(data.artist || ''))
                 .then(r => r.json())
-                .then(d => {
-                    syncOffset = d.offset || 0;
-                    updateOffsetDisplay();
-                }).catch(e => { syncOffset = 0; updateOffsetDisplay(); });
+                .then(d => applyLoadedOffset(d.offset || 0))
+                .catch(() => applyLoadedOffset(0));
             
             // 歌詞不在這裡抓 —— iTunes 日文原名還原是非同步的,這一刻的名字可能再過幾秒就變。
             // 等下面 resolving 為 false 再抓,整首歌只抓一次 (見 server.js handleMediaUpdate)
@@ -633,17 +637,17 @@ function resetSyncOffset() {
     }
 }
 
-let _saveOffsetTimeout = null;
+const saveOffsetLater = createOffsetSaver((payload) => {
+    fetch('/api/lyrics/offset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true
+    }).catch(e => console.error("Failed to save offset", e));
+});
+window.addEventListener('pagehide', saveOffsetLater.flush);
 function saveSyncOffset() {
-    if (!lastMediaTitle) return;
-    clearTimeout(_saveOffsetTimeout);
-    _saveOffsetTimeout = setTimeout(() => {
-        fetch('/api/lyrics/offset', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: lastMediaTitle, artist: lastMediaArtist, offset: syncOffset })
-        }).catch(e => console.error("Failed to save offset", e));
-    }, 500);
+    saveOffsetLater(lastMediaTitle, lastMediaArtist, syncOffset);
 }
 
 let activeHotkeys = {
