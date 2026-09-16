@@ -33,6 +33,7 @@ scripts/.itunes_cache.json
 scripts/.itunes_tracks.json
 app.pid
 web-app/server_log.txt
+tmp-task*-runtime-*/
 # 個人筆記/截圖/PDF,不進版控
 docs/
 # 規劃筆記 (含「明確不做的事」),只留本機
