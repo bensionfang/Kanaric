@@ -70,10 +70,13 @@ def _is_official(it, artist):
     """頻道名含歌手名 = 官方頻道 (或至少是本人相關的上傳)。
 
     這是**最強的一個訊號**:實測 `米津玄師 / 春雷` 的官方頻道叫「Kenshi Yonezu 米津玄師」,
-    而 YouTube 自己排在第一的常常是帶字幕的轉載或翻唱。沒有歌手名時這一項一律不加分。
+    而 YouTube 自己排在第一的常常是帶字幕的轉載或翻唱。沒有歌手名時只能表示未知,
+    不應把它誤當成明確的非官方頻道。
     """
     a = _norm(artist)
-    return bool(a) and a in _norm(it["channel"])
+    if not a:
+        return None
+    return a in _norm(it["channel"])
 
 
 def fetch_html(query):
@@ -145,7 +148,7 @@ def _thumb(vr):
 
 
 def parse_results(data, duration=None, limit=MAX_RESULTS, artist="", title=""):
-    """ytInitialData → [{videoId, title, channel, durationSec, thumb, ok}]。
+    """ytInitialData → candidate metadata, including official/version checks.
 
     排序三件,其餘照 YouTube 自己的順序 (它的相關度對「歌手 + 歌名」本來就相當準):
       * 翻唱/演唱會/鋼琴/カラオケ 那一類排到最後,並標 `ok: False` —— 前端只在第一支
@@ -181,6 +184,17 @@ def parse_results(data, duration=None, limit=MAX_RESULTS, artist="", title=""):
 
     for it in items:
         it["ok"] = not _is_bad(it)
+        it["official"] = _is_official(it, artist)
+        it["durationDeltaSec"] = (
+            abs(it["durationSec"] - duration)
+            if duration and it["durationSec"] else None
+        )
+        it["needsConfirmation"] = (
+            not it["ok"]
+            or it["official"] is False
+            or (it["durationDeltaSec"] is not None
+                and it["durationDeltaSec"] > DURATION_TOLERANCE)
+        )
 
     def rank(it):
         topic = 1 if it["channel"].strip().endswith("- Topic") else 0
@@ -191,7 +205,7 @@ def parse_results(data, duration=None, limit=MAX_RESULTS, artist="", title=""):
         # 官方頻道自己也會上傳 Live 版與 -Topic 音源
         return (0 if it["ok"] else 1,
                 0 if _title_matches(it, title) else 1,
-                0 if _is_official(it, artist) else 1,
+                0 if it["official"] else 1,
                 topic, close)
 
     items.sort(key=rank)   # list.sort 是穩定的,同分維持 YouTube 的原順序

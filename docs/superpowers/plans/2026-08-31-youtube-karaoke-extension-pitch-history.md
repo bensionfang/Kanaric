@@ -1,5 +1,7 @@
 # Kanaric YouTube Karaoke、手動升降 Key 與演唱音高紀錄實作計畫
 
+> **歷史計畫（Tasks 0–7）**：Tasks 0–6 已成為目前 dirty worktree 的基線；本文件內的「下一步 Task 7」已過時。現在狀態、後續路線與唯一接手提示請以 `docs/CODEX_HANDOFF.md` 為準。本文件只保留原始需求、schema、測試與安全邊界供查證。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把既有 `/karaoke` 收斂成 YouTube-only Karaoke：在 Kanaric 搜歌、建立本次待播佇列，由 Chrome／Edge 擴充套件播放 YouTube、即時手動升降 `-6..+6 Key`，並按 YouTube 影片分別保存使用者每次演唱的音高曲線。

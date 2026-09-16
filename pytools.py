@@ -11,10 +11,127 @@ Node.js 後端以子命令呼叫本腳本;打包發布時由 PyInstaller 將此�
   pytools.py minimize                       最小化目前前景視窗
   pytools.py sessions                       列出目前系統上的媒體來源 (stdout JSON)
 """
-import sys
+import json
 import os
+from pathlib import Path
+import re
+import struct
+import sys
+import time
+from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+NATIVE_PROTOCOL = "kanaric-youtube-v1"
+NATIVE_MAX_BYTES = 16 * 1024
+NATIVE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
+NATIVE_EXTENSION_ORIGIN_RE = re.compile(r"^chrome-extension://[a-p]{32}/$")
+
+
+def _native_launch_origin(args):
+    if not args or not args[0].startswith("chrome-extension://"):
+        return None
+    origin = args[0]
+    if not NATIVE_EXTENSION_ORIGIN_RE.fullmatch(origin):
+        return ""
+    if any(not arg.startswith("--parent-window=") for arg in args[1:]):
+        return ""
+    return origin
+
+
+def _native_reply(payload):
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack("<I", len(raw)) + raw)
+    sys.stdout.buffer.flush()
+
+
+def _native_discovery_path():
+    explicit = os.environ.get("KANARIC_DISCOVERY_FILE")
+    if explicit:
+        return Path(explicit)
+    app_data = os.environ.get("APPDATA") or os.path.expanduser("~\\AppData\\Roaming")
+    return Path(app_data) / "Kanaric" / "youtube-karaoke-discovery.json"
+
+
+def _native_pid_alive(pid):
+    if not isinstance(pid, int) or pid < 1:
+        return False
+    if os.name == "nt":
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def native_messaging_main(launch_origin=None):
+    stream = sys.stdin.buffer
+    if launch_origin == "":
+        _native_reply({"ok": False, "error": "invalid-origin"})
+        return
+    header = stream.read(4)
+    if len(header) != 4:
+        _native_reply({"ok": False, "error": "invalid-frame"})
+        return
+    size = struct.unpack("<I", header)[0]
+    if size > NATIVE_MAX_BYTES:
+        _native_reply({"ok": False, "error": "request-too-large"})
+        return
+    raw = stream.read(size)
+    if len(raw) != size:
+        _native_reply({"ok": False, "error": "invalid-frame"})
+        return
+    try:
+        request = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        _native_reply({"ok": False, "error": "invalid-request"})
+        return
+    if not isinstance(request, dict) or set(request) - {"type", "protocol", "origin"} \
+            or request.get("type") != "discover" or request.get("protocol") != NATIVE_PROTOCOL:
+        _native_reply({"ok": False, "error": "invalid-request"})
+        return
+    origin = request.get("origin")
+    expected_origin = launch_origin
+    if expected_origin is None:
+        extension_id = os.environ.get("KANARIC_EXTENSION_ID", "")
+        expected_origin = f"chrome-extension://{extension_id}/" if extension_id else ""
+    if origin is not None and (not expected_origin or origin != expected_origin):
+        _native_reply({"ok": False, "error": "invalid-origin"})
+        return
+
+    try:
+        data = json.loads(_native_discovery_path().read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        _native_reply({"ok": False, "error": "app-not-running"})
+        return
+    base_url = data.get("baseUrl") if isinstance(data, dict) else None
+    token = data.get("token") if isinstance(data, dict) else None
+    expires_at = data.get("expiresAt") if isinstance(data, dict) else None
+    pid = data.get("pid") if isinstance(data, dict) else None
+    parsed = urlparse(base_url or "")
+    port = parsed.port if parsed.hostname else None
+    if (parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}
+            or parsed.path not in {"", "/"} or parsed.query or parsed.fragment
+            or not isinstance(port, int) or not 1 <= port <= 65535
+            or not isinstance(token, str) or not NATIVE_TOKEN_RE.fullmatch(token)
+            or not isinstance(expires_at, int) or expires_at <= int(time.time() * 1000)
+            or not _native_pid_alive(pid)):
+        _native_reply({"ok": False, "error": "app-not-running"})
+        return
+    _native_reply({
+        "ok": True,
+        "baseUrl": f"http://127.0.0.1:{port}",
+        "token": token,
+        "expiresAt": expires_at,
+        "pid": pid,
+    })
 
 
 def main():
@@ -28,8 +145,13 @@ def main():
 
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     args = sys.argv[2:]
+    launch_origin = _native_launch_origin(sys.argv[1:])
 
-    if cmd == "monitor":
+    if launch_origin is not None:
+        native_messaging_main(launch_origin)
+    elif cmd == "native-messaging":
+        native_messaging_main()
+    elif cmd == "monitor":
         import asyncio
         from media_monitor import poll_media
         asyncio.run(poll_media())

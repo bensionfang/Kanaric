@@ -115,7 +115,7 @@ body {
     opacity: 1;
 }
 
-/* 無邊框視窗:頂端隱形拖曳條 (高度對應 electron.js 的 titleBarOverlay.height) */
+/* 無邊框視窗:頂端隱形拖曳條與非卡拉 OK 頁的自製控制列 */
 .win-drag {
     position: fixed;
     top: 0;
@@ -125,6 +125,29 @@ body {
     z-index: 9998;
     -webkit-app-region: drag;
 }
+
+.window-controls {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: flex;
+    height: 36px;
+    -webkit-app-region: no-drag;
+}
+.window-controls button {
+    width: 46px;
+    height: 36px;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+}
+.window-controls button:hover,
+.window-controls button:focus-visible { background: var(--panel-hover); color: var(--text-primary); }
+.window-controls button:last-child:hover,
+.window-controls button:last-child:focus-visible { background: #c42b2b; color: #fff; }
+body.karaoke-page .window-controls { display: none; }
 
 .brand {
     display: flex;
@@ -193,6 +216,8 @@ body {
     border-radius: 4px;
     white-space: nowrap;
 }
+#karaoke-window-settings[hidden],
+#karaoke-window-desktop-note[hidden] { display: none; }
 
 .menu-label {
     font-size: 13px;
@@ -1601,8 +1626,7 @@ body.window-maximized .fullscreen-btn .icon-compress { display: inline !importan
     overflow: hidden;
     background: var(--bg-shell);
     gap: 8px;
-    /* 上緣與右緣不留黑邊:讓歌詞面板頂到視窗右上角,系統按鈕 (electron.js 的 titleBarOverlay)
-       才不會壓在「黑邊 + 圓角」的交界上。 */
+    /* 上緣與右緣不留黑邊:讓歌詞面板頂到視窗右上角,自製控制列不會壓在「黑邊 + 圓角」的交界上。 */
     padding: 0 0 0 8px;
 }
 
@@ -2732,30 +2756,142 @@ body.game-masked .main-content { border-radius: 8px; }
    裡面那顆按鈕上,藏掉播放列會連它一起藏掉。所以改成 fixed 的自動隱藏浮條,
    滑鼠動了才滑出來 (karaoke-mode.js 的 body.bar-visible)。
    ============================================================ */
-/* 介紹頁 ⇄ 字幕機:`body.karaoke-page` 才是字幕機。兩個畫面互斥,
-   舞台在介紹頁時完全不畫 (裡面有 MV 的 iframe 容器與 rAF 在跑的歌詞層)。 */
+ /* 完整點歌首頁 ⇄ 同頁控台:`body.karaoke-page` 只切換布局，shared picker 永遠保留。 */
 body:not(.karaoke-page) #karaoke-stage { display: none; }
-body.karaoke-page #karaoke-setup,
 body.karaoke-page .page-header { display: none; }
 
-#karaoke-setup { padding: 26px 30px; max-width: 900px; }
 .k-guide-title { font-size: 17px; margin-bottom: 14px; }
-.k-steps { display: flex; flex-direction: column; gap: 12px; padding-left: 20px; }
-.k-steps li { line-height: 1.6; }
-/* 只有開頭那顆 <b> 是標題要自成一行 —— 寫成 `li b` 的話內文裡的 <b>ESC</b> 也會被斷行 */
-.k-steps li > b:first-child { display: block; font-size: 14px; }
-.k-steps li span { font-size: 13px; color: var(--text-secondary); }
-.k-start-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-top: 22px;
-    padding-top: 18px;
-    border-top: 1px solid var(--border-color);
+.k-youtube-note { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.k-youtube-search { display: flex; gap: 10px; margin-top: 18px; }
+.k-youtube-search input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 13px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--panel-hover);
+    color: var(--text-primary);
 }
-#k-now { font-size: 13px; color: var(--text-secondary); }
+.k-youtube-status { min-height: 20px; margin-top: 10px; color: var(--text-secondary); font-size: 12px; }
+.k-youtube-results { display: grid; gap: 8px; max-height: 320px; overflow-y: auto; margin-top: 8px; }
+.k-youtube-result {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+}
+.k-youtube-result:hover, .k-youtube-result.selected { border-color: var(--accent-main); background: var(--panel-hover); }
+.k-youtube-result img { width: 120px; height: 68px; object-fit: cover; border-radius: 5px; background: #111; }
+.k-youtube-result-info { display: flex; min-width: 0; flex-direction: column; justify-content: center; gap: 5px; }
+.k-youtube-result-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-youtube-result-meta, .k-youtube-selected-channel { color: var(--text-secondary); font-size: 12px; }
+.k-youtube-selected { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color); }
+.k-youtube-selected.hidden { display: none; }
+.k-youtube-selected > div:first-child { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.k-youtube-selected-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-youtube-actions { display: flex; flex-shrink: 0; gap: 8px; }
+.k-youtube-queue-section { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; font-size: 13px; }
+.k-youtube-queue-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 7px; background: var(--panel-hover); }
+.k-youtube-queue-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-youtube-queue-actions { display: flex; flex-shrink: 0; gap: 5px; }
+.k-youtube-queue-actions button { border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.k-youtube-queue-actions button:hover { color: var(--text-primary); }
 
+/* 共用點歌首頁／演唱控台的唯一 picker。唱歌時只切換同一組內容，不複製搜尋或 Queue。 */
+#karaoke-song-picker {
+    width: min(1120px, 100%);
+    margin: 0 auto;
+    padding: 28px;
+}
+.karaoke-picker-layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr);
+    grid-template-areas:
+        "search results"
+        "search queue";
+    gap: 24px;
+}
+.karaoke-picker-search { grid-area: search; min-width: 0; }
+.karaoke-picker-results-pane { grid-area: results; min-width: 0; }
+.karaoke-picker-queue-pane { grid-area: queue; min-width: 0; }
+body:not(.karaoke-page) #karaoke-picker-queue-pane { display: none; }
+body:not(.karaoke-page) #youtube-karaoke-selected { display: none; }
+body:has(#karaoke-song-picker):not(.karaoke-page) .player-bar { display: none; }
+body:not(.karaoke-page) #karaoke-song-picker .karaoke-picker-layout { grid-template-areas: "search results"; }
+.k-picker-eyebrow {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--accent-main);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+}
+.karaoke-picker-tab:focus-visible { outline: 2px solid var(--accent-main); outline-offset: 2px; }
+.k-youtube-search label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+.k-picker-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.k-picker-section-heading h3 { margin: 0; font-size: 15px; }
+.k-picker-section-note { color: var(--text-secondary); font-size: 11px; text-align: right; }
+.karaoke-picker-tabs { display: none; }
+body.karaoke-page #karaoke-song-picker {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 18px 24px 32px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 0;
+}
+body.karaoke-page .karaoke-picker-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.karaoke-picker-tab {
+    min-width: 84px;
+    min-height: 40px;
+    padding: 8px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.karaoke-picker-tab:hover,
+.karaoke-picker-tab.active { border-color: var(--accent-main); color: var(--text-primary); }
+body.karaoke-page #karaoke-song-picker[data-pane="search"] .karaoke-picker-queue-pane,
+body.karaoke-page #karaoke-song-picker[data-pane="queue"] .karaoke-picker-results-pane { display: none; }
+body.karaoke-page #karaoke-song-picker .karaoke-picker-layout { grid-template-areas: "search results"; }
+body.karaoke-page #karaoke-song-picker[data-pane="queue"] .karaoke-picker-layout { grid-template-areas: "search queue"; }
+body.karaoke-page #karaoke-song-picker .karaoke-picker-search { display: block; }
+body.karaoke-page #karaoke-song-picker .k-youtube-note { display: none; }
+body.karaoke-page #karaoke-song-picker .k-youtube-search { margin-top: 10px; }
+body.karaoke-page #karaoke-song-picker .k-youtube-results { max-height: 250px; }
+
+@media (max-width: 760px) {
+    #karaoke-song-picker { padding: 20px 16px; }
+    .karaoke-picker-layout { grid-template-columns: 1fr; grid-template-areas: "search" "results" "queue"; gap: 20px; }
+    body.karaoke-page #karaoke-song-picker .karaoke-picker-layout,
+    body.karaoke-page #karaoke-song-picker[data-pane="queue"] .karaoke-picker-layout { grid-template-areas: "search" "results"; }
+    body.karaoke-page #karaoke-song-picker[data-pane="queue"] .karaoke-picker-layout { grid-template-areas: "search" "queue"; }
+    .k-picker-section-note { display: none; }
+}
 body.karaoke-page .sidebar { display: none; }
 body.karaoke-page .app-container {
     grid-template-areas: "main";
@@ -2767,11 +2903,21 @@ body.karaoke-page .app-container {
 body.karaoke-page .main-content {
     border-radius: 0;
     background: #08080a;
-    /* **padding 一定要歸零** —— .main-content 本來有 24px 內距,舞台 (以及鋪滿的 MV)
-       就跟著縮 24px,畫面四周留一圈黑邊。MV 的 cover 算式是對的,黑邊來自這裡。 */
+     /* 控制器使用整個主內容區，避免外層內距讓控制視圖留下空邊。 */
     padding: 0;
 }
-body.karaoke-page .content-body { padding: 0; height: 100%; min-height: 0; }
+body.karaoke-page .content-body {
+    padding: 0;
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+body.karaoke-page #karaoke-stage {
+    flex: 1 0 clamp(420px, 58vh, 680px);
+    height: clamp(420px, 58vh, 680px);
+    min-height: 420px;
+}
 
 /* 控制列:點歌機遙控器,平常收在畫面外,滑鼠一動滑出來。
    **播放列在這一頁整條藏掉** —— 它是播放器版面 (封面/歌名/隨機/循環/上一首/進度條),
@@ -2779,6 +2925,10 @@ body.karaoke-page .content-body { padding: 0; height: 100%; min-height: 0; }
    由 karaoke-mode.js 解掉:整塊 .lyrics-opt-wrap (按鈕+泡泡+浮層) 搬進 #kbar-tools,
    錨點跟著搬,浮層的 CSS 一個字都不用改。 */
 body.karaoke-page .player-bar { display: none; }
+
+body.karaoke-collapsed .app-container { visibility: hidden; }
+.kbar-panel-heading, .kbar-panel-subheading { display: none; }
+body.karaoke-page #karaoke-pin-expand[aria-pressed="true"] { color: var(--accent-main); }
 
 #karaoke-bar { display: none; }
 body.karaoke-page #karaoke-bar {
@@ -2826,7 +2976,7 @@ body.karaoke-page.bar-visible #karaoke-bar { transform: translateX(-50%); opacit
 .kbar-big:hover { background: rgba(255, 255, 255, 0.1); }
 .kbar-big:hover span { color: var(--text-primary); }
 
-/* 工具鈕 (備選歌詞 / MV / 重新載入) 在這一頁跟左邊三顆一樣是大鈕:圖示在上、文字在下。
+/* 工具鈕 (備選歌詞 / 重新載入) 在這一頁跟左邊三顆一樣是大鈕:圖示在上、文字在下。
    **標籤是 [data-tip] 的 ::before 就地變成常駐文字** —— 那三顆的 markup 分別來自 footer、
    karaoke-mv.js 與這一頁,只有 data-tip 是三邊都有的共通欄位;而 .active 的小綠點占著
    ::after,label 只能走 ::before。備選歌詞那顆的 data-tip 本來就會隨狀態改字,自動跟著變。
@@ -2872,7 +3022,7 @@ body.karaoke-page.bar-visible #karaoke-bar { transform: translateX(-50%); opacit
 #kbar-extra .ctrl-btn.active::after,
 .kbar-row3 .ctrl-btn.active::after { display: none; }
 
-/* 字幕 / 影片兩列疊起來,列高壓到 24px 才不會把整條控制列撐成兩倍高 */
+/* 字幕與 Key 控制列高壓到 24px,不把整條控制列撐成兩倍高 */
 .kbar-offsets { display: flex; flex-direction: column; gap: 4px; }
 .kbar-label { font-size: 11px; color: var(--text-secondary); width: 24px; }
 .kbar-offset button {
@@ -2887,7 +3037,27 @@ body.karaoke-page.bar-visible #karaoke-bar { transform: translateX(-50%); opacit
     cursor: pointer;
 }
 .kbar-offset button:hover { background: rgba(255, 255, 255, 0.12); }
-#kbar-offset, #kbar-mv-offset {
+.kbar-key button {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+.kbar-key button:hover { background: rgba(255, 255, 255, 0.12); }
+.kbar-key button:focus-visible { outline: 2px solid var(--accent-main); outline-offset: 2px; }
+.kbar-key #kbar-key-value {
+    min-width: 22px;
+    text-align: center;
+    font-family: monospace;
+    color: var(--accent-main);
+}
+.kbar-seek-wrap { display: flex; align-items: center; min-width: 120px; }
+#kbar-seek { width: 140px; accent-color: var(--accent-main); cursor: pointer; }
+#kbar-offset {
     min-width: 58px;
     text-align: center;
     font-family: monospace;
@@ -2897,140 +3067,113 @@ body.karaoke-page.bar-visible #karaoke-bar { transform: translateX(-50%); opacit
     cursor: pointer;
 }
 
-/* ── 舞台 ── */
-/* 歌詞貼著畫面下緣 (照一般卡拉OK的版面),上面整片留給 MV。
-   下緣留 14vh:控制列滑出來時是 90px 高,不能疊在歌詞上。 */
+/* ── YouTube owner 控制器表面 ── */
 #karaoke-stage {
     position: relative;
     height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-end;
-    padding-bottom: 14vh;
     overflow: hidden;
     background: #08080a;
 }
-
-/* MV 背景 (沒挑 MV 時整個是空的)。pointer-events 關掉,免得 iframe 吃走滑鼠事件 ——
-   那會讓控制列的自動隱藏收不到 mousemove */
-#karaoke-mv {
+#karaoke-console-summary {
     position: absolute;
-    inset: 0;
-    pointer-events: none;
-}
-/* 16:9 鋪滿:兩個維度都取到滿,超出的部分裁掉。
-   **單位要用 cqw/cqh 不能用 vw/vh** —— 這個舞台不是整個視窗 (app-container 還留著
-   上下左右的內距),用視窗單位算出來的尺寸會比容器小一圈,左右露出黑邊。
-
-   **做過又拿掉:為了蓋掉 YouTube 的 CC 字幕而把播放器放大、把字幕那一帶裁到容器外面**
-   (2026-08-09,兩版都試過)。不要重新提案,兩條路各自的死法記在這裡:
-   - 「只把影片往下推」(下緣往下推 18cqh):CSS 幾何是對的 (隔離重現量到 topGap 0),但
-     **很多 MV 本身有 letterbox 黑邊** —— 置中時黑邊平分上下、各一條細的不礙眼,一往下推
-     就全堆到上面變成一大條。
-   - 「上下對稱裁 22cqh」:字幕與黑邊都看不到了,但**每一首歌的 MV 都放大 1.44 倍、四邊各
-     吃掉約 22%**,為了部分影片才有的字幕讓所有影片都被裁,使用者定案不要。
-   現在是「滿版,字幕就讓它出現」:碰到字幕擋歌詞就用 🎞 換一支。CC 是**影片自己有字幕軌**
-   才會出現的 (實站搜尋資料撈得到 `metadataBadgeRenderer.label = "字幕"`),而且**帶字幕的
-   常常正好是官方 MV**,所以也不能在搜尋階段把它們排掉 —— 排掉之後選到的是「【中文字幕】」
-   轉載或歌ってみた,比字幕更糟。 */
-#karaoke-mv { container-type: size; }
-#karaoke-mv iframe {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 100cqw; height: 56.25cqw;
-    min-height: 100cqh; min-width: 177.78cqh;
-    border: 0;
-}
-
-/* ── 兩行歌詞 (JOYSOUND 式) ── */
-#karaoke-lines {
-    position: relative;
-    z-index: 2;
-    width: min(1400px, 92vw);
+    top: 50%;
+    left: 9%;
     display: flex;
+    min-width: min(520px, calc(100vw - 360px));
+    transform: translateY(-50%);
     flex-direction: column;
+    gap: 8px;
+    padding: 24px 28px;
+    border-left: 3px solid var(--accent-main);
+    color: var(--text-primary);
 }
-/* 字體跟主歌詞頁 (`.lyrics-line`) 用同一套,不另外抓日文字型 —— 見 CLAUDE.md 那節:
-   丸ゴシック / UD 明朝都試過,跟 JOYSOUND 還是差一截,而每一款 CJK 都是幾 MB 的
-   unicode-range chunk。**不要再提案為這一頁抓字型。** */
-#karaoke-lines, #karaoke-intro {
-    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-#karaoke-lines.hidden { display: none; }
-/* 只有上下兩槽露臉,其餘全部收起來 —— 靠 class 切換而不是重寫 innerHTML,
-   karaokeSplit 記在 .__kc 上的字元 span 才不會每句作廢一次。
-   **上下順序靠 flex 的 order 而不是文件順序**:活躍句坐下槽時,上槽放的是它的
-   下一句 (文件順序在它後面),照文件順序畫就上下顛倒了。 */
-.kline { display: none; }
-.kline.slot-top, .kline.slot-bottom { display: block; }
-/* 上下兩行**交錯**:上行靠左、下行靠右,各離該側約 16% (照 JOYSOUND 的版面,docs/1.png)。
-   一前一後才看得出「這句是這句、那句是那句」,兩行都置中反而黏成一團。
-   **縮排一定要用 margin 不能用 padding** —— .kover 是 `position:absolute; inset:0`,
-   它的容器盒是 .kline 的 *padding box*,加 padding 會讓上面那層比 .kbase 多偏一段,
-   兩種顏色又錯開 (就是先前 ::before 那個坑的另一種形狀)。margin 改的是整顆 .kline,兩層一起動。 */
-/* **align-self 讓 .kline 縮成貼合文字的寬度** (flex 項目的 cross size 從 stretch 變 fit-content),
-   倒數那五個點才能用 `left: 0` 貼在第一個字的左邊。長句由 karaoke-mode.js 讓上下槽
-   共用縮小後的字級,不換行；.kbase / .kover 繼承同一字級,兩層座標不會漂。 */
-.kline.slot-top { order: 0; align-self: flex-start; text-align: left; margin-left: 16%; }
-.kline.slot-bottom { order: 1; align-self: flex-end; text-align: right; margin-right: 16%; }
-.kline {
-    position: relative;
-    font-size: clamp(34px, 4.4vw, 70px);
-    font-weight: 700;
-    line-height: 1.35;
-    margin-bottom: 0.12em;
-    white-space: nowrap;
-}
-.kline rt { font-size: 0.45em; transform: translateY(-2px); }
-body.hide-furigana .kline rt { display: none; }
+.karaoke-console-kicker,
+#karaoke-console-state { color: var(--text-secondary); font-size: 13px; }
+#karaoke-console-title { font-size: clamp(28px, 4vw, 52px); line-height: 1.15; }
+#karaoke-console-artist { color: var(--text-secondary); font-size: 18px; }
+#karaoke-console-state { margin-top: 8px; }
 
-/* JOYSOUND 的配色:未唱 = 黑框白字,唱過 = 白框紅字。
-   **描邊寬度用 em 不用 px** —— rt 是 0.45em,同一條宣告就讓注音的框跟著變細。
-   `paint-order: stroke fill` 不能省:沒有它描邊會壓在筆畫內側,日文的細筆畫會糊掉
-   (舊版註解說的「text-stroke 圈日文很醜」其實是漏了這個屬性,不是 text-stroke 的問題)。
-
-   **每一行畫兩份、整行疊整行**:.kbase 是未唱的那份,.kover 絕對定位疊在上面,逐字
-   clip-path 由左往右揭開。**不可以改成用 `::before` 逐字疊** —— 絕對定位元素放在
-   *行內* 元素裡時,基線與行盒對不上 (實測整顆字往左下偏約 0.1em),兩種顏色的字就錯開了。
-   整行那層是 block,inset:0 與 .kbase 是同一個內容盒,換行與置中天生一致。
-   (連帶好處:不必再用 background-clip: text,那個會關掉次像素抗鋸齒。) */
-.kbase, .kover {
+#karaoke-pitch-panel {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 4;
+    width: min(260px, calc(100vw - 32px));
+    padding: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    background: rgba(10, 10, 12, 0.78);
+    backdrop-filter: blur(10px);
+    color: var(--text-primary);
+    font-size: 11px;
+}
+#karaoke-pitch-canvas {
     display: block;
-    white-space: nowrap;
-    paint-order: stroke fill;
+    width: 100%;
+    height: 72px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
 }
-.kbase, .kbase rt { color: #fff; -webkit-text-stroke: 0.06em #000; }
-.kover, .kover rt { color: #e60012; -webkit-text-stroke: 0.06em #fff; }
-/* 疊在上面那層只在「正在唱的那一句」露臉。沒有逐字資料的歌因此整句一起變紅
-   (那種歌本來就是整行亮);有逐字資料的歌下面那組 clip-path 會逐字揭開。 */
-.kover { position: absolute; inset: 0; opacity: 0; }
-/* .done = 剛唱完、還留在另一槽的那句:繼續紅著直到被下一句換掉 (見 karaoke-slots.js
-   檔頭第 4 點)。逐字的 --k 停在最後一幀的值,所以不必重畫。 */
-.kline.cur .kover, .kline.done .kover { opacity: 1; }
-/* **只有上下兩邊的 inset 是負的。** 字的墨水會超出 span 的邊框盒 (0.06em 的描邊、下伸部),
-   切在盒子上會削掉那幾筆,所以上下放寬。
-   **左邊一定要是 0,不可以跟著放寬** —— `inset()` 的可見矩形是
-   `[left, width - right]`,`--k: 0%` 時 right = 100%,左邊放成 -0.2em 就變成
-   `[-0.2em, 0]`:一條**位在這個字左邊、寬 0.2em 的可見縫**。那條縫會把這個字 (紅底白框)
-   的左側墨水畫到**前一個字**身上,前一個字的黑框就被白色蓋掉,看起來像右緣被削掉
-   (2026-08-10 回報,`docs/5.png`、`6.png` 的 行 與 選 —— 那是 -0.2em 那版才有的新災情)。 */
-.kover .kc, .kover rt.rt-pending, .kover rt.rt-now, .kover rt.rt-sung {
-    --k: 0%;
-    clip-path: inset(-0.2em calc(100% - var(--k)) -0.2em 0);
-    transition: none;
+.karaoke-pitch-reading {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 3px 8px;
+    align-items: baseline;
+    margin-top: 6px;
 }
-/* **唱過的字直接不裁** —— 100% 的 inset 剛好切在邊框盒上,右緣那一截描邊會被削掉,
-   看起來像「這個字沒填滿色」,而底下 .kbase 的黑框從缺口透出來更明顯
-   (2026-08-10 回報,docs/3.png、4.png 的 道 與 ん)。全部唱完的字本來就不需要裁。 */
-.kover .kc.sung, .kover rt.rt-sung { --k: 100%; clip-path: none; }
-/* **唱完留紅的那句一律補滿。** 一句停止活躍時最後幾個字常常還沒填到底:收尾點 `endMs`
-   是封頂算出來的 (word-times.js),而換到下一句的時機是下一句自己的時間戳,兩者沒有關係。
-   舊版那句在同一瞬間就被換掉所以看不見,現在它要留著紅一陣子,沒補滿就是「最後一個字
-   不會變紅」(2026-08-09 回報)。行內的 `--k` 權重比 class 高,所以只能用 !important。 */
-.kline.done .kover .kc,
-.kline.done .kover rt { --k: 100% !important; clip-path: none !important; }
+.karaoke-pitch-reading strong { font-size: 12px; }
+.karaoke-pitch-reading span:last-child { grid-column: 1 / -1; color: var(--text-secondary); }
+.karaoke-pitch-enable {
+    width: 100%;
+    margin-top: 7px;
+    padding: 5px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 11px;
+    cursor: pointer;
+}
+.karaoke-pitch-enable:hover { background: rgba(255, 255, 255, 0.1); }
+.karaoke-pitch-enable:disabled { cursor: default; opacity: 0.7; }
+.karaoke-pitch-history-open,
+.karaoke-pitch-history-back,
+.karaoke-pitch-history-delete {
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 11px;
+}
+.karaoke-pitch-history-open { width: 100%; margin-top: 5px; padding: 3px; }
+.karaoke-pitch-history-open:hover,
+.karaoke-pitch-history-back:hover,
+.karaoke-pitch-history-delete:hover { color: var(--text-primary); }
+.karaoke-pitch-history {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 5;
+    width: min(420px, calc(100vw - 32px));
+    max-height: min(58vh, 520px);
+    overflow-y: auto;
+    padding: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    background: rgba(10, 10, 12, 0.9);
+    backdrop-filter: blur(10px);
+    color: var(--text-primary);
+    font-size: 11px;
+}
+.karaoke-pitch-history-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.karaoke-pitch-history-head button { border: 0; background: transparent; color: var(--text-secondary); font-size: 18px; cursor: pointer; }
+.karaoke-pitch-history-status { min-height: 16px; color: var(--text-secondary); }
+.karaoke-pitch-history-row { display: flex; align-items: center; gap: 5px; padding: 5px 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.karaoke-pitch-history-item { flex: 1; min-width: 0; padding: 3px; border: 0; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.karaoke-pitch-history-item:hover { background: rgba(255, 255, 255, 0.08); }
+.karaoke-pitch-history-delete { flex-shrink: 0; }
+#karaoke-pitch-history-canvas { display: block; width: 100%; height: 220px; margin-top: 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
+#karaoke-pitch-history-summary { margin-top: 7px; color: var(--text-secondary); line-height: 1.5; }
 
 /* ── 控制列拆成獨立小視窗 (karaoke-remote.js) ──
    **同一顆 #karaoke-bar** 被 adoptNode 搬進 window.open 出來的空白文件,樣式因此完全共用
@@ -3185,91 +3328,6 @@ body.karaoke-remote #karaoke-mv-picker {
     border-radius: 0;
 }
 
-/* ── 曲名/作詞作曲的資訊卡 ──
-   **貼在畫面上緣、絕對定位,不佔版面流** —— 歌詞是貼著下緣的 (#karaoke-stage 是
-   justify-content: flex-end),兩者天生不重疊,所以資訊卡可以跟歌詞同時在畫面上。
-   舊版是「獨佔一個畫面、把 #karaoke-lines 整個藏起來」,那會逼出兩個互相矛盾的需求:
-   前奏短的歌卡片一閃而過等於沒顯示,而為了讓第一句連同倒數的點看得到又得提早收掉卡片。
-   移到上緣之後兩件事同時成立 (2026-08-10 使用者要求)。 */
-#karaoke-intro {
-    position: absolute;
-    top: 3vh;
-    left: 0;
-    right: 0;
-    z-index: 2;
-    text-align: center;
-    color: #fff;
-    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85);
-}
-/* **字級跟著 vh 不是 vw** —— 這張卡與歌詞搶的是**垂直**空間 (它在上緣、歌詞在下緣),
-   用 vw 的話矮而寬的視窗會把卡片撐到壓在歌詞上 (實測 1490×846 + 4 列製作人員就疊了 10px)。
-   上限是「4 列製作人員時整張卡仍然構不到歌詞」推出來的:1080p 全螢幕下卡片約 320px 高,
-   而歌詞最壞情況 (兩句各佔兩列) 的上緣約在 540px。再往上加要先量那個距離。 */
-#ki-title { font-size: clamp(30px, 7vh, 84px); font-weight: 800; line-height: 1.2; }
-#ki-artist { font-size: clamp(17px, 3.2vh, 38px); font-weight: 600; margin-top: 0.35em; opacity: 0.9; }
-#ki-credits { margin-top: 1.1em; font-size: clamp(12px, 1.9vh, 22px); opacity: 0.8; line-height: 1.6; }
-
-/* ── 倒數的五個點 ──
-   karaoke-mode.js 把這塊塞進「即將唱的那一句」(.kline) 裡,所以位置是相對那一句的
-   **左上角**,不是畫面上的固定位置 (照 JOYSOUND)。`.kline` 已經是 position: relative,
-   而且靠 align-self 縮成貼合文字的寬度,所以 left: 0 就是這一句第一個字的左邊。
-   尺寸用 em 跟著歌詞字級縮放。 */
-#karaoke-countin {
-    position: absolute;
-    left: 0;
-    bottom: 100%;
-    display: flex;
-    align-items: center;
-    gap: 0.14em;
-    padding-bottom: 0.06em;
-}
-/* (收起來靠全站共用的 `.hidden { display: none !important }`,這裡不必再寫一條) */
-/* 配色與歌詞同一套:還沒走到 = 白底黑框 (未唱),走過去 = 紅底白框 (唱過)。
-   外框用 box-shadow 的 spread 畫,跟 -webkit-text-stroke 看起來是同一個粗細語彙。
-   **不要加 transition** —— 倒數是每幀重算的離散狀態,補間只會讓「還剩幾個」變模糊。 */
-.kdot {
-    width: 0.26em; height: 0.26em;
-    border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 0 0 0.045em #000;
-}
-.kdot.on { background: #e60012; box-shadow: 0 0 0 0.045em #fff; }
-
-/* ── 狀態 / 降級提示 ── */
-/* 空狀態 (等待播放 / 找不到歌詞) 要留在畫面正中央 —— 舞台已經改成貼下緣,
-   跟著歌詞擠在下面會看起來像壞掉 */
-#karaoke-status {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 2;
-    text-align: center;
-    color: rgba(255, 255, 255, 0.45);
-}
-#karaoke-status.hidden { display: none; }
-#karaoke-status i { font-size: 42px; margin-bottom: 14px; display: block; }
-#karaoke-status p { font-size: 17px; }
-
-#karaoke-degraded {
-    position: absolute;
-    left: 20px; bottom: 20px;
-    z-index: 3;
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 14px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 13px;
-}
-#karaoke-degraded.hidden { display: none; }
-#karaoke-degraded button {
-    background: none; border: 0; padding: 0;
-    color: var(--primary-color, #1db954);
-    font-size: 13px; cursor: pointer;
-}
-#karaoke-degraded button:hover { text-decoration: underline; }
-
 /* ── MV 挑選面板 ── */
 #karaoke-mv-mask {
     position: fixed; inset: 0; z-index: 90;
@@ -3326,3 +3384,78 @@ body.karaoke-remote #karaoke-mv-picker {
     font-size: 11px;
 }
 .kmv-empty { padding: 28px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 14px; }
+
+/* 唱歌控台沿頁面分區排列，窄窗由同一個容器捲動。 */
+body.karaoke-page:not(.karaoke-remote) .content-body {
+    display: flex; flex-direction: column; gap: 12px;
+    height: 100%; padding: 16px; box-sizing: border-box;
+    overflow-y: auto; overflow-x: hidden;
+}
+body.karaoke-page:not(.karaoke-remote) #karaoke-stage {
+    display: contents;
+}
+body.karaoke-page:not(.karaoke-remote) #karaoke-console-summary,
+body.karaoke-page:not(.karaoke-remote) #karaoke-pitch-panel,
+body.karaoke-page:not(.karaoke-remote) #karaoke-pitch-history,
+body.karaoke-page:not(.karaoke-remote) #karaoke-bar,
+body.karaoke-page:not(.karaoke-remote) #karaoke-song-picker {
+    box-sizing: border-box; min-width: 0;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 12px; background: #131719; box-shadow: none;
+}
+body.karaoke-page:not(.karaoke-remote) #karaoke-console-summary {
+    order: 0; position: static; transform: none;
+    width: 100%; max-width: 760px; margin: 0 auto; padding: 16px;
+}
+body.karaoke-page:not(.karaoke-remote) #karaoke-console-title { font-size: clamp(20px, 4vw, 30px); overflow-wrap: anywhere; }
+body.karaoke-page:not(.karaoke-remote) #karaoke-console-artist { font-size: 14px; }
+body.karaoke-page:not(.karaoke-remote) #karaoke-pitch-panel,
+body.karaoke-page:not(.karaoke-remote) #karaoke-pitch-history {
+    position: static; width: 100%; max-width: 760px;
+    max-height: none; margin: 0 auto; padding: 16px; backdrop-filter: none;
+}
+body.karaoke-page:not(.karaoke-remote) #karaoke-pitch-panel { order: 3; }
+body.karaoke-page:not(.karaoke-remote) #karaoke-pitch-history { order: 4; }
+body.karaoke-page:not(.karaoke-remote) .karaoke-panel-heading,
+body.karaoke-page:not(.karaoke-remote) .kbar-panel-heading,
+body.karaoke-page:not(.karaoke-remote) .kbar-panel-subheading {
+    display: block; margin: 0 0 10px; font-size: 14px; color: var(--text-primary);
+}
+body.karaoke-page:not(.karaoke-remote) .kbar-panel-subheading {
+    margin: 14px 0 8px; color: var(--text-secondary); font-size: 12px;
+}
+body.karaoke-page:not(.karaoke-remote) #youtube-karaoke-warning {
+    order: 2; position: static; transform: none; flex-wrap: wrap;
+    align-self: stretch; padding: 12px; border-radius: 10px; font-size: 12px;
+}
+body.karaoke-page:not(.karaoke-remote) #youtube-karaoke-warning.hidden { display: none; }
+body.karaoke-page:not(.karaoke-remote) #youtube-karaoke-warning-message { flex: 1 1 220px; }
+body.karaoke-page:not(.karaoke-remote) #karaoke-bar {
+    order: 1; position: static; display: block; width: 100%; max-width: 760px;
+    margin: 0 auto; padding: 16px; transform: none; opacity: 1;
+    transition: none; backdrop-filter: none;
+}
+body.karaoke-page.bar-visible:not(.karaoke-remote) #karaoke-bar { transform: none; }
+body.karaoke-page:not(.karaoke-remote) #karaoke-bar .kbar-sep { display: none; }
+body.karaoke-page:not(.karaoke-remote) #karaoke-bar > .kbar-group,
+body.karaoke-page:not(.karaoke-remote) #kbar-tools,
+body.karaoke-page:not(.karaoke-remote) #kbar-extra {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+}
+body.karaoke-page:not(.karaoke-remote) #kbar-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+body.karaoke-page:not(.karaoke-remote) #karaoke-bar .kbar-big,
+body.karaoke-page:not(.karaoke-remote) #karaoke-bar .ctrl-btn { width: 100%; min-width: 0; min-height: 48px; }
+body.karaoke-page:not(.karaoke-remote) #karaoke-bar .lyrics-opt-wrap { min-width: 0; }
+body.karaoke-page:not(.karaoke-remote) #karaoke-bar .lyrics-opt-wrap > button { width: 100%; }
+body.karaoke-page:not(.karaoke-remote) .kbar-offsets { gap: 8px; }
+body.karaoke-page:not(.karaoke-remote) .kbar-offset { width: 100%; justify-content: space-between; }
+body.karaoke-page:not(.karaoke-remote) .kbar-offset button,
+body.karaoke-page:not(.karaoke-remote) .kbar-key button { flex: 0 0 36px; width: 36px; height: 36px; }
+body.karaoke-page:not(.karaoke-remote) .kbar-offset #kbar-offset,
+body.karaoke-page:not(.karaoke-remote) .kbar-key #kbar-key-value { flex: 1; }
+body.karaoke-page:not(.karaoke-remote) .kbar-seek-wrap { margin: 12px 0; }
+body.karaoke-page:not(.karaoke-remote) #kbar-seek { width: 100%; }
+body.karaoke-page:not(.karaoke-remote) #karaoke-song-picker {
+    order: 5; width: 100%; max-width: 760px;
+    margin: 0 auto 16px; padding: 16px;
+}

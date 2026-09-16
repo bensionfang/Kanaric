@@ -83,4 +83,5 @@ function createYouTubeKaraokeQueue() {
   };
 }
 
-if (typeof module !== 'undefined') module.exports = { createYouTubeKaraokeQueue };
+if (typeof module !== 'undefined' && module.exports) module.exports = { createYouTubeKaraokeQueue };
+if (typeof window !== 'undefined') window.createYouTubeKaraokeQueue = createYouTubeKaraokeQueue;

@@ -15,8 +15,10 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { randomUUID } = require('crypto');
 const { spawn } = require('child_process');
 const { toTraditional, toSimplified } = require('./s2t');   // 簡體歌詞轉繁 (日文歌會跳過,見該檔註解)
+const { youtubeCnSourceOrder, shouldAcceptYoutubeCnResult } = require('./youtube-lyrics-source');
 const { badLyric } = require('./lyric-quality');            // 內嵌注音 / 羅馬字轉寫的爛歌詞,抓取階段就換下一家
 const { cleanBrowserQuery, isMusicAppSource } = require('./browser-query');   // 瀏覽器來源的影片標題去噪
 const { autoMarkTitleLines, normalizeLrcTime } = require('./title-lines');   // 製作人員/版權列標記 #TITLE#
@@ -26,11 +28,24 @@ const { mergeWordTimes } = require('./word-times');        // 逐字時間合併
 const { pickDistractors, filterArtistTracks } = require('./game');   // 猜歌遊戲:選項與提示句的挑選規則
 const { titleKey } = require('./public/js/song-key');                // 曲目池去重 (前後端共用那份)
 const {
+  buildYouTubeLyricsPayload,
+  createYouTubeLyricsCoordinator,
+  resolveYouTubeLyricsStatus,
+} = require('./youtube-karaoke-lyrics');
+const {
   normalizeExtensionState,
+  normalizeKaraokePitchStatus,
+  normalizeKaraokePitchFrame,
+  normalizeKaraokeLyricsSearch,
+  normalizeKaraokeLyricsPrefetch,
   normalizeKaraokeCommand,
   readOrCreateExtensionToken,
   tokenMatches,
 } = require('./youtube-karaoke-protocol');
+const {
+  PitchTakeValidationError,
+  createPitchTakeStore,
+} = require('./karaoke-pitch-takes');
 require('dotenv').config();
 
 const app = express();
@@ -173,7 +188,7 @@ app.use((req, res, next) => {
 // gzip:本機看不出來,雲端那台的行動網路才是重點 —— 手機首載的 index.html 67KB、
 // 每首歌帶 <ruby> 的歌詞幾十 KB,都是純文字,壓完剩約四分之一。
 app.use(compression());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 // vendor/ 底下是版本固定的第三方字型與圖示,檔名一變就是新網址,直接讓瀏覽器永久快取
 app.use('/vendor', express.static(path.join(__dirname, 'public', 'vendor'), { maxAge: '1y', immutable: true }));
@@ -185,7 +200,9 @@ app.set('views', path.join(__dirname, 'views'));
 
 // 使用者資料目錄 (打包後由 Electron 指向 %APPDATA%,開發模式維持專案根目錄)
 const DATA_DIR = process.env.DATA_DIR || PARENT_DIR;
-const YOUTUBE_EXTENSION_TOKEN = readOrCreateExtensionToken({ dataDir: DATA_DIR });
+const YOUTUBE_EXTENSION_TOKEN = process.env.YOUTUBE_EXTENSION_TOKEN
+  || readOrCreateExtensionToken({ dataDir: DATA_DIR });
+const YOUTUBE_EXTENSION_ID = process.env.KANARIC_EXTENSION_ID || '';
 
 // Python Environment Detection
 const venvPythonPath = path.join(PARENT_DIR, 'venv', 'Scripts', 'python.exe');
@@ -273,6 +290,7 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
     )`);
   }
 });
+const pitchTakeStore = createPitchTakeStore(db);
 
 // 歌手正規名對照。handleMediaUpdate 是同步的,不能在那裡等 db.get,所以整張表
 // (數列而已) 開機載入進記憶體,/api/aliases 寫入後同步更新這份快取。
@@ -647,8 +665,16 @@ app.get('/game', (req, res) => {
 
 // 卡拉OK字幕機模式 (兩行大字 + 逐字填色 + 可選的 MV 背景)
 app.get('/karaoke', (req, res) => {
-  res.render('karaoke', { activePage: 'karaoke' });
+  // YouTube Karaoke 不讀取一般媒體的初始狀態；footer 仍提供共用歌詞工具，但不可把 Spotify/Windows
+  // 的目前歌曲閃進這一頁。
+  res.render('karaoke', {
+    activePage: 'karaoke',
+    media: { title: '', artist: '', position: 0, duration: 0, is_playing: false, hasCover: false, shuffle: false, repeat: 0 },
+  });
 });
+
+// /karaoke 需要同一份純函式的瀏覽器影片標題去噪；檔案本身也仍供 server require。
+app.get('/browser-query.js', (req, res) => res.sendFile(path.join(__dirname, 'browser-query.js')));
 
 // 靈動島視窗的內容 (由 Electron 主進程的 island.js 載入,見該檔說明)
 app.get('/island', (req, res) => {
@@ -815,7 +841,7 @@ function invalidateFurigana(artist, title) {
 // 這一次執行期間已經補抓過譯文的歌。**成功失敗都留著**,不只是 in-flight 去重:
 // 抓失敗時 (沒網路) pytools 不會寫入負快取,鍵一刪就會變成
 // 補抓 -> rebroadcast -> 還是查無資料 -> 再補抓 的無窮迴圈。
-const translationJobs = new Set();
+const translationJobs = new Map();
 
 /**
  * 譯文只在抓歌詞時搭便車存下來,所以改版前就存在快取裡的歌一首都沒有。開了「顯示翻譯」
@@ -827,18 +853,21 @@ const translationJobs = new Set();
 // 手機查一首歌不該去動桌面與靈動島上顯示的內容。
 function ensureTranslations(artist, title, quiet) {
   const key = furiganaKey(artist, title);
-  if (translationJobs.has(key)) return;
-  translationJobs.add(key);
+  const existing = translationJobs.get(key);
+  if (existing) return existing;
 
   // 查詢字串一定要過 buildSearchQuery,不能直接拿 cache 的 key 去搜 —— 那些 key 是播放
   // app 給的寫法,歌手可能是別名 (「神不擲骰子」查無結果,「神はサイコロを振らない」有 29 筆譯文)。
   // 走 fetchCnLyricsS2 而不是自己 spawn:簡體重試那層邏輯只該有一份。歌詞本身用不到
   // (cache 裡已經有了),要的是 pytools 順手寫進 lyrics_translations 的那筆。
-  buildSearchQuery(title, artist)
+  const job = buildSearchQuery(title, artist)
     .then(({ trueArtist, cleanTitle }) => fetchCnLyricsS2({
       title, artist, searchTitle: cleanTitle, searchArtist: trueArtist, source: 'all'
     }))
-    .then(() => { if (!quiet) rebroadcastLyrics(artist, title); });
+    .then(() => { if (!quiet) rebroadcastLyrics(artist, title); })
+    .catch(() => {});
+  translationJobs.set(key, job);
+  return job;
 }
 
 /**
@@ -907,12 +936,19 @@ function wordTimesMismatch(artist, title, lrc) {
   });
 }
 
-function applyWordTimes(artist, title, html) {
+function applyWordTimes(artist, title, html, { waitForData = false } = {}) {
   return new Promise((resolve) => {
     db.get('SELECT data FROM word_times WHERE artist = ? AND title = ?', [artist, title], (err, row) => {
       // 建表是非同步的,全新 DB 上這支 SELECT 可能先到 —— 有 callback 就不會炸成未捕捉例外
-      if (err || !row) {
-        if (!err) ensureTranslations(artist, title);
+      if (err) return resolve(html);
+      if (!row) {
+        const job = ensureTranslations(artist, title, waitForData);
+        if (waitForData) {
+          return Promise.resolve(job)
+            .then(() => applyWordTimes(artist, title, html, { waitForData: false }))
+            .then(resolve);
+        }
+        // 沒有資料時維持原本的背景補抓行為,桌面播放器不必被網路延遲卡住。
         return resolve(html);
       }
       try {
@@ -941,7 +977,7 @@ function injectFurigana(artist, title, lyrics, opts = {}) {
     .then((html) => ((opts.force || wantsExtraLine('romaji')) ? mergeRomaji(html) : html))
     // 逐字時間排最後:它不是要顯示的行,插在最貼著歌詞的位置最省事,
     // 而且 mergeTranslations / mergeRomaji 的跳過清單就不必多認一種標記
-    .then((html) => applyWordTimes(artist, title, html));
+    .then((html) => applyWordTimes(artist, title, html, { waitForData: opts.waitForWordTimes === true }));
 }
 
 // 譯文刻意不進 furiganaCache:切換「顯示翻譯」就不必重跑 python,快取也不用多一個比對維度
@@ -1078,9 +1114,15 @@ function spawnPyJson(args, { stdin = null, timeoutMs = PY_TIMEOUT_MS, onJson }) 
   });
 }
 
-function fetchCnLyrics({ title, artist, searchTitle, searchArtist, source = 'auto', stash = true }) {
+function remainingSearchTimeout(deadlineAt) {
+  if (deadlineAt == null) return PY_TIMEOUT_MS;
+  return Math.max(0, Math.min(PY_TIMEOUT_MS, deadlineAt - Date.now()));
+}
+
+function fetchCnLyrics({ title, artist, searchTitle, searchArtist, source = 'auto', stash = true }, { timeoutMs = PY_TIMEOUT_MS } = {}) {
   const duration = currentDuration(title, artist);
   return spawnPyJson(['cnlyrics'], {
+    timeoutMs,
     stdin: JSON.stringify({ title, artist, searchTitle, searchArtist, source, duration, stash }),
     onJson: (parsed) => {
       if (!parsed.success) return null;
@@ -1093,20 +1135,24 @@ function fetchCnLyrics({ title, artist, searchTitle, searchArtist, source = 'aut
 // 中國三家的搜尋結果標題是簡體,繁體歌名 (告白氣球) 過不了 cn_music._title_matches 的比對,
 // 整首歌就 MISS。但**不能一律轉簡體**:純漢字的日文歌名 (新宝島 -> 新宝岛) 轉了反而查不到。
 // 所以原名先查,全 MISS 且轉換後真的不一樣時才用簡體重試一次 —— 只在既有的失敗路徑上多一次請求。
-async function fetchCnLyricsS2(q) {
-  const first = await fetchCnLyrics(q);
+async function fetchCnLyricsS2(q, { deadlineAt = null } = {}) {
+  const firstTimeout = remainingSearchTimeout(deadlineAt);
+  if (!firstTimeout) return null;
+  const first = await fetchCnLyrics(q, { timeoutMs: firstTimeout });
   if (first && (!Array.isArray(first) || first.length)) return first;
 
   const sTitle = toSimplified(q.searchTitle);
   const sArtist = toSimplified(q.searchArtist);
   if (sTitle === q.searchTitle && sArtist === q.searchArtist) return first;
-  return fetchCnLyrics({ ...q, searchTitle: sTitle, searchArtist: sArtist });
+  const retryTimeout = remainingSearchTimeout(deadlineAt);
+  return retryTimeout ? fetchCnLyrics({ ...q, searchTitle: sTitle, searchArtist: sArtist }, { timeoutMs: retryTimeout }) : first;
 }
 
-function fetchFallback(title, artist, fetchAll = false) {
+function fetchFallback(title, artist, fetchAll = false, { timeoutMs = PY_TIMEOUT_MS } = {}) {
   const args = ['fallback', title, artist];
   if (fetchAll) args.push('--all');
   return spawnPyJson(args, {
+    timeoutMs,
     onJson: (parsed) => {
       if (fetchAll && parsed.success && parsed.results) return parsed.results;
       if (!fetchAll && parsed.success && parsed.lyrics) {
@@ -1194,10 +1240,28 @@ app.get('/api/lyrics/offset', (req, res) => {
 });
 
 app.post('/api/lyrics/offset', (req, res) => {
-  const { title, artist, offset } = req.body;
-  if (!title || !artist || typeof offset !== 'number') return res.status(400).json({ error: 'Missing parameters' });
+  const { title, artist, offset, videoId, revision } = req.body;
+  const hasVideoId = videoId !== undefined;
+  const hasRevision = revision !== undefined;
+  if (!title || !artist || typeof offset !== 'number'
+    || hasVideoId !== hasRevision
+    || (hasVideoId && (typeof videoId !== 'string' || !/^[A-Za-z0-9_-]{11}$/.test(videoId)
+      || !Number.isSafeInteger(revision) || revision < 0))) {
+    return res.status(400).json({ error: 'Missing parameters' });
+  }
   db.run('INSERT OR REPLACE INTO sync_offsets (artist, title, offset) VALUES (?, ?, ?)', [artist, title, offset], (err) => {
     if (err) return res.status(500).json({ error: err.message });
+
+    // The controller may persist an offset, but only the canonical, revision-bound
+    // server payload may relay it to the owner tab.  An unversioned offset update
+    // remains a normal shared preference and cannot identify a YouTube session.
+    if (hasVideoId && currentYouTubeExtensionState?.videoId === videoId
+      && currentYouTubeExtensionState.revision === revision
+      && currentYouTubeLyrics?.videoId === videoId
+      && normalizeYouTubeRevision(currentYouTubeLyrics.revision) === revision) {
+      currentYouTubeLyrics = { ...currentYouTubeLyrics, offsetMs: Math.round(offset * 1000) };
+      sendYouTubeLyricsToExtension(currentYouTubeLyrics);
+    }
     
     if (global.broadcast) {
       global.broadcast({ type: 'sync_offset_updated', title, artist, offset });
@@ -1240,7 +1304,8 @@ function hashLyric(s) {
 
 // 跑完整來源串接,回傳「會寫進 cache 的那份歌詞字串」(轉繁 + 標記製作人員列 + source 標籤),
 // 找不到回空字串。**不寫 cache、不廣播** —— 純搜尋,給 performFetch 與無歌詞背景重查共用。
-async function searchBestLyric(title, artist, searchTitle, searchArtist) {
+async function searchBestLyric(title, artist, searchTitle, searchArtist, { deadlineMs = null, youtube = false } = {}) {
+  const deadlineAt = deadlineMs == null ? null : Date.now() + deadlineMs;
   const { qArtist, trueArtist, cleanTitle } = await buildSearchQuery(title, artist, searchTitle, searchArtist);
 
   let preferredSource = 'NetEase';
@@ -1276,26 +1341,29 @@ async function searchBestLyric(title, artist, searchTitle, searchArtist) {
   // 只有 JS 這一份,不複製到 Python),所以被擋下來時要由這裡指定另一家再問一次 —— 實測
   // モザイクロール 網易是內嵌注音版、酷狗那份乾淨,不重問就會白白掉到 fallback。
   // 這個迴圈只有在被擋掉時才會多打,成功路徑跟以前一樣一次。
-  if (preferredSource === 'NetEase' || preferredSource === 'Kugou') {
+  const cnOrder = youtubeCnSourceOrder(preferredSource, { youtube });
+  if (cnOrder.length) {
     // **QQ 排在偏好來源前面,但只有「它自己那份帶逐字」時才佔位。** 逐字時間只有 QQ 的 QRC 有,
     // 而歌詞本體多半來自網易 —— 兩份不同源就有幾行對不上,`mergeWordTimes` 是全有或全無,
     // 那首歌就整個沒有卡拉OK。本體也用 QQ 那份的話,行覆蓋率天生 100%。
     // 沒有 QRC 時它那份不佔位:QQ 會把兩三個短句併成一長行,讀起來比網易差。
     // 成本是**只在快取 miss 時**多打一次 QQ 搜尋,而且常常不會多 —— `cn_music.fetch` 在
     // 「這家沒有」時自己就往下一家問,回來的 source 剛好是偏好來源的話就直接用。
-    const cnOrder = ['QQMusic', preferredSource, ...['NetEase', 'QQMusic', 'Kugou']
-      .filter((s) => s !== preferredSource && s !== 'QQMusic')];
     const tried = new Set();
     for (const src of cnOrder) {
       if (tried.has(src)) continue;
       tried.add(src);
+      if (!remainingSearchTimeout(deadlineAt)) break;
       const cnData = await fetchCnLyricsS2({
         title, artist, searchTitle: cleanTitle, searchArtist: trueArtist, source: src
-      });
-      if (!cnData || !cnData.lyrics) break;              // 一家都沒有 = 三家都沒有 (cn_music 內部已經問過)
+      }, { deadlineAt });
+      if (!cnData || !cnData.lyrics) {
+        if (src === 'QQMusic') continue;
+        break;              // 一家都沒有 = 三家都沒有 (cn_music 內部已經問過)
+      }
       if (!usable(cnData.lyrics, cnData.source)) continue;
+      if (!shouldAcceptYoutubeCnResult(src, cnData)) continue;
       // QQ 那份沒有逐字 = 沒有留下它的理由,讓給偏好來源 (它內部已經掉到別家的話就照收)
-      if (cnData.source === 'QQMusic' && !cnData.word && src === 'QQMusic') continue;
       if (/\[\d{2}:\d{2}/.test(cnData.lyrics)) { bestLyric = cnData.lyrics; finalSource = cnData.source; }
       else if (!plainBackup) { plainBackup = cnData.lyrics; finalSource = cnData.source; }
       break;
@@ -1303,7 +1371,8 @@ async function searchBestLyric(title, artist, searchTitle, searchArtist) {
   }
 
   if (!bestLyric && preferredSource !== 'Lrclib') {
-    const fbData = await fetchFallback(cleanTitle, qArtist);
+    const timeoutMs = remainingSearchTimeout(deadlineAt);
+    const fbData = timeoutMs ? await fetchFallback(cleanTitle, qArtist, false, { timeoutMs }) : null;
     fallbackSearched = true;
     if (fbData && fbData.lyrics && usable(fbData.lyrics, fbData.source)) {
       if (/\[\d{2}:\d{2}/.test(fbData.lyrics)) { bestLyric = fbData.lyrics; finalSource = fbData.source; }
@@ -1315,7 +1384,11 @@ async function searchBestLyric(title, artist, searchTitle, searchArtist) {
   // 把前面已經拿到的 plainBackup 一起丟掉 —— 有無時間軸的歌詞也比「找不到歌詞」好。
   if (!bestLyric) try {
     const apiUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(trueArtist)}&track_name=${encodeURIComponent(cleanTitle)}`;
-    const lrclibResp = await fetch(apiUrl, { headers: { "User-Agent": "Kanaric/1.0 (https://github.com/bensionfang/Kanaric)" } });
+    const timeoutMs = remainingSearchTimeout(deadlineAt);
+    if (!timeoutMs) throw Object.assign(new Error('lyrics search timed out'), { code: 'lyrics-search-timeout' });
+    const fetchOptions = { headers: { "User-Agent": "Kanaric/1.0 (https://github.com/bensionfang/Kanaric)" } };
+    if (deadlineAt != null) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
+    const lrclibResp = await fetch(apiUrl, fetchOptions);
     if (lrclibResp.ok) {
       const data = await lrclibResp.json();
       // 時長守門:lrclib 只用歌名+歌手字串比對,撞名會回別首歌。回傳帶 duration,
@@ -1332,7 +1405,8 @@ async function searchBestLyric(title, artist, searchTitle, searchArtist) {
   }
 
   if (!bestLyric && !fallbackSearched) {
-    const fbData = await fetchFallback(cleanTitle, qArtist);
+    const timeoutMs = remainingSearchTimeout(deadlineAt);
+    const fbData = timeoutMs ? await fetchFallback(cleanTitle, qArtist, false, { timeoutMs }) : null;
     if (fbData && fbData.lyrics && usable(fbData.lyrics, fbData.source)) {
       if (/\[\d{2}:\d{2}/.test(fbData.lyrics) || !plainBackup) { bestLyric = fbData.lyrics; finalSource = fbData.source; }
     }
@@ -1344,6 +1418,9 @@ async function searchBestLyric(title, artist, searchTitle, searchArtist) {
     bestLyric = rejectedBackup;
     finalSource = rejectedSource;
   }
+  if (!bestLyric && deadlineAt != null && Date.now() >= deadlineAt) {
+    throw Object.assign(new Error('lyrics search timed out'), { code: 'lyrics-search-timeout' });
+  }
   if (!bestLyric) return { lyric: "", source: "" };
 
   const sourceName = finalSource || 'Fallback';
@@ -1354,6 +1431,24 @@ async function searchBestLyric(title, artist, searchTitle, searchArtist) {
 // 快取裡是內嵌注音、已經重抓過一次的歌 (見 /api/lyrics/fetch);重開 app 會再試一次,那是刻意的:
 // 來源網站之後補上乾淨版本的話,重開就換得到。
 const inlineRetried = new Set();
+// YouTube's old cache can contain an empty word_times row from a prior miss or rate limit.
+// Recheck it once per process so a later QQ result can populate the existing song.
+const youtubeWordTimesRetried = new Set();
+
+function retryYouTubeNegativeWordTimes(artist, title) {
+  const key = furiganaKey(artist, title);
+  if (youtubeWordTimesRetried.has(key)) return Promise.resolve();
+  return new Promise((resolve) => {
+    db.get('SELECT data FROM word_times WHERE artist = ? AND title = ?', [artist, title], (err, row) => {
+      if (err || !row) return resolve();
+      let data;
+      try { data = JSON.parse(row.data); } catch { return resolve(); }
+      if (data?.flow?.length) return resolve();
+      youtubeWordTimesRetried.add(key);
+      Promise.resolve(ensureTranslations(artist, title, true)).then(resolve, resolve);
+    });
+  });
+}
 
 // 無歌詞背景重查:搜到「跟標記時那份不同」的非空結果 = 真的被收錄了 → 解除標記、寫快取、廣播套用。
 const NOLYRICS_RECHECK_MS = Number(process.env.NOLYRICS_RECHECK_MS) || 7 * 24 * 3600 * 1000;
@@ -1526,6 +1621,61 @@ app.get('/api/lyrics', async (req, res) => {
 // key = artist|||title;客戶端用 /api/lyrics/options/state 查進度,任何頁面都能接回結果。
 const optionJobs = new Map();
 const jobKey = (artist, title) => `${artist}|||${title}`;
+const youtubeOptionSelections = new Map();
+
+function normalizeYouTubeLyricsOptionsRequest(message) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)
+    || Object.keys(message).some((key) => !['type', 'videoId', 'revision', 'title', 'artist'].includes(key))
+    || message.type !== 'youtube_karaoke_lyrics_options_request'
+    || !/^[A-Za-z0-9_-]{11}$/.test(message.videoId)
+    || !Number.isSafeInteger(message.revision) || message.revision < 0
+    || typeof message.title !== 'string' || !message.title.trim() || message.title.length > 200
+    || typeof message.artist !== 'string' || !message.artist.trim() || message.artist.length > 200) return null;
+  return { videoId: message.videoId, revision: message.revision, title: message.title.trim(), artist: message.artist.trim() };
+}
+
+function normalizeYouTubeLyricsOptionSelect(message) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)
+    || Object.keys(message).some((key) => !['type', 'videoId', 'revision', 'optionId'].includes(key))
+    || message.type !== 'youtube_karaoke_lyrics_option_select'
+    || !/^[A-Za-z0-9_-]{11}$/.test(message.videoId)
+    || !Number.isSafeInteger(message.revision) || message.revision < 0
+    || typeof message.optionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(message.optionId)) return null;
+  return { videoId: message.videoId, revision: message.revision, optionId: message.optionId };
+}
+
+function summarizeYouTubeOption(option, job, request) {
+  const optionId = randomUUID().replace(/-/g, '');
+  youtubeOptionSelections.set(optionId, { job, index: job.options.indexOf(option), ...request });
+  while (youtubeOptionSelections.size > 200) youtubeOptionSelections.delete(youtubeOptionSelections.keys().next().value);
+  const preview = String(option.lyrics || '')
+    .replace(/^\[source:[^\]]+\]\s*/i, '')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\[[^\]]+\]\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(' / ')
+    .slice(0, 500);
+  return {
+    optionId,
+    source: String(option.provider || 'Unknown').slice(0, 100),
+    format: option.hasWords ? '逐字' : (option.isSynced ? 'LRC' : 'TXT'),
+    preview,
+    hasWords: !!option.hasWords,
+  };
+}
+
+function buildYouTubeLyricsOptionsMessage(job, request, status = job.status, error = null) {
+  const message = {
+    type: 'youtube_karaoke_lyrics_options',
+    videoId: request.videoId,
+    revision: request.revision,
+    status,
+    options: (job.options || []).map((option) => summarizeYouTubeOption(option, job, request)),
+  };
+  if (error) message.error = String(error).slice(0, 500);
+  return message;
+}
 
 function startOptionsJob(q) {
   const key = jobKey(q.artist, q.title);
@@ -1835,24 +1985,25 @@ app.post('/api/search-override', (req, res) => {
   }
 });
 
+async function saveManualLyrics(title, artist, lyrics) {
+  const finalLyrics = autoMarkTitleLines(toTraditional(`[source:ManualEdit]\n${lyrics}`), title);
+  await new Promise((resolve, reject) => {
+    db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, finalLyrics], (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+  const injected = await injectFurigana(artist, title, finalLyrics);
+  if (global.broadcast) global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
+  return { finalLyrics, injected };
+}
+
 app.post('/api/lyrics/custom', async (req, res) => {
   const { title, artist, lyrics } = req.body;
   if (!title || !artist || !lyrics) return res.status(400).json({ error: 'Missing parameters' });
   
   try {
-    // 這條路徑同時是「套用備選歌詞」的入口 (lyrics-tools.js applyLyricsOption),
-    // 抓回來的簡體歌詞也走這裡,所以一樣要轉繁
-    const finalLyrics = autoMarkTitleLines(toTraditional(`[source:ManualEdit]\n${lyrics}`), title);
-    await new Promise((resolve, reject) => {
-      db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, finalLyrics], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-    const injected = await injectFurigana(artist, title, finalLyrics);
-    if (global.broadcast) {
-      global.broadcast({ type: 'lyrics_updated', title, artist, lyrics: injected });
-    }
+    const { injected } = await saveManualLyrics(title, artist, lyrics);
     res.json({ success: true, lyrics: injected });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1939,6 +2090,18 @@ app.get('/api/songs', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
+});
+
+app.get('/api/karaoke/lyrics-search', (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (q.length < 2 || q.length > 80) return res.status(400).json({ error: 'bad_query' });
+  db.all(
+    'SELECT artist, title FROM cache WHERE instr(lyrics, ?) > 0 ORDER BY artist, title LIMIT 20',
+    [q],
+    (err, items) => err
+      ? res.status(500).json({ error: 'search_failed' })
+      : res.json({ scope: 'cached', items }),
+  );
 });
 
 // 5. Stats APIs
@@ -2283,7 +2446,11 @@ app.get('/api/mv/search', async (req, res) => {
   const hit = mvSearchCache.get(key);
   if (hit && Date.now() - hit.at < MV_SEARCH_TTL) return res.json({ results: hit.results });
 
-  const duration = Number(req.query.duration) || currentDuration(title, artist) || null;
+  const hasDuration = Object.prototype.hasOwnProperty.call(req.query, 'duration');
+  const duration = hasDuration ? Number(req.query.duration) : (currentDuration(title, artist) || null);
+  if (hasDuration && (!Number.isFinite(duration) || duration < 0)) {
+    return res.status(400).json({ error: 'bad_duration' });
+  }
   const results = await spawnPyJson(['ytsearch'], {
     stdin: JSON.stringify({ title, artist, duration }),
     onJson: (parsed) => (Array.isArray(parsed) ? parsed : []),
@@ -2326,6 +2493,60 @@ app.post('/api/game/result', (req, res) => {
       res.json({ success: true });
     }
   );
+});
+
+// YouTube 卡拉 OK 的使用者音高歷史。只保存 compact pitch frames，不保存音訊或分析原始資料。
+const pitchTakeError = (res, error) => {
+  if (error instanceof PitchTakeValidationError) {
+    return res.status(400).json({ error: error.message });
+  }
+  console.error('音高歷史失敗:', error.message);
+  return res.status(500).json({ error: error.message });
+};
+const parsePitchTakeId = (value) => {
+  if (!/^[1-9]\d*$/.test(String(value))) return null;
+  const id = Number(value);
+  return Number.isSafeInteger(id) ? id : null;
+};
+
+app.post('/api/karaoke/pitch-takes', async (req, res) => {
+  try {
+    const saved = await pitchTakeStore.save(req.body);
+    res.status(201).json(saved);
+  } catch (error) {
+    pitchTakeError(res, error);
+  }
+});
+
+app.get('/api/karaoke/pitch-takes', async (req, res) => {
+  try {
+    res.json(await pitchTakeStore.list(req.query.videoId));
+  } catch (error) {
+    pitchTakeError(res, error);
+  }
+});
+
+app.get('/api/karaoke/pitch-takes/:id', async (req, res) => {
+  const id = parsePitchTakeId(req.params.id);
+  if (id === null) return res.status(400).json({ error: 'invalid id' });
+  try {
+    const take = await pitchTakeStore.detail(id);
+    if (!take) return res.status(404).json({ error: 'not found' });
+    res.json(take);
+  } catch (error) {
+    pitchTakeError(res, error);
+  }
+});
+
+app.delete('/api/karaoke/pitch-takes/:id', async (req, res) => {
+  const id = parsePitchTakeId(req.params.id);
+  if (id === null) return res.status(400).json({ error: 'invalid id' });
+  try {
+    if (!(await pitchTakeStore.delete(id))) return res.status(404).json({ error: 'not found' });
+    res.json({ success: true });
+  } catch (error) {
+    pitchTakeError(res, error);
+  }
 });
 
 // 5b. 資料用量與清除。
@@ -2629,15 +2850,319 @@ app.post('/api/lyrics/diff', (req, res) => {
 
 
 const server = http.createServer(app);
+let currentYouTubeLyrics = null;
+let currentYouTubeLyricsStatus = null;
+let currentYouTubeExtensionState = null;
+
+function pitchRelayIdentityMatches(message, state = currentYouTubeExtensionState) {
+  return !!state && message?.videoId === state.videoId
+    && message?.revision === state.revision && message.revision > 0;
+}
+
+function sendYouTubePitchRelayToExtension(message) {
+  if (!message || global.activeYouTubeExtension?.readyState !== 1) return false;
+  global.activeYouTubeExtension.send(JSON.stringify(message));
+  return true;
+}
+
+function stopPitchRelayForSocket(ws) {
+  const identity = ws?.pitchRelayIdentity;
+  if (!ws) return false;
+  ws.pitchRelayIdentity = null;
+  ws.pitchRelayEnabled = false;
+  ws.pitchRelayStatus = null;
+  ws.pendingPitchRelayStatus = null;
+  if (!identity) return false;
+  return sendYouTubePitchRelayToExtension({
+    type: 'youtube_karaoke_pitch_status',
+    videoId: identity.videoId,
+    revision: identity.revision,
+    status: 'stopped',
+    error: null,
+  });
+}
+
+function stopAllPitchRelays() {
+  wss?.clients?.forEach((client) => {
+    if (client.isKaraoke) stopPitchRelayForSocket(client);
+  });
+}
+
+function replayPitchRelayStatuses() {
+  const state = currentYouTubeExtensionState;
+  wss?.clients?.forEach((client) => {
+    if (!client.isKaraoke) return;
+    const pending = client.pendingPitchRelayStatus;
+    if (pending) {
+      client.pendingPitchRelayStatus = null;
+      if (!pitchRelayIdentityMatches(pending, state)) return;
+      handleKaraokePitchRelay(client, pending);
+      return;
+    }
+    if (client.pitchRelayStatus && pitchRelayIdentityMatches(client.pitchRelayStatus, state)) {
+      sendYouTubePitchRelayToExtension(client.pitchRelayStatus);
+    }
+  });
+}
+
+function handleKaraokePitchRelay(ws, raw) {
+  if (!ws?.isKaraoke) return false;
+  const status = normalizeKaraokePitchStatus(raw);
+  if (status) {
+    if (!currentYouTubeExtensionState) {
+      const pending = ws.pendingPitchRelayStatus;
+      if (pending && (pending.videoId !== status.videoId || pending.revision !== status.revision)) return false;
+      ws.pendingPitchRelayStatus = status;
+      return true;
+    }
+    if (!pitchRelayIdentityMatches(status)) return false;
+    const current = ws.pitchRelayIdentity;
+    if (current && (current.videoId !== status.videoId || current.revision !== status.revision)) return false;
+    ws.pendingPitchRelayStatus = null;
+    ws.pitchRelayIdentity = { videoId: status.videoId, revision: status.revision };
+    ws.pitchRelayEnabled = status.status === 'enabled';
+    ws.pitchRelayStatus = status;
+    if (status.status === 'stopped') ws.pitchRelayIdentity = null;
+    const forwarded = sendYouTubePitchRelayToExtension(status);
+    if (status.status === 'stopped') ws.pitchRelayStatus = null;
+    return forwarded;
+  }
+  const frame = normalizeKaraokePitchFrame(raw);
+  if (!frame || !ws.pitchRelayEnabled || !ws.pitchRelayIdentity
+    || ws.pitchRelayIdentity.videoId !== frame.videoId
+    || ws.pitchRelayIdentity.revision !== frame.revision
+    || !pitchRelayIdentityMatches(frame)) return false;
+  return sendYouTubePitchRelayToExtension(frame);
+}
+
+function normalizeYouTubeRevision(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function withYouTubeRevision(value, revision) {
+  const normalized = normalizeYouTubeRevision(revision);
+  return value && normalized !== null ? { ...value, revision: normalized } : value;
+}
+
+function withoutYouTubeRevision(value) {
+  if (!value || typeof value !== 'object') return value;
+  const { revision, ...wire } = value;
+  return wire;
+}
+
+function currentYouTubeRevision(videoId) {
+  if (currentYouTubeExtensionState?.videoId === videoId) return currentYouTubeExtensionState.revision;
+  if (currentYouTubeLyrics?.videoId === videoId) {
+    const revision = normalizeYouTubeRevision(currentYouTubeLyrics.revision);
+    if (revision !== null) return revision;
+  }
+  if (currentYouTubeLyricsStatus?.videoId === videoId) {
+    const revision = normalizeYouTubeRevision(currentYouTubeLyricsStatus.revision);
+    if (revision !== null) return revision;
+  }
+  return null;
+}
+
+function cachedYouTubeRevision() {
+  return normalizeYouTubeRevision(currentYouTubeLyrics?.revision)
+    ?? normalizeYouTubeRevision(currentYouTubeLyricsStatus?.revision);
+}
+
+function hasCurrentYouTubeLyrics(state) {
+  if (!currentYouTubeLyrics || currentYouTubeLyrics.videoId !== state.videoId) return false;
+  const revision = normalizeYouTubeRevision(currentYouTubeLyrics.revision);
+  return revision === null || revision === state.revision;
+}
+
+function sendYouTubeLyricsStatusToExtension(status) {
+  if (!status || global.activeYouTubeExtension?.readyState !== 1) return false;
+  global.activeYouTubeExtension.send(JSON.stringify(withoutYouTubeRevision(status)));
+  return true;
+}
+
+function publishYouTubeLyricsStatus(videoId, status, error = null, revision = currentYouTubeRevision(videoId)) {
+  currentYouTubeLyricsStatus = withYouTubeRevision({
+    type: 'youtube_karaoke_lyrics_status', videoId, status, error: error || null,
+  }, revision);
+  return sendYouTubeLyricsStatusToExtension(currentYouTubeLyricsStatus);
+}
+
+function getCachedYouTubeLyrics(artist, title) {
+  return new Promise((resolve, reject) => {
+    db.all('SELECT artist, lyrics FROM cache WHERE title = ?', [title], (err, rows) => {
+      if (err) return reject(err);
+      const wantedArtist = artist.replace(/\s+/g, ' ').trim();
+      const row = (rows || []).find((candidate) =>
+        typeof candidate.artist === 'string'
+        && candidate.artist.replace(/\s+/g, ' ').trim() === wantedArtist);
+      resolve(row?.lyrics ? toTraditional(row.lyrics) : '');
+    });
+  });
+}
+
+function getCachedYouTubeOffset(artist, title) {
+  return new Promise((resolve) => {
+    db.get('SELECT offset FROM sync_offsets WHERE title = ? AND artist = ?', [title, artist], (err, row) => {
+      resolve(!err && row && typeof row.offset === 'number' && Number.isFinite(row.offset) ? row.offset : null);
+    });
+  });
+}
+
+async function findYouTubeOffset(candidates) {
+  const seen = new Set();
+  for (const [candidateArtist, candidateTitle] of candidates) {
+    const key = `${candidateArtist}\u0000${candidateTitle}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const offset = await getCachedYouTubeOffset(candidateArtist, candidateTitle);
+    if (offset !== null) return offset;
+  }
+  return 0;
+}
+
+function cacheYouTubeLyrics(artist, title, lyrics) {
+  return new Promise((resolve, reject) => {
+    db.run('INSERT OR REPLACE INTO cache (artist, title, lyrics) VALUES (?, ?, ?)', [artist, title, lyrics], (err) => {
+      if (err) reject(err); else resolve();
+    });
+  });
+}
+
+async function loadYouTubeLyrics(state, { force = false } = {}) {
+  const rawTitle = state.title.trim();
+  const rawArtist = state.channel.trim();
+  // Match the main media path: YouTube metadata is browser noise, not a
+  // music-app track key. Clean it before the cache miss reaches search.
+  const cleaned = cleanBrowserQuery(rawTitle, rawArtist);
+  const title = cleaned.title;
+  const artist = canonicalArtist(cleaned.artist);
+  const query = await buildSearchQuery(title, artist);
+  let cachedRaw = await getCachedYouTubeLyrics(rawArtist, rawTitle);
+  if (!cachedRaw) {
+    const compactTitle = rawTitle.replace(/\s{2,}/g, ' ');
+    if (compactTitle !== rawTitle) cachedRaw = await getCachedYouTubeLyrics(rawArtist, compactTitle);
+  }
+  if (!cachedRaw && (cleaned.title !== rawTitle || cleaned.artist !== rawArtist)) {
+    cachedRaw = await getCachedYouTubeLyrics(cleaned.artist, cleaned.title);
+  }
+  if (!cachedRaw && (query.cleanTitle !== title || query.trueArtist !== artist)) {
+    cachedRaw = await getCachedYouTubeLyrics(query.trueArtist, query.cleanTitle);
+  }
+  let raw = force ? '' : cachedRaw;
+  await retryYouTubeNegativeWordTimes(artist, title);
+  // YouTube used to accept an older non-QQ cache entry even after word_times had
+  // been found. Reuse the main cache repair rule so a QQ word track can replace
+  // only the mismatched lyric body (manual edits remain untouched).
+  const retryKey = `${artist}|||${title}`;
+  if (raw && !force && !raw.startsWith('[source:ManualEdit]') && !inlineRetried.has(retryKey)) {
+    const wt = await wordTimesMismatch(artist, title, raw);
+    if (wt) {
+      inlineRetried.add(retryKey);
+      const found = await searchBestLyric(title, artist, query.cleanTitle, query.trueArtist, {
+        deadlineMs: 20000, youtube: true
+      });
+      if (found.lyric && mergeWordTimes(found.lyric, wt) !== found.lyric) {
+        raw = found.lyric;
+        await cacheYouTubeLyrics(artist, title, raw);
+        invalidateFurigana(artist, title);
+      }
+    }
+  }
+  if (!raw) {
+    // Reuse the main player query path: overrides, artist aliases, browser noise and
+    // feat/Live/Remastered cleanup must apply to extension-originated video metadata too.
+    const found = await searchBestLyric(title, artist, query.cleanTitle, query.trueArtist, { deadlineMs: 20000, youtube: true });
+    raw = found.lyric;
+    if (raw) await cacheYouTubeLyrics(artist, title, raw);
+    else if (force) raw = cachedRaw;
+  }
+  if (!raw) return { videoId: state.videoId, status: 'no_lyrics' };
+  const injected = await injectFurigana(artist, title, raw, { waitForWordTimes: true });
+  const lyrics = buildYouTubeLyricsPayload(state.videoId, injected);
+  const offset = await findYouTubeOffset([
+    [rawArtist, rawTitle],
+    [cleaned.artist, cleaned.title],
+    [artist, title],
+    [query.trueArtist, query.cleanTitle],
+  ]);
+  if (lyrics) lyrics.offsetMs = Math.round(offset * 1000);
+  return lyrics?.lines.length
+    ? { videoId: state.videoId, status: 'loaded', lyrics }
+    : { videoId: state.videoId, status: 'no_lyrics' };
+}
+
+const youtubeLyricsCoordinator = createYouTubeLyricsCoordinator({
+  search: loadYouTubeLyrics,
+  publish(message) {
+    const revision = currentYouTubeRevision(message.videoId);
+    if (message.status === 'loaded' && message.lyrics) {
+      currentYouTubeLyrics = withYouTubeRevision(message.lyrics, revision);
+      publishYouTubeLyricsStatus(message.videoId, 'loaded', null, revision);
+      sendYouTubeLyricsToExtension(currentYouTubeLyrics);
+      return;
+    }
+    const status = resolveYouTubeLyricsStatus(currentYouTubeLyrics, message, revision);
+    if (status !== 'loaded') currentYouTubeLyrics = null;
+    publishYouTubeLyricsStatus(message.videoId, status, status === 'loaded' ? null : message.error, revision);
+  },
+});
+
 // WebSocket 的 upgrade 不會經過 express middleware,同源守門要在這裡再擋一次 ——
 // 否則惡意網頁還是能連上來收播放狀態廣播 (你正在聽什麼)。靈動島用 C# ClientWebSocket,
 // 不帶 Origin,照常放行。
 function isYouTubeExtensionHandshake(info) {
   const origin = info.origin || info.req?.headers?.origin || '';
-  if (!/^chrome-extension:\/\/[a-p]{32}$/.test(origin)) return false;
+  const originIsFixed = YOUTUBE_EXTENSION_ID
+    ? origin === `chrome-extension://${YOUTUBE_EXTENSION_ID}`
+    : /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
+  if (!originIsFixed) return false;
   const protoHeader = info.req?.headers?.['sec-websocket-protocol'] || '';
   const protocols = protoHeader.split(',').map((s) => s.trim()).filter(Boolean);
   return protocols[0] === 'kanaric-youtube-v1' && tokenMatches(protocols[1], YOUTUBE_EXTENSION_TOKEN);
+}
+
+function sendYouTubeLyricsToExtension(lyrics) {
+  if (!lyrics || lyrics !== currentYouTubeLyrics) return false;
+  const latest = currentYouTubeExtensionState;
+  const revision = normalizeYouTubeRevision(lyrics.revision);
+  if (latest && (lyrics.videoId !== latest.videoId || revision !== latest.revision)) return false;
+  if (global.activeYouTubeExtension?.readyState !== 1) return false;
+  global.activeYouTubeExtension.send(JSON.stringify({
+    type: 'youtube_karaoke_lyrics', lyrics: withoutYouTubeRevision(lyrics),
+  }));
+  return true;
+}
+
+function sendYouTubeLyricsOptionsToExtension(message) {
+  if (!message || global.activeYouTubeExtension?.readyState !== 1) return false;
+  global.activeYouTubeExtension.send(JSON.stringify(message));
+  return true;
+}
+
+async function applyYouTubeLyricsOption(request, selection) {
+  const latest = currentYouTubeExtensionState;
+  if (!latest || latest.videoId !== request.videoId || latest.revision !== request.revision) return false;
+  const option = selection.job.options[selection.index];
+  if (!option) return false;
+  const { injected } = await saveManualLyrics(request.title, request.artist, option.lyrics);
+  const current = currentYouTubeExtensionState;
+  if (!current || current.videoId !== request.videoId || current.revision !== request.revision) return false;
+  const lyrics = buildYouTubeLyricsPayload(request.videoId, injected);
+  if (!lyrics) return false;
+  currentYouTubeLyrics = withYouTubeRevision(lyrics, request.revision);
+  publishYouTubeLyricsStatus(request.videoId, 'loaded', null, request.revision);
+  sendYouTubeLyricsToExtension(currentYouTubeLyrics);
+  return true;
+}
+
+function clearCurrentYouTubeLyrics() {
+  const videoId = currentYouTubeLyrics?.videoId || currentYouTubeExtensionState?.videoId;
+  if (!videoId) return false;
+  currentYouTubeLyrics = currentYouTubeLyrics?.videoId === videoId
+    ? { ...currentYouTubeLyrics, lines: [] }
+    : withYouTubeRevision({ videoId, offsetMs: 0, lines: [] }, currentYouTubeRevision(videoId));
+  sendYouTubeLyricsToExtension(currentYouTubeLyrics);
+  return true;
 }
 
 const wss = new WebSocketServer({
@@ -2663,6 +3188,9 @@ wss.on('connection', (ws) => {
       try { global.activeYouTubeExtension.close(4000, 'replaced'); } catch (e) {}
     }
     global.activeYouTubeExtension = ws;
+    sendYouTubeLyricsStatusToExtension(currentYouTubeLyricsStatus);
+    sendYouTubeLyricsToExtension(currentYouTubeLyrics);
+    replayPitchRelayStatuses();
     console.log('WebSocket client connected (YouTube Karaoke Extension)');
   } else {
     console.log('WebSocket client connected (Dynamic Island)');
@@ -2686,17 +3214,134 @@ wss.on('connection', (ws) => {
     try { msg = JSON.parse(raw); } catch (e) { return; }
     if (!msg) return;
     if (ws.isYouTubeExtension) {
+      if (msg.type === 'youtube_karaoke_state_reset') {
+        stopAllPitchRelays();
+        currentYouTubeExtensionState = null;
+        currentYouTubeLyrics = null;
+        currentYouTubeLyricsStatus = null;
+        youtubeLyricsCoordinator.resetActive();
+        broadcastToKaraoke({ type: 'youtube_karaoke_owner_lost' });
+        return;
+      }
       if (msg.type === 'youtube_karaoke_state') {
         const state = normalizeExtensionState(msg.state || msg);
+        const previousState = currentYouTubeExtensionState;
         if (!state) return;
+        if (previousState && (state.videoId !== previousState.videoId || state.revision !== previousState.revision)) {
+          stopAllPitchRelays();
+        }
+        const videoChanged = previousState && state.videoId !== previousState.videoId;
+        const cachedRevision = cachedYouTubeRevision();
+        const revisionAdvanced = !!((previousState && state.revision > previousState.revision)
+          || (!previousState && cachedRevision !== null && state.revision > cachedRevision));
+        const freshNavigation = revisionAdvanced || (videoChanged && state.state === 'loading');
+        if (currentYouTubeExtensionState && !freshNavigation
+          && (state.revision < currentYouTubeExtensionState.revision
+            || (state.revision === currentYouTubeExtensionState.revision
+              && state.videoId !== currentYouTubeExtensionState.videoId))) return;
+        if (revisionAdvanced) youtubeLyricsCoordinator.resetActive();
+        if (freshNavigation) {
+          if (revisionAdvanced && !videoChanged) {
+            currentYouTubeLyrics = null;
+            currentYouTubeLyricsStatus = null;
+          } else if (!currentYouTubeLyrics || currentYouTubeLyrics.videoId !== state.videoId) {
+            currentYouTubeLyrics = null;
+            currentYouTubeLyricsStatus = null;
+          }
+        }
+        const metadataChanged = previousState
+          && state.videoId === previousState.videoId
+          && state.revision === previousState.revision
+          && (state.title !== previousState.title || state.channel !== previousState.channel);
+        if (metadataChanged) {
+          currentYouTubeLyrics = null;
+          currentYouTubeLyricsStatus = null;
+        }
+        currentYouTubeExtensionState = state;
+        replayPitchRelayStatuses();
         broadcastToKaraoke({ type: 'youtube_karaoke_state', ...state });
+        if (!['ad', 'error'].includes(state.state) && state.title && state.channel
+          && !hasCurrentYouTubeLyrics(state)) {
+          youtubeLyricsCoordinator.request(state, { force: metadataChanged });
+        }
       }
+      if (msg.type === 'youtube_karaoke_search') {
+        const latest = currentYouTubeExtensionState;
+        if (!latest) return;
+        const request = normalizeKaraokeLyricsSearch(msg, latest);
+        if (!request) return;
+        youtubeLyricsCoordinator.request({ ...latest, title: request.title, channel: request.channel }, {
+          force: request.force === undefined ? true : request.force,
+        });
+      }
+      if (msg.type === 'youtube_karaoke_lyrics_options_request') {
+        const request = normalizeYouTubeLyricsOptionsRequest(msg);
+        const latest = currentYouTubeExtensionState;
+        if (!request || !latest || request.videoId !== latest.videoId || request.revision !== latest.revision) return;
+        const job = startOptionsJob({ title: request.title, artist: request.artist });
+        sendYouTubeLyricsOptionsToExtension(buildYouTubeLyricsOptionsMessage(job, request, job.status));
+        Promise.resolve(job.promise).then(() => {
+          const current = currentYouTubeExtensionState;
+          if (current?.videoId === request.videoId && current.revision === request.revision) {
+            sendYouTubeLyricsOptionsToExtension(buildYouTubeLyricsOptionsMessage(job, request, 'done'));
+          }
+        });
+      }
+      if (msg.type === 'youtube_karaoke_lyrics_option_select') {
+        const selectionRequest = normalizeYouTubeLyricsOptionSelect(msg);
+        const latest = currentYouTubeExtensionState;
+        const selection = selectionRequest && youtubeOptionSelections.get(selectionRequest.optionId);
+        if (!selectionRequest || !selection || !latest
+          || selectionRequest.videoId !== latest.videoId || selectionRequest.revision !== latest.revision
+          || selection.videoId !== latest.videoId || selection.revision !== latest.revision
+          || optionJobs.get(jobKey(selection.artist, selection.title)) !== selection.job) return;
+        applyYouTubeLyricsOption(selectionRequest, selection).catch(() => false).then((applied) => {
+          if (!applied && currentYouTubeExtensionState?.videoId === selectionRequest.videoId
+            && currentYouTubeExtensionState.revision === selectionRequest.revision) {
+            sendYouTubeLyricsOptionsToExtension(buildYouTubeLyricsOptionsMessage(
+              selection.job, selectionRequest, 'error', '套用備選歌詞失敗'));
+          }
+        });
+      }
+      return;
+    }
+    if (msg.type === 'youtube_karaoke_pitch_status' || msg.type === 'youtube_karaoke_pitch_frame') {
+      handleKaraokePitchRelay(ws, msg);
       return;
     }
     if (msg.type === 'youtube_karaoke_command') {
       const command = normalizeKaraokeCommand(msg.command);
       if (!command || !global.activeYouTubeExtension || global.activeYouTubeExtension.readyState !== 1) return;
       global.activeYouTubeExtension.send(JSON.stringify({ type: 'youtube_karaoke_command', command }));
+      return;
+    }
+    if (msg.type === 'youtube_karaoke_search') {
+      if (!ws.isKaraoke) return;
+      const latest = currentYouTubeExtensionState;
+      if (!latest) return;
+      const request = normalizeKaraokeLyricsSearch(msg, latest);
+      if (!request) return;
+      youtubeLyricsCoordinator.request({ ...latest, title: request.title, channel: request.channel }, {
+        force: request.force === undefined ? true : request.force,
+      });
+      return;
+    }
+    if (msg.type === 'youtube_karaoke_lyrics_prefetch') {
+      if (!ws.isKaraoke) return;
+      const request = normalizeKaraokeLyricsPrefetch(msg);
+      if (!request) return;
+      ws.send(JSON.stringify({
+        type: 'youtube_karaoke_lyrics_prefetch_status',
+        videoId: request.videoId,
+        status: 'searching',
+      }));
+      youtubeLyricsCoordinator.prefetch(request).then((result) => {
+        if (ws.readyState !== 1) return;
+        ws.send(JSON.stringify({
+          type: 'youtube_karaoke_lyrics_prefetch_status',
+          ...result,
+        }));
+      });
       return;
     }
     if (msg.type === 'game_active') {
@@ -2710,18 +3355,30 @@ wss.on('connection', (ws) => {
     }
     if (msg.type === 'karaoke_active') {
       const active = !!msg.active;
+      if (!active) stopPitchRelayForSocket(ws);
       if (ws.isKaraoke === active) return;
+      const wasKaraoke = ws.isKaraoke;
       ws.isKaraoke = active;
+      if (wasKaraoke && !active && !isKaraokeActive()) clearCurrentYouTubeLyrics();
       syncIslandHidden();
     }
   });
 
   ws.on('close', () => {
     console.log('WebSocket client disconnected');
-    if (ws.isYouTubeExtension && global.activeYouTubeExtension === ws) global.activeYouTubeExtension = null;
+    if (ws.isYouTubeExtension && global.activeYouTubeExtension === ws) {
+      stopAllPitchRelays();
+      global.activeYouTubeExtension = null;
+      currentYouTubeExtensionState = null;
+      broadcastToKaraoke({ type: 'youtube_karaoke_owner_lost' });
+    }
+    if (!ws.isYouTubeExtension) stopPitchRelayForSocket(ws);
+    const wasKaraoke = ws.isKaraoke;
+    ws.isKaraoke = false;
     // 那兩種頁直接關掉時,島要自己開回來 (猜歌還要解除遮蔽)
     if (ws.isGame) global.broadcast({ type: 'game_state', active: isGameActive() });
-    if (ws.isGame || ws.isKaraoke) syncIslandHidden();
+    if (wasKaraoke && !isKaraokeActive()) clearCurrentYouTubeLyrics();
+    if (ws.isGame || wasKaraoke) syncIslandHidden();
   });
 });
 
@@ -2808,3 +3465,5 @@ if (CLOUD) {
     });
   });
 }
+
+module.exports = { app, db, pitchTakeStore, server, wss };
