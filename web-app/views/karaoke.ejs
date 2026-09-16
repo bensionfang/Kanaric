@@ -5,117 +5,123 @@
     <div><h1>卡拉OK</h1></div>
 </div>
 
-<div id="karaoke-setup" class="glass-panel animate-fade-in">
-    <h2 class="k-guide-title">怎麼用</h2>
-    <ol class="k-steps">
-        <li><b>版面是字幕機不是歌詞頁</b>
-            <span>上下兩句等大、位置固定不捲動,唱到哪填到哪 (未唱白字、唱過紅字),
-                前奏/間奏會在下一句的左上角倒數,曲名與作詞作曲顯示在畫面上緣。</span></li>
-        <li><b>先在播放器放歌</b>
-            <span>Spotify、YouTube 都行,歌詞與位置照舊由 Kanaric 自己抓 ——
-                這一頁只是換一種顯示方式。</span></li>
-        <li><b>MV 背景會自動套用</b>
-            <span>每首歌自動配一支最像的 YouTube 影片鋪滿背景,<b>影片一律靜音</b>,聲音仍然來自播放器。
-                配錯的話把滑鼠移到畫面下緣叫出控制列,🎞 裡面可以換一支或整個取消 —— 換過就記住。</span></li>
-        <li><b>控制列可以拆成獨立小視窗</b>
-            <span>控制列上的 <b>獨立視窗</b> 會把整條遙控器搬到另一扇小視窗 ——
-                字幕機投在電視上、遙控器留在筆電這邊,調字幕早晚或換 MV 都不必動到主畫面。
-                再按一次 (或關掉那扇窗) 就收回來。</span></li>
-        <li><b>唱的時候可直接校正字幕</b>
-            <span>沿用「自訂快捷鍵」裡的歌詞早晚按鍵；預設 <b>←</b> 讓字幕提早、<b>→</b> 讓字幕延後，
-                每次 100ms，Kanaric 會替每首歌分開記住。</span></li>
-        <li><b>按「開始」會自動全螢幕</b>
-            <span>這首歌跳回開頭並開始播,期間靈動島先收起來。按 <b>ESC</b> 或控制列最右邊的
-                <b>退出</b> 回到這一頁,同時把播放暫停。</span></li>
-    </ol>
-    <div class="k-start-row">
-        <span id="k-now">目前沒有偵測到播放</span>
-        <button class="game-btn-primary" id="k-start" onclick="karaokeStart()">
-            <i class="fa-solid fa-play"></i> 開始
-        </button>
-    </div>
-</div>
-
 <div id="karaoke-stage">
-    <%# MV 背景:YouTube 的 iframe 由 karaoke-mv.js 動態插進來,沒挑 MV 時這裡是空的。
-        **刻意不蓋暗化層** —— 影片要保持原本的亮度,歌詞的可讀性靠自己的描邊 (見 style.css) %>
-    <div id="karaoke-mv"></div>
-
-    <%# 曲名/作詞作曲的資訊卡:貼在畫面上緣 (歌詞在下緣,兩者不重疊,所以可以同時出現)。
-        作詞/作曲來自歌詞裡的 #TITLE# 行,沒有那幾行就只剩上面兩行 %>
-    <div id="karaoke-intro" class="hidden">
-        <div id="ki-title"></div>
-        <div id="ki-artist"></div>
-        <div id="ki-credits"></div>
-    </div>
-
-    <%# 前奏/間奏倒數的五個點。**karaoke-mode.js 會把它塞進「即將唱的那一句」裡**
-        (絕對定位在該句的左上角,照 JOYSOUND),所以這裡只是它的出生地。
-        點的配色跟歌詞同一套:還沒到 = 白底黑框、走過去 = 紅底白框。 %>
-    <div id="karaoke-countin" class="hidden">
-        <span class="kdot"></span><span class="kdot"></span><span class="kdot"></span>
-        <span class="kdot"></span><span class="kdot"></span>
-    </div>
-
-    <div id="karaoke-lines"></div>
-
-    <%# 等待播放 / 找不到歌詞 / 歌詞沒有時間軸 %>
-    <div id="karaoke-status">
-        <i class="fa-solid fa-microphone-lines"></i>
-        <p>等待播放...</p>
-    </div>
-
-    <%# 這首歌沒有逐字時間 (只有行級 LRC):整句一起亮,標一下並給備選歌詞的入口 %>
-    <div id="karaoke-degraded" class="hidden">
-        <i class="fa-solid fa-circle-info"></i>
-        <span>無逐字資料,整句一起亮</span>
-        <button type="button" onclick="karaokeFindLyrics()">找別份歌詞</button>
-    </div>
-
+    <section id="karaoke-console-summary">
+        <span class="karaoke-console-kicker">目前歌曲</span>
+        <strong id="karaoke-console-title">尚未開始</strong>
+        <span id="karaoke-console-artist">先從下方點歌</span>
+        <span id="karaoke-console-state" role="status" aria-live="polite">等待選歌</span>
+    </section>
+    <section id="karaoke-pitch-panel" aria-label="音高紀錄" aria-live="polite">
+        <h2 class="karaoke-panel-heading">音高紀錄</h2>
+        <canvas id="karaoke-pitch-canvas" width="240" height="72" aria-label="最近 15 秒音高"></canvas>
+        <div class="karaoke-pitch-reading">
+            <strong id="karaoke-pitch-note">目前音名 —</strong>
+            <span id="karaoke-pitch-confidence">信心度 —</span>
+            <span id="karaoke-pitch-status">麥克風未啟用</span>
+        </div>
+        <button type="button" class="karaoke-pitch-enable" id="karaoke-pitch-enable">啟用音高紀錄</button>
+        <div id="karaoke-pitch-recording" class="karaoke-pitch-recording hidden" role="group" aria-live="polite">
+            <span id="karaoke-pitch-recording-status">乾聲錄音已停止</span>
+            <button type="button" id="karaoke-pitch-recording-save">儲存錄音</button>
+            <button type="button" id="karaoke-pitch-recording-discard">捨棄</button>
+        </div>
+        <button type="button" class="karaoke-pitch-history-open" id="karaoke-pitch-history-open">查看演唱紀錄</button>
+    </section>
+    <section id="karaoke-pitch-history" class="karaoke-pitch-history hidden" aria-live="polite">
+        <div class="karaoke-pitch-history-head">
+            <strong>演唱紀錄</strong>
+            <button type="button" id="karaoke-pitch-history-close" aria-label="關閉演唱紀錄">×</button>
+        </div>
+        <div id="karaoke-pitch-history-status" class="karaoke-pitch-history-status"></div>
+        <div id="karaoke-pitch-history-list"></div>
+        <div id="karaoke-pitch-history-detail" class="hidden">
+            <button type="button" id="karaoke-pitch-history-back">返回紀錄</button>
+            <canvas id="karaoke-pitch-history-canvas" width="480" height="220" aria-label="完整音高曲線"></canvas>
+            <div id="karaoke-pitch-history-summary"></div>
+        </div>
+    </section>
 </div>
 
-<%# MV 挑選面板:置中的浮層,不錨在按鈕上,所以不受播放列自動隱藏影響 %>
-<div id="karaoke-mv-mask" class="hidden" onclick="karaokeCloseMvPicker()"></div>
-<div id="karaoke-mv-picker" class="hidden">
-    <div class="kmv-head">
-        <span id="kmv-title">MV 背景</span>
-        <button type="button" class="kmv-close" onclick="karaokeCloseMvPicker()"><i class="fa-solid fa-xmark"></i></button>
+<div id="karaoke-song-picker" class="glass-panel animate-fade-in" data-pane="search">
+    <div class="karaoke-picker-tabs" role="tablist" aria-label="點歌與待唱">
+        <button type="button" id="karaoke-picker-tab-search" class="karaoke-picker-tab active" role="tab" aria-controls="karaoke-picker-results-pane" aria-selected="true">點歌</button>
+        <button type="button" id="karaoke-picker-tab-queue" class="karaoke-picker-tab" role="tab" aria-controls="karaoke-picker-queue-pane" aria-selected="false">待唱</button>
     </div>
-    <div id="kmv-list"></div>
-    <div class="kmv-foot">
-        <span class="kmv-note">影片會靜音播放,聲音仍然來自播放器</span>
-        <button type="button" id="kmv-clear" onclick="karaokeClearMv()">取消 MV</button>
+    <div class="karaoke-picker-layout">
+        <section class="karaoke-picker-search" aria-labelledby="karaoke-picker-heading">
+            <span class="k-picker-eyebrow">日 K 點歌</span>
+            <h2 id="karaoke-picker-heading" class="k-guide-title">選一首歌開始</h2>
+            <p class="k-youtube-note">輸入歌手與歌名，或貼上 YouTube 網址。播放由已配對的 Kanaric Chrome／Edge 擴充套件負責；關閉本頁後待播會清空。</p>
+            <div class="k-youtube-search">
+                <label id="youtube-karaoke-query-label" for="youtube-karaoke-query">搜尋 YouTube 影片</label>
+                <input id="youtube-karaoke-query" type="search" maxlength="200" placeholder="輸入歌手、歌名或貼上 YouTube 網址" autocomplete="off">
+                <button type="button" class="game-btn-primary" id="youtube-karaoke-search">搜尋</button>
+            </div>
+            <div id="youtube-karaoke-search-status" class="k-youtube-status" aria-live="polite"></div>
+        </section>
+        <section id="karaoke-picker-results-pane" class="karaoke-picker-results-pane" role="tabpanel" aria-labelledby="karaoke-picker-tab-search">
+            <div class="k-picker-section-heading">
+                <h3 id="karaoke-results-heading">搜尋結果</h3>
+                <span class="k-picker-section-note">點一下可靠影片即可開始；演唱中點結果加入待播</span>
+            </div>
+            <div id="youtube-karaoke-results" class="k-youtube-results"></div>
+            <div id="youtube-karaoke-selected" class="k-youtube-selected hidden">
+                <div>
+                    <strong id="youtube-karaoke-selected-title"></strong>
+                    <span id="youtube-karaoke-selected-channel"></span>
+                </div>
+                <div class="k-youtube-actions">
+                    <button type="button" class="game-btn-primary" id="youtube-karaoke-now">現在唱</button>
+                </div>
+            </div>
+        </section>
+        <section id="karaoke-picker-queue-pane" class="karaoke-picker-queue-pane" role="tabpanel" aria-labelledby="karaoke-picker-tab-queue">
+            <div class="k-picker-section-heading">
+                <h3 id="karaoke-queue-heading">現在唱／待唱</h3>
+                <span class="k-picker-section-note">本次待播</span>
+            </div>
+            <div id="youtube-karaoke-current" class="k-youtube-queue-section"></div>
+            <div id="youtube-karaoke-queue" class="k-youtube-queue-section"></div>
+        </section>
     </div>
+</div>
+
+<div id="youtube-karaoke-warning" class="toast hidden" role="status" aria-live="polite">
+    <i class="fa-solid fa-circle-exclamation"></i>
+    <span id="youtube-karaoke-warning-message"></span>
+    <button type="button" class="toast-action" id="youtube-karaoke-warning-continue">繼續播放</button>
+    <button type="button" class="toast-action" id="youtube-karaoke-warning-other">查看其他影片</button>
 </div>
 
 <%# 控制列 = 點歌機遙控器,**不是** footer 的 .player-bar (那是播放器版面:封面/歌名/隨機/
     循環/上一首/進度條,唱歌時一項都用不到)。播放列在這一頁整條 display:none,備選歌詞那顆
-    連同它的浮層 (絕對定位錨在 .lyrics-opt-wrap 上) 由 karaoke-mode.js 整塊搬進 #kbar-tools,
-    MV 的 🎞 由 karaoke-mv.js 插進同一格 (影片快慢那列則是下面的 #kbar-mv-row)。 %>
+    連同它的浮層 (絕對定位錨在 .lyrics-opt-wrap 上) 由 karaoke-mode.js 整塊搬進 #kbar-tools。 %>
 <div id="karaoke-bar">
+    <h2 class="kbar-panel-heading">播放控制</h2>
     <div class="kbar-group">
         <%# 大鈕帶文字標籤:全圖示的話「重唱」猜不出來。標籤已經是文字了,不再掛 data-tip %>
-        <button type="button" class="kbar-big" onclick="karaokeRestart()">
+        <button type="button" class="kbar-big" id="kbar-restart">
             <i class="fa-solid fa-rotate-left"></i><span>重唱</span>
         </button>
-        <button type="button" class="kbar-big" onclick="mediaAction('playpause')">
+        <button type="button" class="kbar-big" id="kbar-play">
             <i class="fa-solid fa-play" id="kbar-play-icon"></i><span id="kbar-play-label">播放</span>
         </button>
-        <button type="button" class="kbar-big" onclick="mediaAction('next')">
+        <button type="button" class="kbar-big" id="kbar-next">
             <i class="fa-solid fa-forward-step"></i><span>下一首</span>
         </button>
     </div>
     <div class="kbar-sep"></div>
-    <%# 工具鈕:備選歌詞 (karaoke-mode.js 搬進來) / 🎞 MV (karaoke-mv.js 插進來) / 重新載入。
+    <%# 工具鈕:備選歌詞 (karaoke-mode.js 搬進來) / 重新載入。
         三顆都是 .ctrl-btn,在這一頁由 CSS 撐成大鈕 —— 標籤直接用 [data-tip] 的 ::before
         就地變成常駐文字 (小綠點是 ::after,兩者不打架)。 %>
+    <h3 class="kbar-panel-subheading">歌詞工具</h3>
     <div class="kbar-group" id="kbar-tools">
-        <button type="button" class="ctrl-btn" onclick="reloadCurrentLyrics()" data-tip="重新載入"><i class="fa-solid fa-rotate"></i></button>
+        <button type="button" class="ctrl-btn" onclick="karaokeReloadLyrics()" data-tip="重新載入"><i class="fa-solid fa-rotate"></i></button>
     </div>
     <div class="kbar-sep"></div>
-    <%# 快/慢兩列:上字幕 (sync offset,跟首頁共用同一筆、存 DB)、下影片 (mv_choices.offset)。
-        兩列的「−」一律是「這個東西慢了,催快一點」—— 顯示的都是**延遲**,所以按 − 都變小。
-        影片那列只有真的挑了 MV 才顯示 (karaoke-mv.js 切 .hidden)。 %>
+    <%# 字幕 offset 沿用既有歌詞管線；YouTube seek/Key 都由 youtube_karaoke_command 處理。 %>
+    <h3 class="kbar-panel-subheading">同步與音調</h3>
     <div class="kbar-offsets">
         <div class="kbar-group kbar-offset">
             <span class="kbar-label">字幕</span>
@@ -123,19 +129,21 @@
             <span id="kbar-offset" onclick="karaokeResetOffset()" data-tip="點擊歸零">0 ms</span>
             <button type="button" onclick="karaokeAdjustOffset(0.1)" data-tip="字幕快了"><i class="fa-solid fa-plus"></i></button>
         </div>
-        <div class="kbar-group kbar-offset hidden" id="kbar-mv-row">
-            <span class="kbar-label">影片</span>
-            <button type="button" onclick="karaokeAdjustMvOffset(-0.5)" data-tip="影片慢了"><i class="fa-solid fa-minus"></i></button>
-            <span id="kbar-mv-offset" onclick="karaokeAdjustMvOffset(0)" data-tip="點擊歸零">0.0 s</span>
-            <button type="button" onclick="karaokeAdjustMvOffset(0.5)" data-tip="影片快了"><i class="fa-solid fa-plus"></i></button>
+        <div class="kbar-group kbar-key" id="kbar-key">
+            <span class="kbar-label">Key</span>
+            <button type="button" id="kbar-key-down">−</button>
+            <button type="button" id="kbar-key-value" aria-label="Key 歸零" title="點擊回原 Key">0</button>
+            <button type="button" id="kbar-key-up">+</button>
         </div>
     </div>
+    <div class="kbar-seek-wrap"><input type="range" id="kbar-seek" min="0" max="0" value="0" step="1" aria-label="YouTube 播放位置"></div>
     <div class="kbar-sep"></div>
     <%# 獨立視窗 / 退出 自成一欄,排在微調右邊。**退出不再是右上角那顆 ✕** —— 那個位置
         使用者看不到 (2026-08-10)。拆窗時這兩顆會跟著被搬進小視窗的第三列
         (karaoke-remote.js 的 layoutRow3:微調 → 收回 → 退出)。 %>
     <div class="kbar-group" id="kbar-extra">
         <button type="button" class="ctrl-btn" id="kbar-detach" onclick="karaokeToggleRemote()" data-tip="獨立視窗"><i class="fa-solid fa-up-right-from-square"></i></button>
+        <button type="button" class="ctrl-btn" id="karaoke-pin-expand" aria-label="釘選展開控台" aria-pressed="false" title="釘選展開控台" data-tip="釘選"><i class="fa-solid fa-thumbtack"></i></button>
         <button type="button" class="ctrl-btn" id="kbar-exit" onclick="karaokeExit()" data-tip="退出"><i class="fa-solid fa-right-from-bracket"></i></button>
     </div>
 </div>
@@ -144,9 +152,15 @@
 <script src="/js/lrc-parse.js?v=1"></script>
 <script src="/js/offset-sync.js?v=3"></script>
 <script src="/js/karaoke-slots.js?v=5"></script>
-<script src="/js/karaoke-mv.js?v=11"></script>
-<script src="/js/karaoke-mode.js?v=19"></script>
+<script src="/browser-query.js?v=1"></script>
+<script src="/js/youtube-karaoke-queue.js?v=1"></script>
+<script src="/js/youtube-karaoke.js?v=3"></script>
+<script src="/js/pitch-analysis.js?v=1"></script>
+<script src="/js/karaoke-pitch-recorder.js?v=1"></script>
+<script src="/js/karaoke-pitch-history.js?v=1"></script>
+<script src="/js/karaoke-mode.js?v=23"></script>
 <%# 一定要排在 karaoke-mode.js 之後:它的 DOMContentLoaded 先把 .lyrics-opt-wrap 搬進
     #kbar-tools,拆窗才會連備選歌詞的浮層一起帶走 %>
 <script src="/js/karaoke-remote.js?v=7"></script>
+<script>window.__youtubeKaraokeOnly = true;</script>
 <%- include('footer') %>

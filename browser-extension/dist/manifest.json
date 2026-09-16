@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Kanaric YouTube Karaoke",
+  "version": "0.1.0",
+  "description": "讓 Kanaric 控制一個專用 YouTube 歌唱分頁。",
+  "action": {
+    "default_title": "Kanaric YouTube Karaoke",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["youtube-content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["storage", "tabs", "activeTab", "scripting", "tabCapture", "offscreen"],
+  "host_permissions": ["https://www.youtube.com/*", "http://127.0.0.1/*"]
+}

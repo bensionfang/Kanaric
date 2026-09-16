@@ -127,7 +127,7 @@ async function run() {
   check(otherOrigin.status === 403, '設定 mobile_origin 後其他外部來源仍被擋', `${otherOrigin.status} (expected 403)`);
 
   // WebSocket 的 upgrade 不經過 express middleware,要另外擋 (否則惡意網頁能收播放狀態廣播)
-  const WebSocket = require('../web-app/node_modules/ws');
+  const WebSocket = require('ws');
   for (const [label, origin, wantOpen] of [
     ['靈動島 (無 Origin)', undefined, true],
     ['後台自己 (同源)', BASE, true],

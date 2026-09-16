@@ -1,15 +1,9 @@
 /*
- * 卡拉OK字幕機模式 (/karaoke) 的頁面邏輯。
+ * YouTube 卡拉OK App controller (/karaoke) 的頁面邏輯。
  *
- * 與首頁 (app.js) 的三個關鍵差別:
- *
- * 1. **沒有提前量。** 首頁的 WEB_APP_LYRICS_ADVANCE 是為了讓下一句早 0.25 秒上畫面,
- *    而字幕機的下一句本來就一直在畫面上。所以換行與填色吃同一個位置值,不必像首頁那樣
- *    在填色前再減回去 (那一減曾經漏掉,整首歌的填色比聽到的快了 0.25 秒都沒人發現)。
- * 2. **整份歌詞一次渲染,靠 class 切換顯示哪兩行。** karaokeSplit 把字元 span memo 在
- *    root.__kc 上且不還原,所以換行時重寫 innerHTML 必須手動作廢那個 memo (靈動島踩過)。
- *    每行各自一顆 .kline 就沒有這個問題,換行那一幀零重建。
- * 3. **控制列是自己一條 (#karaoke-bar),不是 footer 的播放列。** 播放列是播放器版面
+ * YouTube 頁面是唯一的播放與歌詞 stage；這裡只維護選曲、佇列、控制命令、
+ * lyric payload relay 與本機音高紀錄。控制列是自己一條 (#karaoke-bar),不是 footer 的播放列。
+ * 播放列是播放器版面
  *    (封面/歌名/隨機/循環/上一首/進度條),唱歌時一項都用不到;這一頁要的是點歌機遙控器:
  *    重唱、切歌、字幕早晚。播放列整條 display:none —— 舊版不敢這樣做是因為備選歌詞浮層
  *    position:absolute 錨在它裡面那顆按鈕上,解法是把整塊 .lyrics-opt-wrap 搬進
@@ -19,283 +13,1357 @@
 // window.onMediaMessage (WebSocket 的 handler 註冊點) 與備選歌詞那塊都在 footer 裡,
 // 立即執行的話是 `onMediaMessage is not a function`,整支腳本死掉、頁面空白。
 // app.js 也是同樣的理由把初始化放在 DOMContentLoaded 裡。
-document.addEventListener('DOMContentLoaded', function () {
+const KARAOKE_PITCH_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+const KARAOKE_PITCH_STATUSES = new Set(['enabled', 'stopped', 'error']);
+const KARAOKE_PITCH_MAX_TIME_MS = 86400000;
+
+function createKaraokePitchRelayStatus(videoId, revision, status, error = null) {
+    if (!KARAOKE_PITCH_VIDEO_ID_RE.test(videoId || '')
+        || !Number.isSafeInteger(revision) || revision < 1
+        || !KARAOKE_PITCH_STATUSES.has(status)) return null;
+    let normalizedError = null;
+    if (error !== null && error !== undefined) {
+        const code = typeof error === 'string' ? error : error?.code;
+        const message = typeof error === 'string' ? error : error?.message;
+        if (typeof error === 'object' && (Array.isArray(error) || Object.keys(error).length !== 2
+            || Object.keys(error).some((key) => !['code', 'message'].includes(key)))) return null;
+        if (typeof code !== 'string' || !code || code.length > 100
+            || typeof message !== 'string' || !message || message.length > 500) return null;
+        normalizedError = { code, message };
+    }
+    if (status === 'error' ? !normalizedError : normalizedError) return null;
+    return { type: 'youtube_karaoke_pitch_status', videoId, revision, status, error: normalizedError };
+}
+
+function createKaraokePitchRelayFrame(videoId, revision, frame) {
+    if (!KARAOKE_PITCH_VIDEO_ID_RE.test(videoId || '')
+        || !Number.isSafeInteger(revision) || revision < 1
+        || !frame || typeof frame !== 'object' || Array.isArray(frame)
+        || Object.keys(frame).length !== 7
+        || Object.keys(frame).some((key) => !['timeMs', 'hz', 'midi', 'cents', 'confidence', 'voiced', 'octaveWarning'].includes(key))
+        || !Number.isSafeInteger(frame.timeMs) || frame.timeMs < 0 || frame.timeMs > KARAOKE_PITCH_MAX_TIME_MS
+        || ![frame.hz, frame.midi, frame.cents].every((value) => value === null || typeof value === 'number' && Number.isFinite(value))
+        || (frame.hz !== null && (frame.hz < 0 || frame.hz > 5000))
+        || (frame.midi !== null && (frame.midi < 0 || frame.midi > 200))
+        || (frame.cents !== null && (frame.cents < -1200 || frame.cents > 1200))
+        || typeof frame.confidence !== 'number' || !Number.isFinite(frame.confidence)
+        || frame.confidence < 0 || frame.confidence > 1
+        || typeof frame.voiced !== 'boolean' || typeof frame.octaveWarning !== 'boolean') return null;
+    return {
+        type: 'youtube_karaoke_pitch_frame',
+        videoId,
+        revision,
+        frame: {
+            timeMs: frame.timeMs,
+            hz: frame.hz,
+            midi: frame.midi,
+            cents: frame.cents,
+            confidence: frame.confidence,
+            voiced: frame.voiced,
+            octaveWarning: frame.octaveWarning,
+        },
+    };
+}
+
+function createKaraokePitchLifecycle({
+    createRecorder,
+    createDryRecording = null,
+    getCurrentSong = () => null,
+    isStarted = () => true,
+    finishTake = null,
+    onRecordingReady = () => {},
+    onRecordingError = () => {},
+    onStateChange = () => {},
+} = {}) {
+    let recorder = null;
+    let dryRecording = null;
+    let pendingRecording = null;
+    let active = false;
+    let lifecyclePromise = Promise.resolve();
+    let startPromise = null;
+    let stopPromise = null;
+    let generation = 0;
+
+    function notifyState() {
+        try {
+            onStateChange({
+                enabled: active,
+                recorder,
+                dryRecording,
+                pendingRecording,
+            });
+        } catch {}
+    }
+
+    function enqueue(task) {
+        const next = lifecyclePromise.then(task, task);
+        lifecyclePromise = next.catch(() => {});
+        return next;
+    }
+
+    function errorCode(error, fallback = 'microphone-recording-failed') {
+        const named = error?.name || error?.message;
+        return typeof named === 'string' && named ? named : typeof error === 'string' && error ? error : fallback;
+    }
+
+    async function disposeRecorder(currentRecorder) {
+        await Promise.resolve(currentRecorder?.dispose?.()).catch(() => {});
+    }
+
+    async function startInternal(item, requestGeneration) {
+        if (requestGeneration !== generation) return { ok: false, error: 'cancelled' };
+        if (pendingRecording) return { ok: false, error: 'pending-recording' };
+        if (!isStarted() || !item) return { ok: false, error: 'song-required' };
+        let currentRecorder = null;
+        try {
+            currentRecorder = typeof createRecorder === 'function' ? createRecorder() : null;
+            if (!currentRecorder) return { ok: false, error: 'microphone-unavailable' };
+            recorder = currentRecorder;
+            notifyState();
+            const result = await currentRecorder.enable();
+            const currentSong = getCurrentSong?.() || item;
+            if (requestGeneration !== generation || recorder !== currentRecorder
+                || !isStarted() || currentSong?.videoId !== item?.videoId) {
+                await disposeRecorder(currentRecorder);
+                if (recorder === currentRecorder) {
+                    recorder = null;
+                    notifyState();
+                }
+                return { ok: false, error: 'cancelled' };
+            }
+            if (!result?.enabled) {
+                await disposeRecorder(currentRecorder);
+                if (recorder === currentRecorder) {
+                    recorder = null;
+                    notifyState();
+                }
+                return { ok: false, error: result?.error || 'microphone-denied' };
+            }
+            currentRecorder.startTake(item);
+            if (typeof createDryRecording === 'function') {
+                let candidate = null;
+                try {
+                    candidate = createDryRecording({
+                        onError: (error) => {
+                            try { onRecordingError(errorCode(error)); } catch {}
+                        },
+                    });
+                    const recording = candidate?.start?.(currentRecorder.getStream?.(), item);
+                    if (recording?.ok) dryRecording = candidate;
+                    else {
+                        try { onRecordingError(recording?.error || 'media-recorder-unavailable'); } catch {}
+                        await Promise.resolve(candidate?.discard?.()).catch(() => {});
+                    }
+                } catch (error) {
+                    try { onRecordingError(errorCode(error)); } catch {}
+                    await Promise.resolve(candidate?.discard?.()).catch(() => {});
+                }
+            }
+            active = true;
+            notifyState();
+            return { ok: true, status: 'enabled' };
+        } catch (error) {
+            await disposeRecorder(currentRecorder);
+            if (recorder === currentRecorder) {
+                recorder = null;
+                notifyState();
+            }
+            return { ok: false, error: errorCode(error, 'microphone-denied') };
+        }
+    }
+
+    function start(item = getCurrentSong?.()) {
+        if (active) return stop();
+        if (startPromise) return startPromise;
+        const requestGeneration = ++generation;
+        const pending = enqueue(() => startInternal(item, requestGeneration));
+        const guarded = pending.finally(() => {
+            if (startPromise === guarded) startPromise = null;
+        });
+        startPromise = guarded;
+        return guarded;
+    }
+
+    function stop({ discardRecording = false } = {}) {
+        const requestGeneration = ++generation;
+        if (stopPromise) return stopPromise;
+        const currentAtRequest = recorder;
+        const cancelPendingEnable = !active && currentAtRequest
+            ? disposeRecorder(currentAtRequest)
+            : Promise.resolve();
+        const pending = enqueue(async () => {
+            await cancelPendingEnable;
+            const currentRecorder = recorder;
+            const recordingController = dryRecording;
+            let take = null;
+            let saved = null;
+            let failure = null;
+            if (active && currentRecorder && typeof finishTake === 'function') {
+                try { take = finishTake(currentRecorder); } catch (error) { failure = errorCode(error, 'pitch-finish-failed'); }
+            }
+            try {
+                if (recordingController) {
+                    if (discardRecording) await recordingController.discard?.();
+                    else saved = await recordingController.stop?.();
+                }
+            } catch (error) {
+                failure = failure || errorCode(error, 'recording-stop-failed');
+            }
+            await disposeRecorder(currentRecorder);
+            if (saved && !discardRecording) {
+                if (!pendingRecording) {
+                    pendingRecording = { recording: saved, controller: recordingController };
+                    try { onRecordingReady(pendingRecording); } catch {}
+                } else {
+                    await Promise.resolve(recordingController?.discard?.()).catch(() => {});
+                }
+            }
+            recorder = null;
+            dryRecording = null;
+            active = false;
+            notifyState();
+            const result = { ok: !failure, status: 'stopped', take };
+            if (failure) result.error = failure;
+            if (saved && !discardRecording && !failure) result.recording = saved;
+            return result;
+        });
+        const guarded = pending.finally(() => {
+            if (stopPromise === guarded) stopPromise = null;
+        });
+        stopPromise = guarded;
+        void requestGeneration;
+        return guarded;
+    }
+
+    function savePending() {
+        const pending = pendingRecording;
+        if (!pending) return false;
+        try {
+            if (pending.controller?.download?.(pending.recording) === false) return false;
+            pendingRecording = null;
+            notifyState();
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    async function discardPending() {
+        const pending = pendingRecording;
+        if (!pending) return true;
+        pendingRecording = null;
+        try {
+            await pending.controller?.discard?.();
+            notifyState();
+            return true;
+        } catch {
+            pendingRecording = pending;
+            notifyState();
+            return false;
+        }
+    }
+
+    return {
+        start,
+        stop,
+        savePending,
+        discardPending,
+        pause: () => recorder?.pause?.(),
+        resume: () => recorder?.resume?.(),
+        setCurrentSong(item) {
+            if (!active || !recorder) return false;
+            recorder.startTake?.(item);
+            return true;
+        },
+        isEnabled: () => active,
+        getRecorder: () => recorder,
+        getDryRecording: () => dryRecording,
+        getPendingRecording: () => pendingRecording,
+    };
+}
+
+function createKaraokeCompactStartGate({
+    bridge,
+    schedule = setTimeout,
+    cancel = clearTimeout,
+    getSettings = () => ({}),
+    onStarted = () => {},
+    onError = () => {},
+} = {}) {
+    let pendingVideoId = null;
+    let activeVideoId = null;
+    let timer = null;
+    let generation = 0;
+
+    function settings() {
+        let value = {};
+        try { value = getSettings?.() || {}; } catch {}
+        return { compact: value.compact !== false, top: value.top !== false };
+    }
+
+    function clear() {
+        if (timer !== null) cancel(timer);
+        timer = null;
+        pendingVideoId = null;
+    }
+
+    function invalidate() {
+        generation += 1;
+        clear();
+        activeVideoId = null;
+    }
+
+    function launch(bounds = null) {
+        if (!pendingVideoId || typeof bridge?.startCollapsed !== 'function' || !settings().compact) return;
+        const requestGeneration = generation;
+        const videoId = pendingVideoId;
+        activeVideoId = videoId;
+        clear();
+        const options = { compact: true, top: settings().top };
+        if (bounds) options.ownerWindowBounds = bounds;
+        Promise.resolve(bridge.startCollapsed?.(options)).then((result) => {
+            if (requestGeneration !== generation || activeVideoId !== videoId) return;
+            if (result?.ok === false) {
+                activeVideoId = null;
+                void bridge.finish?.();
+                onError(result.error);
+            }
+            else onStarted(result);
+        }).catch(() => {
+            if (requestGeneration !== generation || activeVideoId !== videoId) return;
+            activeVideoId = null;
+            void bridge.finish?.();
+            onError('window-start-failed');
+        });
+    }
+
+    return {
+        arm(videoId) {
+            invalidate();
+            if (!bridge || typeof bridge.startCollapsed !== 'function' || !videoId || !settings().compact) return;
+            pendingVideoId = videoId;
+        },
+        onState(state) {
+            if (state?.videoId === activeVideoId && state.state === 'error') {
+                invalidate();
+                void bridge?.finish?.();
+                return;
+            }
+            if (!pendingVideoId || state?.videoId !== pendingVideoId
+                || !Number.isSafeInteger(state.revision) || state.revision < 0) return;
+            if (state.state === 'error') { invalidate(); return; }
+            if (!hasOwnerWindowBounds(state.ownerWindowBounds)) return;
+            launch(state.ownerWindowBounds);
+        },
+        finish() {
+            invalidate();
+            return bridge?.finish?.();
+        },
+    };
+}
+
+function hasOwnerWindowBounds(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value)
+        && Object.keys(value).length === 4
+        && Object.keys(value).every((key) => ['x', 'y', 'width', 'height'].includes(key))
+        && [value.x, value.y, value.width, value.height].every(Number.isSafeInteger)
+        && value.width >= 1 && value.width <= 32768
+        && value.height >= 1 && value.height <= 32768;
+}
+
+function createKaraokeWindowBlocker({ onBlocked = () => {}, onClear = () => {} } = {}) {
+    const reasons = new Set();
+
+    function set(blocked, reason = 'error') {
+        const wasBlocked = reasons.size > 0;
+        if (blocked) {
+            reasons.add(reason);
+            try { onBlocked(reasons); } catch {}
+            return true;
+        }
+        if (reason) reasons.delete(reason);
+        else reasons.clear();
+        if (wasBlocked && !reasons.size) {
+            try { onClear(); } catch {}
+        }
+        return reasons.size > 0;
+    }
+
+    return {
+        set,
+        clear: () => set(false, ''),
+        isBlocked: () => reasons.size > 0,
+        reasons: () => new Set(reasons),
+    };
+}
+
+function createKaraokeCollapseController({
+    bridge,
+    getState = () => ({}),
+    schedule = setTimeout,
+    cancel = clearTimeout,
+    onCollapsed = () => {},
+    onExpanded = () => {},
+    onError = () => {},
+} = {}) {
+    let timer = null;
+    let collapsed = false;
+    let pendingCollapse = null;
+    let pendingExpand = null;
+
+    function state() {
+        try { return getState?.() || {}; } catch { return { blockingError: true }; }
+    }
+
+    function clear() {
+        if (timer !== null) {
+            try { cancel(timer); } catch {}
+            timer = null;
+        }
+    }
+
+    function reportError(error, fallback) {
+        try { onError(error || fallback); } catch {}
+    }
+
+    function invoke(method, fallback, onSuccess, onFailure) {
+        let result;
+        try {
+            result = typeof bridge?.[method] === 'function' ? bridge[method]() : { ok: false, error: fallback };
+        } catch (error) {
+            return onFailure(error?.message || fallback);
+        }
+        const settle = (value) => {
+            if (value?.ok === false) return onFailure(value.error || fallback, value);
+            try { onSuccess(value); } catch {}
+            return value || { ok: true };
+        };
+        if (result && typeof result.then === 'function') {
+            return result.then(settle).catch((error) => onFailure(error?.message || fallback));
+        }
+        return settle(result);
+    }
+
+    function expand(force = false) {
+        clear();
+        if (pendingExpand) return pendingExpand.result;
+        if (pendingCollapse) {
+            pendingCollapse = null;
+            force = true;
+        }
+        if (!force && !collapsed) return { ok: true };
+        const operation = { result: null };
+        pendingExpand = operation;
+        const result = invoke('expand', 'window-expand-failed', (value) => {
+            if (pendingExpand !== operation) return;
+            pendingExpand = null;
+            collapsed = false;
+            try { onExpanded(value); } catch {}
+        }, (error) => {
+            if (pendingExpand !== operation) return { ok: false, error: error || 'window-expand-failed' };
+            pendingExpand = null;
+            reportError(error, 'window-expand-failed');
+            return { ok: false, error: error || 'window-expand-failed' };
+        });
+        operation.result = result;
+        return result;
+    }
+
+    function canCollapse() {
+        const current = state();
+        return Boolean(
+            bridge?.collapse
+            && !collapsed
+            && current.started !== false
+            && current.nativeStarted !== false
+            && current.compact !== false
+            && current.autoCollapse !== false
+            && !pendingExpand
+            && current.pinned !== true
+            && current.interacting !== true
+            && current.focused !== true
+            && current.blockingError !== true
+            && current.error !== true,
+        );
+    }
+
+    function collapse() {
+        if (pendingCollapse) return pendingCollapse.result;
+        if (!canCollapse()) return { ok: false, error: 'collapse-suppressed' };
+        const operation = { result: null };
+        pendingCollapse = operation;
+        const result = invoke('collapse', 'window-collapse-failed', (value) => {
+            if (pendingCollapse !== operation) return;
+            pendingCollapse = null;
+            collapsed = true;
+            try { onCollapsed(value); } catch {}
+        }, (error) => {
+            if (pendingCollapse !== operation) return { ok: false, error: error || 'window-collapse-failed' };
+            pendingCollapse = null;
+            reportError(error, 'window-collapse-failed');
+            // A failed native collapse must leave the renderer in the expanded state.
+            return expand(true);
+        });
+        operation.result = result;
+        return result;
+    }
+
+    function arm() {
+        clear();
+        if (!canCollapse()) return false;
+        try { timer = schedule(() => { timer = null; return collapse(); }, 3000); }
+        catch (error) { reportError(error?.message, 'collapse-timer-failed'); return false; }
+        return true;
+    }
+
+    function block() {
+        clear();
+        return collapsed || pendingCollapse ? expand(true) : { ok: true };
+    }
+
+    function finish() {
+        clear();
+        pendingCollapse = null;
+        pendingExpand = null;
+        if (collapsed) {
+            collapsed = false;
+            try { onExpanded(); } catch {}
+        }
+        return { ok: true };
+    }
+
+    function markCollapsed() {
+        clear();
+        pendingCollapse = null;
+        pendingExpand = null;
+        if (!collapsed) {
+            collapsed = true;
+            try { onCollapsed(); } catch {}
+        }
+        return { ok: true };
+    }
+
+    return {
+        arm,
+        clear,
+        collapse,
+        expand,
+        block,
+        finish,
+        markCollapsed,
+        isCollapsed: () => collapsed,
+    };
+}
+
+const YOUTUBE_LYRICS_PREFETCH_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+const KARAOKE_ACTIVE_STICKY_KEY = 'karaoke-active';
+
+function youtubeLyricsPrefetchIdentity(item) {
+    if (!item || !YOUTUBE_LYRICS_PREFETCH_VIDEO_ID_RE.test(item.videoId || '')) return null;
+    const title = typeof item.title === 'string' ? item.title.trim() : '';
+    const channel = typeof item.channel === 'string' ? item.channel.trim() : '';
+    if (!title || title.length > 200 || !channel || channel.length > 200) return null;
+    return `${item.videoId}\u0000${title}\u0000${channel}`;
+}
+
+function youtubeLyricsStatusLabel(status) {
+    return {
+        searching: '搜尋歌詞中',
+        loaded: '歌詞已載入',
+        no_lyrics: '找不到歌詞',
+        error: '歌詞查詢失敗',
+    }[status] || '等待歌詞';
+}
+
+function createYouTubeLyricsPrefetchController({
+    send = () => {},
+    onState = () => {},
+} = {}) {
+    const jobs = new Map();
+    const rows = new Map();
+
+    function emit(row, job) {
+        try {
+            const state = { queueId: row.queueId, identity: job.identity, videoId: job.videoId, status: job.status };
+            if (job.error) state.error = { code: job.error.code };
+            onState(state);
+        } catch {}
+    }
+
+    function prefetch(item) {
+        const identity = youtubeLyricsPrefetchIdentity(item);
+        if (!identity || !item.queueId) return false;
+        const row = { queueId: String(item.queueId), identity };
+        const previousRow = rows.get(row.queueId);
+        if (previousRow?.identity !== identity) rows.delete(row.queueId);
+        rows.set(row.queueId, row);
+        let job = jobs.get(identity);
+        if (job) {
+            emit(row, job);
+            return false;
+        }
+        job = {
+            identity,
+            videoId: item.videoId,
+            title: item.title.trim(),
+            channel: item.channel.trim(),
+            status: 'searching',
+            error: null,
+        };
+        jobs.set(identity, job);
+        emit(row, job);
+        try {
+            send({
+                type: 'youtube_karaoke_lyrics_prefetch',
+                videoId: job.videoId,
+                title: job.title,
+                channel: job.channel,
+            });
+        } catch {}
+        return true;
+    }
+
+    function remove(queueId) {
+        return rows.delete(String(queueId));
+    }
+
+    function receiveStatus(message) {
+        if (!message || !['youtube_karaoke_lyrics_prefetch_status', 'youtube_karaoke_lyrics_status'].includes(message.type)
+            || !YOUTUBE_LYRICS_PREFETCH_VIDEO_ID_RE.test(message.videoId || '')
+            || !['searching', 'loaded', 'no_lyrics', 'error'].includes(message.status)) return false;
+        const candidates = Array.from(jobs.values()).filter((job) => job.videoId === message.videoId);
+        if (!candidates.length) return false;
+        const errorCode = typeof message.error?.code === 'string'
+            && /^[A-Za-z0-9._-]{1,100}$/.test(message.error.code) ? message.error.code : null;
+        for (const job of candidates) {
+            job.status = message.status;
+            job.error = message.status === 'error' && errorCode ? { code: errorCode } : null;
+            for (const row of rows.values()) if (row.identity === job.identity) emit(row, job);
+        }
+        return true;
+    }
+
+    return {
+        prefetch,
+        remove,
+        receiveStatus,
+        status(item) {
+            const identity = youtubeLyricsPrefetchIdentity(item);
+            return identity ? jobs.get(identity)?.status || null : null;
+        },
+    };
+}
+
+if (typeof module === 'object' && module.exports) module.exports = {
+    createKaraokePitchLifecycle,
+    createKaraokePitchRelayStatus,
+    createKaraokePitchRelayFrame,
+    createKaraokeCompactStartGate,
+    createKaraokeWindowBlocker,
+    createKaraokeCollapseController,
+    createYouTubeLyricsPrefetchController,
+    youtubeLyricsPrefetchIdentity,
+};
+
+if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', function () {
     const stage = document.getElementById('karaoke-stage');
     if (!stage) return;
 
-    const linesEl = document.getElementById('karaoke-lines');
-    const statusEl = document.getElementById('karaoke-status');
-    const countEl = document.getElementById('karaoke-countin');
-    const degradedEl = document.getElementById('karaoke-degraded');
-    const dots = Array.from(countEl.querySelectorAll('.kdot'));
-    const introEl = document.getElementById('karaoke-intro');
-    const nowEl = document.getElementById('k-now');
+    // App 只負責要求 server 的 canonical producer 重新載入；歌詞 payload 與填色都在 owner tab。
+    let canonicalRefreshPending = false;
 
-    // ── 歌詞狀態 ──
-    let lines = [];
-    let unsynced = false;
-    let curIdx = -1;      // 正在唱的那一句 (填色的對象)
-    let topIdx = -1;      // 上槽
-    let botIdx = -1;      // 下槽
-    let firstTime = Infinity;   // 第一句真歌詞的時間 = 前奏結束 = 資訊卡收掉的時機
-    let fetchSeq = 0;
-    let fitRaf = 0;
-
-    // ── 播放狀態 (自己內插,理由同 app.js:廣播一秒才一則) ──
-    let pos = 0;
+    // ── YouTube Karaoke 狀態 ──
+    const youtube = window.youtubeKaraoke;
+    const queue = window.createYouTubeKaraokeQueue();
     let playing = false;
-    let lastServerPos = -1;
-    let lastFrame = performance.now();
+    let extensionState = { state: 'idle', videoId: '', positionMs: 0, durationMs: 0, keySemitones: 0, revision: 0 };
+    let commandId = 0;
+    let searchResults = [];
+    let selectedResult = null;
+    let searchGeneration = 0;
+    let currentItem = null;
+    let warnedCandidateVideoId = '';
+    let pendingCandidate = null;
     let syncOffset = 0;
     let title = '';
     let artist = '';
-    let lyricsKey = '';
+    const lyricStates = new Map();
+    const lyricPrefetch = createYouTubeLyricsPrefetchController({
+        send: (message) => window.sendMediaSocket(message),
+        onState: (state) => {
+            lyricStates.set(state.queueId, state);
+            renderQueue();
+        },
+    });
 
-    const m0 = window.__initialMedia;
-    if (m0 && m0.title) {
-        pos = m0.position || 0;
-        playing = !!m0.is_playing;
+    function requestCanonicalLyrics(force = false) {
+        if (!currentItem || extensionState.videoId !== currentItem.videoId
+            || !Number.isSafeInteger(extensionState.revision) || !title || !artist) {
+            canonicalRefreshPending = true;
+            return false;
+        }
+        canonicalRefreshPending = false;
+        const request = {
+            type: 'youtube_karaoke_search',
+            videoId: extensionState.videoId,
+            title,
+            channel: artist,
+            revision: extensionState.revision,
+            force: force === true,
+        };
+        window.sendMediaSocket(request);
+        return true;
     }
 
-    // ===================== 畫面 =====================
-
-    function setStatus(text, icon) {
-        if (!text) { statusEl.classList.add('hidden'); return; }
-        statusEl.classList.remove('hidden');
-        statusEl.innerHTML = '';
-        const i = document.createElement('i');
-        i.className = 'fa-solid ' + (icon || 'fa-microphone-lines');
-        const p = document.createElement('p');
-        p.textContent = text;
-        statusEl.append(i, p);
+    function prefetchQueuedLyrics(item) {
+        lyricPrefetch.prefetch(item);
     }
 
-    function renderLines() {
-        curIdx = topIdx = botIdx = -1;
-        const first = lines.find((l) => l.text && l.text !== '♫');
-        firstTime = first ? first.time : Infinity;
-        // 歌詞本體是 server 產好的 HTML (含 <ruby>),furigana_inject.py 在分詞前就逃逸過了。
-        // **每一行畫兩份**:.kbase 是未唱的白字黑框,.kover 是唱過的紅字白框、絕對定位疊在
-        // 上面,靠逐字的 clip-path 由左往右揭開 (見 style.css 那段說明)。
-        linesEl.innerHTML = lines.map((l, i) =>
-            `<div class="kline" id="kline-${i}"><span class="kbase">${l.text}</span><span class="kover">${l.text}</span></div>`).join('');
-        // **兩層都要切成一字一顆 span,連只負責顯示白字的 .kbase 也要。** 只切 .kover 的話
-        // 兩層在**換行的位置**會不一樣:Chrome 的禁則處理 (っ、小假名、標點不能在行首) 是看
-        // 同一個文字 run 判斷的,拆成獨立 span 之後那個判斷跟著變,斷行點就差一個字 ——
-        // 畫面上是「換行的那一列整個重影錯開」(2026-08-09 回報,docs/4.png)。
-        // 結構一模一樣就一定排得一樣,不必去猜瀏覽器怎麼斷。**時機也必須是同一刻** ——
-        // 先切一層、另一層等到唱到才切的話,中間那段時間照樣是錯開的。
-        linesEl.querySelectorAll('.kline').forEach((el) => {
-            karaokeSplit(el.querySelector('.kbase'));
-            karaokeSplit(el.querySelector('.kover'));
+    window.karaokeReloadLyrics = function () {
+        if (!currentItem) {
+            if (typeof noSongToast === 'function') noSongToast();
+            return false;
+        }
+        if (typeof showToast === 'function') showToast(`重新載入: ${currentItem.title}`, 'fa-solid fa-rotate', 2000);
+        canonicalRefreshPending = true;
+        return requestCanonicalLyrics(true);
+    };
+
+    // ── 本機音高紀錄 (只在使用者按鈕後啟用) ──
+    const pitchCanvas = document.getElementById('karaoke-pitch-canvas');
+    const pitchContext = pitchCanvas?.getContext?.('2d') || null;
+    const pitchNoteEl = document.getElementById('karaoke-pitch-note');
+    const pitchConfidenceEl = document.getElementById('karaoke-pitch-confidence');
+    const pitchStatusEl = document.getElementById('karaoke-pitch-status');
+    const pitchEnableEl = document.getElementById('karaoke-pitch-enable');
+    const pitchRecordingEl = document.getElementById('karaoke-pitch-recording');
+    const pitchRecordingStatusEl = document.getElementById('karaoke-pitch-recording-status');
+    const pitchRecordingSaveEl = document.getElementById('karaoke-pitch-recording-save');
+    const pitchRecordingDiscardEl = document.getElementById('karaoke-pitch-recording-discard');
+    const pitchNotes = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+    let pitchRecorder = null;
+    let dryRecording = null;
+    let pendingRecording = null;
+    let pitchLifecycle = null;
+    let pitchStopPromise = null;
+    let pitchEnabled = false;
+    let pitchFrames = [];
+    let lastPitchFrame = null;
+    let pitchTakeFinished = false;
+    const pitchHistory = window.KanaricPitchHistory?.createKaraokePitchHistory();
+    let pitchRelayIdentity = null;
+
+    function currentPitchRelayIdentity() {
+        if (!currentItem || extensionState.videoId !== currentItem.videoId
+            || !KARAOKE_PITCH_VIDEO_ID_RE.test(extensionState.videoId || '')
+            || !Number.isSafeInteger(extensionState.revision) || extensionState.revision < 1) return null;
+        return { videoId: extensionState.videoId, revision: extensionState.revision };
+    }
+
+    function sendPitchRelayStatus(status, error = null, identity = currentPitchRelayIdentity()) {
+        if (!identity) return false;
+        const message = createKaraokePitchRelayStatus(identity.videoId, identity.revision, status, error);
+        if (!message) return false;
+        window.sendMediaSocket(message);
+        return true;
+    }
+
+    function stopPitchRelay() {
+        const identity = pitchRelayIdentity;
+        pitchRelayIdentity = null;
+        return identity ? sendPitchRelayStatus('stopped', null, identity) : false;
+    }
+
+    function enablePitchRelay() {
+        const identity = currentPitchRelayIdentity();
+        if (!identity) return stopPitchRelay();
+        if (pitchRelayIdentity?.videoId === identity.videoId
+            && pitchRelayIdentity.revision === identity.revision) return true;
+        stopPitchRelay();
+        pitchRelayIdentity = identity;
+        return sendPitchRelayStatus('enabled', null, identity);
+    }
+
+    function sendPitchRelayError(error) {
+        const identity = currentPitchRelayIdentity();
+        if (!identity) return false;
+        const code = typeof error === 'string' && error ? error : error?.name || 'microphone-recording-failed';
+        const message = typeof error?.message === 'string' && error.message ? error.message : String(code);
+        return sendPitchRelayStatus('error', { code: String(code).slice(0, 100), message: String(message).slice(0, 500) }, identity);
+    }
+
+    function sendPitchRelayFrame(frame) {
+        if (!pitchEnabled || !pitchRelayIdentity) return false;
+        const identity = currentPitchRelayIdentity();
+        if (!identity || identity.videoId !== pitchRelayIdentity.videoId || identity.revision !== pitchRelayIdentity.revision) {
+            stopPitchRelay();
+            return false;
+        }
+        const message = createKaraokePitchRelayFrame(identity.videoId, identity.revision, frame);
+        if (!message) return false;
+        window.sendMediaSocket(message);
+        return true;
+    }
+
+    function formatPitchNote(midi) {
+        if (!Number.isFinite(Number(midi))) return '—';
+        const rounded = Math.round(Number(midi));
+        return `${pitchNotes[(rounded % 12 + 12) % 12]}${Math.floor(rounded / 12) - 1}`;
+    }
+
+    function drawPitchTrail() {
+        if (!pitchContext || !pitchCanvas) return;
+        const width = pitchCanvas.width;
+        const height = pitchCanvas.height;
+        const latest = Number(lastPitchFrame?.timeMs ?? extensionState.positionMs ?? 0);
+        const start = Math.max(0, latest - 15000);
+        pitchContext.clearRect(0, 0, width, height);
+        pitchContext.strokeStyle = 'rgba(255,255,255,0.12)';
+        pitchContext.lineWidth = 1;
+        for (const midi of [36, 60, 84]) {
+            const y = height - ((midi - 36) / 48) * height;
+            pitchContext.beginPath();
+            pitchContext.moveTo(0, y + 0.5);
+            pitchContext.lineTo(width, y + 0.5);
+            pitchContext.stroke();
+        }
+        pitchContext.strokeStyle = '#6ee7b7';
+        pitchContext.lineWidth = 2;
+        let previous = null;
+        for (const frame of pitchFrames) {
+            if (frame.timeMs < start || !frame.voiced || !Number.isFinite(Number(frame.midi))) {
+                previous = null;
+                continue;
+            }
+            const x = Math.max(0, Math.min(width, ((frame.timeMs - start) / 15000) * width));
+            const y = height - (Math.max(36, Math.min(84, frame.midi)) - 36) / 48 * height;
+            const gapMs = previous ? frame.timeMs - previous.timeMs : Infinity;
+            if (!previous || gapMs > 150 || gapMs < 0) pitchContext.moveTo(x, y);
+            else pitchContext.lineTo(x, y);
+            previous = frame;
+        }
+        pitchContext.stroke();
+    }
+
+    function paintPitchFrame(frame) {
+        if (!frame) return;
+        lastPitchFrame = frame;
+        pitchFrames.push(frame);
+        const cutoff = Number(frame.timeMs) - 15000;
+        pitchFrames = pitchFrames.filter((item) => item.timeMs >= cutoff);
+        if (pitchNoteEl) pitchNoteEl.textContent = `目前音名 ${frame.voiced ? formatPitchNote(frame.midi) : '—'}`;
+        if (pitchConfidenceEl) {
+            const confidence = Math.round(Math.max(0, Math.min(1, Number(frame.confidence) || 0)) * 100);
+            pitchConfidenceEl.textContent = `信心度 ${confidence}%`;
+        }
+        if (pitchStatusEl) {
+            pitchStatusEl.textContent = frame.octaveWarning || !frame.voiced
+                ? '麥克風已啟用 · 信心不足'
+                : '麥克風已啟用';
+        }
+        drawPitchTrail();
+    }
+
+    function setPitchPlaybackStatus(state) {
+        if (!pitchEnabled || !pitchStatusEl || state === 'playing') return;
+        const labels = { paused: '已暫停', buffering: '緩衝中', ad: '廣告播放中', error: '播放錯誤' };
+        pitchStatusEl.textContent = `麥克風已啟用 · ${labels[state] || '等待播放'}`;
+    }
+
+    function paintPitchRecording(message = '') {
+        const hasPending = Boolean(pendingRecording);
+        pitchRecordingEl?.classList.toggle('hidden', !hasPending);
+        if (pitchRecordingStatusEl) {
+            pitchRecordingStatusEl.textContent = message
+                || (hasPending ? '乾聲錄音已停止，請選擇儲存或捨棄' : '乾聲錄音已停止');
+        }
+        if (pitchRecordingSaveEl) pitchRecordingSaveEl.disabled = !hasPending;
+        if (pitchRecordingDiscardEl) pitchRecordingDiscardEl.disabled = !hasPending;
+    }
+
+    function finishPitchTake() {
+        if (!pitchRecorder || !pitchEnabled || !currentItem || pitchTakeFinished) return null;
+        pitchTakeFinished = true;
+        const result = pitchRecorder.finishTake();
+        if (result.status === 'insufficient-data' && pitchStatusEl) {
+            pitchStatusEl.textContent = '麥克風已啟用 · 資料不足';
+        }
+        if (result.status === 'ready') {
+            pitchHistory?.save({
+                videoId: currentItem.videoId,
+                title: currentItem.title,
+                channel: currentItem.channel || '',
+                keySemitones: Number(extensionState.keySemitones) || 0,
+                durationMs: Number(extensionState.durationMs) || Math.round(Number(currentItem.durationSec) * 1000) || 0,
+                frames: result.frames,
+            });
+        }
+        return result;
+    }
+
+    function createPitchRecorder() {
+        return window.KanaricPitchRecorder?.createKaraokePitchRecorder({
+            mediaDevices: navigator.mediaDevices,
+            AudioContext: window.AudioContext || window.webkitAudioContext,
+            getPlaybackState: () => extensionState,
+            onFrame: (frame) => {
+                paintPitchFrame(frame);
+                sendPitchRelayFrame(frame);
+            },
         });
-        // 沒有逐字時間的歌照樣進來,只是整句一起亮 —— 標一下,別讓人以為壞了
-        degradedEl.classList.toggle('hidden', unsynced || !lines.length || lines.some(l => l.words));
     }
 
-    function clearLyrics() {
-        lines = [];
-        linesEl.innerHTML = '';
-        curIdx = topIdx = botIdx = -1;
-        firstTime = Infinity;
-        degradedEl.classList.add('hidden');
-        introEl.classList.add('hidden');
-        document.getElementById('ki-credits').innerHTML = '';
+    function syncPitchLifecycle(state = {}) {
+        pitchRecorder = state.recorder || null;
+        dryRecording = state.dryRecording || null;
+        pendingRecording = state.pendingRecording || null;
+        pitchEnabled = state.enabled === true;
+        if (!pitchEnabled) pitchTakeFinished = false;
+        if (!pitchEnabled) stopPitchRelay();
+        paintPitchRecording();
     }
 
-    function setLyrics(lrc) {
-        const r = parseLrc(lrc);
-        lines = r.lines;
-        unsynced = r.unsynced;
-        setCredits(lrc);
-        if (unsynced) {
-            // 字幕機沒有時間軸就沒有意義:不硬撐,直接說清楚
-            clearLyrics();
-            setStatus('這份歌詞沒有時間軸,卡拉OK模式需要同步歌詞', 'fa-solid fa-clock');
+    pitchLifecycle = createKaraokePitchLifecycle({
+        createRecorder: createPitchRecorder,
+        createDryRecording: (options) => {
+            const factory = window.KanaricPitchRecorder?.createDryRecordingController;
+            return typeof factory === 'function' ? factory(options) : null;
+        },
+        getCurrentSong: () => currentItem,
+        isStarted: () => started,
+        finishTake: () => finishPitchTake(),
+        onRecordingError: (error) => {
+            sendPitchRelayError(error);
+            setWindowBlocked(true, 'microphone');
+            if (pitchStatusEl) pitchStatusEl.textContent = '本機錄音無法啟用';
+            return error;
+        },
+        onStateChange: syncPitchLifecycle,
+    });
+
+    function stopPitchRecording({ discardRecording = false } = {}) {
+        if (pitchStopPromise) return pitchStopPromise;
+        stopPitchRelay();
+        const operation = Promise.resolve(pitchLifecycle.stop({ discardRecording })).then((result) => {
+            syncPitchLifecycle();
+            if (pitchEnableEl) {
+                pitchEnableEl.disabled = false;
+                pitchEnableEl.textContent = '啟用音高紀錄';
+            }
+            if (pitchStatusEl) pitchStatusEl.textContent = '麥克風未啟用';
+            paintPitchRecording(result?.ok === false ? '本機錄音已停止，但部分資源未正常釋放' : '');
+            return result;
+        });
+        const guarded = operation.finally(() => {
+            if (pitchStopPromise === guarded) pitchStopPromise = null;
+        });
+        pitchStopPromise = guarded;
+        return guarded;
+    }
+
+    let pitchEnablePromise = null;
+    function enablePitchRecording() {
+        if (pitchEnablePromise) return pitchEnablePromise;
+        if (pitchEnabled) return stopPitchRecording();
+        if (pitchStopPromise) return pitchStopPromise;
+        if (pendingRecording) {
+            if (pitchStatusEl) pitchStatusEl.textContent = '請先儲存或捨棄上一段乾聲錄音';
+            return Promise.resolve({ ok: false, error: 'pending-recording' });
+        }
+        const item = currentItem;
+        const operation = Promise.resolve().then(() => {
+            if (!started || !currentItem) {
+                if (pitchStatusEl) pitchStatusEl.textContent = '請先選擇並開始歌曲';
+                return { ok: false, error: 'song-required' };
+            }
+            if (pitchEnableEl) pitchEnableEl.disabled = true;
+            if (pitchStatusEl) pitchStatusEl.textContent = '正在請求麥克風權限…';
+            pitchFrames = [];
+            lastPitchFrame = null;
+            pitchTakeFinished = false;
+            drawPitchTrail();
+            return pitchLifecycle.start(item);
+        }).then((result) => {
+            syncPitchLifecycle();
+            if (!result?.ok) {
+                sendPitchRelayError(result?.error || 'microphone-denied');
+                setWindowBlocked(true, 'microphone');
+                if (pitchStatusEl) pitchStatusEl.textContent = '麥克風無法啟用';
+                if (pitchEnableEl) {
+                    pitchEnableEl.disabled = false;
+                    pitchEnableEl.textContent = result?.error === 'pending-recording' ? '啟用音高紀錄' : '重試音高紀錄';
+                }
+                paintPitchRecording();
+                return result;
+            }
+            setWindowBlocked(false, 'microphone');
+            if (pitchEnableEl) {
+                pitchEnableEl.disabled = false;
+                pitchEnableEl.textContent = '停止音高紀錄';
+            }
+            if (pitchStatusEl) pitchStatusEl.textContent = '麥克風已啟用 · 等待播放';
+            enablePitchRelay();
+            paintPitchRecording();
+            return result;
+        });
+        const guarded = operation.finally(() => {
+            if (pitchEnablePromise === guarded) pitchEnablePromise = null;
+        });
+        pitchEnablePromise = guarded;
+        return guarded;
+    }
+
+    pitchEnableEl?.addEventListener('click', enablePitchRecording);
+    pitchRecordingSaveEl?.addEventListener('click', () => {
+        if (!pendingRecording) return;
+        if (pitchLifecycle.savePending() === false) {
+            paintPitchRecording('儲存錄音失敗，請再試一次');
             return;
         }
-        renderLines();
-        setStatus(lines.length ? '' : '找不到這首歌的歌詞', 'fa-solid fa-face-frown');
-    }
-
-    // 資訊卡的作詞/作曲:parseLrc 會把 #TITLE# 行整個丟掉 (那不是歌詞),所以在這裡自己
-    // 從原始字串撈。判準是「有冒號」—— 那正好把歌名行 (沒有冒號) 與版權聲明 (又長又沒冒號)
-    // 濾掉,剩下的就是 `作詞 : 某某` 這種製作人員列。
-    // **用 innerHTML 是對的**:那幾行已經被 furigana_inject.py 逃逸過 (它不會給 #TITLE# 列
-    // 標注音,所以裡面不會有標籤),textContent 反而會把 `&amp;` 原樣印出來。
-    function setCredits(lrc) {
-        const out = [];
-        for (const raw of String(lrc || '').split('\n')) {
-            const t = raw.replace(/\[\d+:\d+(?:[\.:]\d+)?\]/g, '').trim();
-            if (!t.startsWith('#TITLE#')) continue;
-            const s = t.slice(7).trim();
-            if (!s || s.length > 40 || !/[:：]/.test(s)) continue;
-            if (!out.includes(s)) out.push(s);
-            if (out.length >= 4) break;
+        syncPitchLifecycle();
+        paintPitchRecording();
+    });
+    pitchRecordingDiscardEl?.addEventListener('click', async () => {
+        if (!pendingRecording) return;
+        if (!await pitchLifecycle.discardPending()) {
+            paintPitchRecording('捨棄錄音失敗，請再試一次');
+            return;
         }
-        document.getElementById('ki-credits').innerHTML =
-            out.map((s) => `<div>${s}</div>`).join('');
+        syncPitchLifecycle();
+        paintPitchRecording();
+    });
+    paintPitchRecording();
+    window.addEventListener('pagehide', () => {
+        void stopPitchRecording({ discardRecording: true });
+    });
+    function sendYouTubeCommand(action, payload = {}) {
+        const command = youtube.createYouTubeCommand(action, payload, ++commandId);
+        if (!command) return false;
+        const { type, ...body } = command;
+        window.sendMediaSocket({ type, command: body });
+        return true;
     }
 
-    /**
-     * 倒數的五個點。**掛在「即將唱的那一句」的左上角** (JOYSOUND) 而不是畫面上的固定位置 ——
-     * 那一句在倒數期間本來就已經在畫面上了 (`karaokeSlots` 開口前 COUNT_IN 秒就把它提上來
-     * 當活躍句),點跟著它走才看得出「等一下要唱的是這一句」。
-     *
-     * 點的兩個狀態刻意跟歌詞同一套:還沒走到 = 白底黑框 (未唱)、走過去 = 紅底白框 (唱過),
-     * 所以倒數在視覺上就是「這一句的前導」。
-     */
-    function paintCountdown(cd) {
-        if (!cd) { countEl.classList.add('hidden'); return; }
-        const host = byIdx(curIdx);
-        if (host && countEl.parentNode !== host) host.appendChild(countEl);
-        countEl.classList.remove('hidden');
-        const gone = Math.round((1 - cd.remain / cd.total) * dots.length);
-        dots.forEach((d, i) => d.classList.toggle('on', i < gone));
+    function formatDuration(seconds) {
+        const value = Math.max(0, Math.round(Number(seconds) || 0));
+        return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`;
     }
 
-    const byIdx = (i) => (i >= 0 ? document.getElementById(`kline-${i}`) : null);
+    function setSearchStatus(text) {
+        const el = document.getElementById('youtube-karaoke-search-status');
+        if (el) el.textContent = text || '';
+    }
 
-    // 上下槽永遠維持同字級、各一列。先回到 CSS 最大字級量自然寬度,再一起縮到
-    // 較長那句放得下；只在換槽/縮放時做,不進逐幀填色的熱路徑。
-    function fitVisibleLines() {
-        fitRaf = 0;
-        const visible = [...new Set([byIdx(topIdx), byIdx(botIdx)].filter(Boolean))];
-        if (!visible.length) return;
+    function setPickerPane(pane) {
+        const next = pane === 'queue' ? 'queue' : 'search';
+        const picker = document.getElementById('karaoke-song-picker');
+        picker?.setAttribute('data-pane', next);
+        const searchTab = document.getElementById('karaoke-picker-tab-search');
+        const queueTab = document.getElementById('karaoke-picker-tab-queue');
+        searchTab?.classList.toggle('active', next === 'search');
+        queueTab?.classList.toggle('active', next === 'queue');
+        searchTab?.setAttribute('aria-selected', String(next === 'search'));
+        queueTab?.setAttribute('aria-selected', String(next === 'queue'));
+    }
 
-        visible.forEach((el) => { el.style.fontSize = ''; });
-        const maxPx = parseFloat(getComputedStyle(visible[0]).fontSize);
-        const measurements = visible.map((el) => {
-            const style = getComputedStyle(el);
-            const natural = el.querySelector('.kbase')?.scrollWidth || 0;
-            const available = linesEl.clientWidth
-                - (parseFloat(style.marginLeft) || 0)
-                - (parseFloat(style.marginRight) || 0);
-            return { natural, available };
+    function clearCandidateWarning() {
+        const banner = document.getElementById('youtube-karaoke-warning');
+        if (banner) banner.classList.add('hidden');
+    }
+
+    function showCandidateWarning(item) {
+        const banner = document.getElementById('youtube-karaoke-warning');
+        const message = document.getElementById('youtube-karaoke-warning-message');
+        if (!banner || !message || !item?.needsConfirmation) {
+            clearCandidateWarning();
+            return;
+        }
+        if (warnedCandidateVideoId === item.videoId) return;
+        warnedCandidateVideoId = item.videoId;
+        const delta = Number.isFinite(item.durationDeltaSec) ? Math.round(item.durationDeltaSec) : null;
+        message.textContent = item.official && delta !== null
+            ? `官方影片與歌曲時長相差 ${delta} 秒，可能是不同版本。`
+            : '找不到官方頻道候選，這支影片可能是不同版本。';
+        banner.classList.remove('hidden');
+    }
+
+    function pickResult(item, confirmed = false) {
+        const replaceCurrent = item?.replaceCurrent === true;
+        const candidate = youtube.toYouTubeQueueItem(item);
+        if (!candidate) return null;
+        if (replaceCurrent) candidate.replaceCurrent = true;
+        if (candidate.needsConfirmation && !confirmed) {
+            pendingCandidate = candidate;
+            selectSearchResult(candidate);
+            showCandidateWarning(candidate);
+            setSearchStatus('請確認影片版本後再開始');
+            return null;
+        }
+        pendingCandidate = null;
+        clearCandidateWarning();
+        if (!started || replaceCurrent) {
+            const result = window.karaokeStart(candidate);
+            return result === undefined ? candidate : result;
+        }
+        const queued = queue.snapshot().items.find((entry) => entry.videoId === candidate.videoId)
+            || queue.add(candidate);
+        if (!queued) return null;
+        prefetchQueuedLyrics(queued);
+        selectSearchResult(candidate);
+        renderQueue();
+        setSearchStatus('已加入本次待播');
+        return queued;
+    }
+
+    function selectSearchResult(item) {
+        selectedResult = item;
+        document.querySelectorAll('.k-youtube-result').forEach((el) => {
+            const key = item?.videoId || '';
+            el.classList.toggle('selected', el.dataset.resultKey === key);
         });
-        const size = karaokeFitFontSize(maxPx, measurements);
-        if (size === null) return;
-        visible.forEach((el) => { el.style.fontSize = `${size}px`; });
+        const wrap = document.getElementById('youtube-karaoke-selected');
+        const name = document.getElementById('youtube-karaoke-selected-title');
+        const channel = document.getElementById('youtube-karaoke-selected-channel');
+        if (!wrap || !name || !channel) return;
+        wrap.classList.toggle('hidden', !item || !started);
+        if (!item) return;
+        name.textContent = item.title;
+        channel.textContent = `${item.channel || '未知頻道'} · ${formatDuration(item.durationSec)}`;
+        const warning = !item.ok
+            ? '（此結果可能不是原版，請確認後再開始）'
+            : item.needsConfirmation ? '（播放時會提示確認版本）' : '';
+        setSearchStatus(warning);
     }
 
-    function scheduleLineFit() {
-        cancelAnimationFrame(fitRaf);
-        fitRaf = requestAnimationFrame(fitVisibleLines);
+    function renderSearchResults(items) {
+        const list = document.getElementById('youtube-karaoke-results');
+        if (!list) return;
+        list.textContent = '';
+        for (const item of items) {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'k-youtube-result';
+            row.dataset.videoId = item.videoId || '';
+            row.dataset.resultKey = item.videoId;
+            const info = document.createElement('span');
+            info.className = 'k-youtube-result-info';
+            const name = document.createElement('span');
+            name.className = 'k-youtube-result-title';
+            name.textContent = item.title;
+            const meta = document.createElement('span');
+            meta.className = 'k-youtube-result-meta';
+            const image = document.createElement('img');
+            image.src = item.thumb || '';
+            image.alt = '';
+            image.loading = 'lazy';
+            row.appendChild(image);
+            meta.textContent = `${item.channel || '未知頻道'} · ${formatDuration(item.durationSec)}`;
+            if (!item.ok) meta.textContent += ' · 可能不可靠';
+            info.append(name, meta);
+            row.appendChild(info);
+            row.addEventListener('click', () => pickResult(item));
+            list.appendChild(row);
+        }
+        selectSearchResult(youtube.pickInitialYouTubeResult(items));
     }
 
-    window.addEventListener('resize', scheduleLineFit);
-    document.addEventListener('fullscreenchange', scheduleLineFit);
-    document.fonts?.ready.then(scheduleLineFit);
-
-    // 填色只動疊在上面那層。**karaokeSplit / karaokePaint / karaokeClear 三個都要收到
-    // 同一顆元素** —— 它們把字元 span 與「正在唱的那顆」memo 在 root.__kc / root.__kcNow 上,
-    // 傳不同的根等於各記各的,清除就清不到。
-    const overOf = (el) => (el ? el.querySelector('.kover') : null);
-
-    /**
-     * 把 karaokeSlots 算出來的上下槽套到 DOM 上。
-     *
-     * **唱完的那句不清填色** —— 它會以 .done 留在原地紅著,直到這句唱到一半才被下一句
-     * 換掉 (見 karaoke-slots.js 檔頭第 4 點)。清除的時機因此是「一句**進場**時」:
-     * 往回 seek 會讓同一句再上場一次,那時舊的填色才要抹掉。
-     */
-    function applySlots(s) {
-        const prev = [topIdx, botIdx];
-        const now = [s.top, s.bottom];
-
-        for (const i of prev) {
-            if (i < 0 || now.includes(i)) continue;
-            const el = byIdx(i);
-            if (el) el.classList.remove('slot-top', 'slot-bottom', 'cur', 'done');
-        }
-        for (const i of now) {
-            if (i < 0 || prev.includes(i)) continue;
-            const over = overOf(byIdx(i));
-            if (over) karaokeClear(over);
-        }
-        const top = byIdx(s.top);
-        if (top) { top.classList.add('slot-top'); top.classList.remove('slot-bottom'); }
-        const bottom = byIdx(s.bottom);
-        if (bottom) { bottom.classList.add('slot-bottom'); bottom.classList.remove('slot-top'); }
-
-        if (s.index !== curIdx) {
-            const oldCur = byIdx(curIdx);
-            if (oldCur) oldCur.classList.remove('cur');
-            const cur = byIdx(s.index);
-            if (cur) cur.classList.add('cur');
-        }
-        // 另一槽放的是「剛唱完那句」時要繼續紅著 (.done);放的是預覽的下一句就不能紅。
-        // 序號比活躍句小 = 上一句 —— 往回 seek 的話它的填色已經被上面那圈 karaokeClear
-        // 抹掉了,紅字被 clip 到 0% 等於看不見,不會有殘影。
-        const other = s.top === s.index ? s.bottom : s.top;
-        for (const i of now) {
-            const el = byIdx(i);
-            if (el) el.classList.toggle('done', i === other && i >= 0 && i < s.index);
-        }
-        topIdx = s.top;
-        botIdx = s.bottom;
-        curIdx = s.index;
-        scheduleLineFit();
-    }
-
-    /**
-     * 曲名/作詞作曲的資訊卡。
-     *
-     * **它不再是一個獨佔的畫面,而是畫面上緣的一塊** (見 style.css) —— 歌詞照舊在下緣顯示,
-     * 兩者不重疊。改成這樣才解得開「前奏短的歌看不到資訊卡」與「卡片蓋住第一句連同倒數的點」
-     * 這組互相矛盾的需求。
-     *
-     * 因此顯示時間可以**至少 `INFO_MIN_SEC` 秒**:前奏只有一兩秒的歌一閃而過等於沒顯示,
-     * 而超出前奏繼續留著也不擋任何東西。
-     */
-    const INFO_MIN_SEC = 3;
-    function paintIntro(p) {
-        // firstTime 是 Infinity = 整份都是間奏行,那時沒有「前奏」可言,卡片會卡住不走
-        const show = lines.length > 0 && firstTime < Infinity
-            && p < Math.max(firstTime, INFO_MIN_SEC);
-        introEl.classList.toggle('hidden', !show);
-    }
-
-    function frame() {
-        const now = performance.now();
-        const dt = (now - lastFrame) / 1000;
-        lastFrame = now;
-        if (playing) pos += dt;
-
-        const p = pos - syncOffset;
-        if (lines.length) {
-            const s = karaokeSlots(lines, p, curIdx);
-            if (s.index !== curIdx || s.top !== topIdx || s.bottom !== botIdx) applySlots(s);
-            if (curIdx >= 0) {
-                const over = overOf(byIdx(curIdx));
-                // 位置沒有提前量,所以這裡不必再減回去 (見檔頭第 1 點)
-                if (over) karaokePaint(over, lines[curIdx].words, (p - lines[curIdx].time) * 1000);
+    function renderQueue() {
+        const currentEl = document.getElementById('youtube-karaoke-current');
+        const queueEl = document.getElementById('youtube-karaoke-queue');
+        if (!currentEl || !queueEl) return;
+        const view = youtube.buildQueueView(queue.snapshot());
+        currentEl.textContent = '';
+        queueEl.textContent = '';
+        if (view.current) {
+            const label = document.createElement('strong');
+            label.textContent = '現在唱';
+            const name = document.createElement('span');
+            name.textContent = `${view.current.title} · ${view.current.channel || '未知頻道'}`;
+            currentEl.append(label, name);
+            const status = lyricStates.get(view.current.queueId);
+            if (status && status.identity === youtubeLyricsPrefetchIdentity(view.current)) {
+                const statusEl = document.createElement('span');
+                statusEl.className = 'k-youtube-queue-status';
+                statusEl.textContent = youtubeLyricsStatusLabel(status.status);
+                currentEl.appendChild(statusEl);
             }
-            paintCountdown(s.countdown);
-        } else {
-            paintCountdown(null);
         }
-        paintIntro(p);
+        if (!view.upcoming.length) return;
+        const heading = document.createElement('strong');
+        heading.textContent = '待播';
+        queueEl.appendChild(heading);
+        view.upcoming.forEach((item) => {
+            const row = document.createElement('div');
+            row.className = 'k-youtube-queue-row';
+            row.dataset.queueId = item.queueId;
+            const name = document.createElement('span');
+            name.textContent = `${item.title} · ${item.channel || '未知頻道'}`;
+            const lyricState = lyricStates.get(item.queueId);
+            if (lyricState && lyricState.identity === youtubeLyricsPrefetchIdentity(item)) {
+                const status = document.createElement('span');
+                status.className = 'k-youtube-queue-status';
+                status.textContent = youtubeLyricsStatusLabel(lyricState.status);
+                name.appendChild(status);
+            }
+            const actions = document.createElement('span');
+            actions.className = 'k-youtube-queue-actions';
+            [['↑', -1, '上移'], ['↓', 1, '下移']].forEach(([text, delta, labelText]) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = text;
+                button.title = labelText;
+                button.addEventListener('click', () => { queue.move(item.queueId, delta); renderQueue(); });
+                actions.appendChild(button);
+            });
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.textContent = '刪除';
+            remove.addEventListener('click', () => removeQueueItem(item.queueId));
+            actions.appendChild(remove);
+            row.append(name, actions);
+            queueEl.appendChild(row);
+        });
+    }
 
-        mvSync(pos, playing);
-        requestAnimationFrame(frame);
+    function lyricQuery(item) {
+        const clean = window.cleanBrowserQuery
+            ? window.cleanBrowserQuery(item.title, item.channel)
+            : { title: item.title, artist: item.channel || '' };
+        return { title: clean.title || item.title, artist: clean.artist || item.channel || '' };
+    }
+
+    function paintConsoleSong(item) {
+        const consoleTitle = document.getElementById('karaoke-console-title');
+        const consoleArtist = document.getElementById('karaoke-console-artist');
+        if (consoleTitle) consoleTitle.textContent = item?.title || '尚未開始';
+        if (consoleArtist) consoleArtist.textContent = item?.channel || '先從下方點歌';
+    }
+
+    function paintConsoleState(state) {
+        const stateEl = document.getElementById('karaoke-console-state');
+        if (!stateEl) return;
+        const labels = {
+            loading: '載入中', playing: '播放中', paused: '已暫停', buffering: '緩衝中',
+            ad: '廣告播放中', ended: '已結束', error: '播放錯誤', idle: '等待選歌',
+            'app-disconnected': 'App 連線中斷，請等待重連或退出',
+            'owner-lost': 'YouTube 已斷線，請重新選歌或退出',
+        };
+        const label = labels[state?.state] || '等待選歌';
+        if (stateEl.textContent !== label) stateEl.textContent = label;
+    }
+
+    function setCurrentSong(item) {
+        const query = lyricQuery(item);
+        title = query.title;
+        artist = query.artist;
+        paintConsoleSong(item);
+        paintConsoleState({ state: 'loading' });
+        window.currentSongInfo = { title, artist };
+        window.currentMediaDuration = item.durationSec || 0;
+        document.getElementById('youtube-karaoke-current').dataset.videoId = item.videoId;
+        pitchFrames = [];
+        lastPitchFrame = null;
+        pitchTakeFinished = false;
+        drawPitchTrail();
+        if (pitchEnabled) pitchRecorder?.startTake(item);
+        pitchHistory?.load(item.videoId);
+        canonicalRefreshPending = true;
+        syncOffset = 0;
+        paintOffset();
+        const requestedOffsetKey = offsetSongKey(title, artist);
+        fetch(`/api/lyrics/offset?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`)
+            .then((r) => r.json()).then((o) => {
+                if (offsetSongKey(title, artist) !== requestedOffsetKey) return;
+                syncOffset = o.offset || 0;
+                paintOffset();
+                // canonical refresh
+                requestCanonicalLyrics();
+            }).catch(() => {});
+    }
+
+    function loadYouTubeItem(item, autoplay = true) {
+        if (!item) return;
+        if (typeof stopPitchRelay === 'function') stopPitchRelay();
+        warnedCandidateVideoId = '';
+        clearCandidateWarning();
+        const queued = queue.snapshot().items.find((x) => x.videoId === item.videoId)
+            || queue.add(item);
+        if (!queued) return;
+        prefetchQueuedLyrics(queued);
+        const candidate = Object.prototype.hasOwnProperty.call(item, 'official')
+            ? { ...queued, official: item.official, durationDeltaSec: item.durationDeltaSec ?? null,
+                needsConfirmation: item.needsConfirmation === true }
+            : queued;
+        queue.start(queued.queueId);
+        extensionState = youtube.startYouTubeSong(extensionState, candidate);
+        currentItem = queued;
+        if (candidate !== queued) currentItem = candidate;
+        playing = false;
+        paintPlayBtn();
+        setCurrentSong(queued);
+        renderQueue();
+        if (started) setPickerPane('queue');
+        sendYouTubeCommand('load', { videoId: queued.videoId, positionMs: 0 });
+        if (autoplay) sendYouTubeCommand('play');
+    }
+
+    function removeQueueItem(queueId) {
+        const removed = queue.remove(queueId);
+        if (!removed) return;
+        lyricPrefetch.remove(removed.queueId);
+        lyricStates.delete(removed.queueId);
+        if (currentItem?.queueId === removed.queueId) {
+            stopPitchRelay();
+            finishPitchTake();
+            sendYouTubeCommand('pause');
+            currentItem = null;
+            extensionState = { ...extensionState, state: 'idle', videoId: '', positionMs: 0, durationMs: 0 };
+            playing = false;
+            paintConsoleSong(null);
+            paintConsoleState(extensionState);
+        }
+        renderQueue();
+    }
+
+    function nextYouTubeSong() {
+        const item = queue.advance(queue.snapshot().revision);
+        if (item) loadYouTubeItem(item);
+    }
+
+    async function searchYouTube(queryOverride = '') {
+        const generation = ++searchGeneration;
+        const input = document.getElementById('youtube-karaoke-query');
+        const button = document.getElementById('youtube-karaoke-search');
+        const query = queryOverride || input?.value.trim() || '';
+        if (!query) {
+            setSearchStatus('請輸入歌手、歌名或 YouTube 網址');
+            if (generation === searchGeneration && button) button.disabled = false;
+            return;
+        }
+        setSearchStatus('搜尋中...');
+        if (button) button.disabled = true;
+        try {
+            const searchDuration = Math.round(window.currentMediaDuration || currentItem?.durationSec || 0);
+            const r = await fetch(`/api/mv/search?title=${encodeURIComponent(query)}`
+                + `&artist=&duration=${searchDuration}`);
+            if (generation !== searchGeneration) return;
+            const data = r.ok ? await r.json() : null;
+            if (generation !== searchGeneration) return;
+            searchResults = (data?.results || []).map(youtube.toYouTubeQueueItem).filter(Boolean);
+            renderSearchResults(searchResults);
+            if (!searchResults.length) setSearchStatus('找不到 YouTube 影片');
+            else if (!selectedResult) setSearchStatus('沒有可靠候選；請手動選擇後再開始');
+        } catch (e) {
+            if (generation !== searchGeneration) return;
+            searchResults = [];
+            renderSearchResults([]);
+            setSearchStatus('YouTube 搜尋失敗');
+        } finally {
+            if (generation === searchGeneration && button) button.disabled = false;
+        }
     }
 
     // ===================== 播放狀態 =====================
-
-    async function fetchLyrics(t, a) {
-        const seq = ++fetchSeq;
-        setStatus('正在搜尋歌詞...', 'fa-solid fa-spinner fa-spin');
-        try {
-            const r = await fetch(`/api/lyrics/fetch?title=${encodeURIComponent(t)}&artist=${encodeURIComponent(a || '')}`);
-            if (seq !== fetchSeq) return;
-            const d = r.ok ? await r.json() : null;
-            if (seq !== fetchSeq) return;
-            setLyrics(d && d.lyrics ? d.lyrics : '');
-        } catch (e) {
-            if (seq === fetchSeq) setStatus('歌詞抓取失敗', 'fa-solid fa-triangle-exclamation');
-        }
-    }
 
     // 播放鍵自己更新:common.js 的 syncPlayerBar 改的是播放列裡那顆,那條在這一頁是藏著的
     function paintPlayBtn() {
@@ -305,134 +1373,250 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('kbar-play-label').textContent = playing ? '暫停' : '播放';
     }
 
-    function applyState(d) {
-        playing = !!d.is_playing;
+    function applyState(message) {
+        const incoming = youtube.readYouTubeState(message);
+        if (!incoming || !incoming.videoId) return;
+        if (currentItem && incoming.videoId !== currentItem.videoId) return;
+        const next = youtube.applyYouTubeState(extensionState, incoming);
+        const recoveringWindow = windowBlocker.reasons().has('owner')
+            || windowBlocker.reasons().has('app-socket');
+        if (next.state !== 'error' && recoveringWindow && !nativeStarted) compactGate.arm(next.videoId);
+        if (next.state !== 'error') setWindowBlocked(false, 'owner');
+        setWindowBlocked(false, 'app-socket');
+        if (next === extensionState) { compactGate.onState(next); return; }
+        const blockWindow = typeof setWindowBlocked === 'function' ? setWindowBlocked : null;
+        if (next.state === 'error' || next.error) {
+            if (typeof nativeStarted !== 'undefined') nativeStarted = false;
+            if (typeof collapseController !== 'undefined') collapseController.finish?.();
+            blockWindow?.(true, 'playback');
+        } else blockWindow?.(false, 'playback');
+        compactGate.onState(next);
+        if (next.state === 'ended') {
+            stopPitchRelay();
+            paintConsoleState(next);
+            finishPitchTake();
+            const ended = youtube.handleYouTubeEnded(queue, extensionState, incoming);
+            extensionState = ended.state;
+            if (ended.item) {
+                currentItem = ended.item;
+                warnedCandidateVideoId = '';
+                clearCandidateWarning();
+                setCurrentSong(ended.item);
+                renderQueue();
+                sendYouTubeCommand('load', { videoId: ended.item.videoId, positionMs: 0 });
+                sendYouTubeCommand('play');
+                showCandidateWarning(ended.item);
+            } else {
+                playing = false;
+                paintPlayBtn();
+                paintConsoleSong(null);
+                paintConsoleState({ state: 'idle' });
+                setSearchStatus('本次待播完成');
+            }
+            return;
+        }
+        extensionState = next;
+        if (typeof pitchEnabled !== 'undefined' && pitchEnabled
+            && typeof enablePitchRelay === 'function') enablePitchRelay();
+        paintConsoleState(next);
+        playing = next.state === 'playing';
+        if (playing) showCandidateWarning(currentItem);
+        if (playing) pitchRecorder?.resume();
+        else pitchRecorder?.pause();
+        setPitchPlaybackStatus(next.state);
         paintPlayBtn();
 
-        if (d.title && d.position !== lastServerPos) {
-            const diff = d.position - pos;
-            // 換歌 / seek 就硬對齊,小漂移補一半 (同 app.js)
-            if (Math.abs(diff) > 1.5 || d.title !== title) pos = d.position;
-            else pos += diff * 0.5;
-            lastServerPos = d.position;
+        const seek = document.getElementById('kbar-seek');
+        if (seek) {
+            seek.max = String(next.durationMs || currentItem?.durationSec * 1000 || 0);
+            seek.value = String(next.positionMs || 0);
         }
-
-        if (d.title && (d.title !== title || d.artist !== artist)) {
-            title = d.title;
-            artist = d.artist || '';
-            window.currentMediaDuration = d.duration || 0;
-            clearLyrics();
-            // 曲名/歌手是播放器給的原始字串 (沒逃逸過) —— 這兩顆一定要 textContent
-            document.getElementById('ki-title').textContent = title;
-            document.getElementById('ki-artist').textContent = artist;
-            setStatus('正在搜尋歌詞...', 'fa-solid fa-spinner fa-spin');
-            const requestedOffsetKey = offsetSongKey(title, artist);
-            const applyLoadedOffset = (value) => {
-                if (offsetSongKey(title, artist) !== requestedOffsetKey) return;
-                syncOffset = value;
-                window.karaokePaintOffset();
-            };
-            fetch(`/api/lyrics/offset?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`)
-                .then(r => r.json()).then(o => applyLoadedOffset(o.offset || 0))
-                .catch(() => applyLoadedOffset(0));
-            // 還在介紹頁時不要載 MV (`karaokeStart` 會補一次)
-            if (started) karaokeOnSongChange(title, artist);
-            nowEl.textContent = `現在播放:${title}${artist ? ' — ' + artist : ''}`;
-        } else if (!d.title && title) {
-            title = artist = lyricsKey = '';
-            clearLyrics();
-            setStatus('等待播放...');
-            nowEl.textContent = '目前沒有偵測到播放';
-            if (started) karaokeOnSongChange('', '');
-        }
-        if (d.duration !== undefined) window.currentMediaDuration = d.duration;
-
-        // 名字定案 (iTunes 日文原名還原是非同步的) 才抓歌詞 —— 不等的話會用兩個不同的鍵
-        // 各抓一次,第二次多半撞來源限流拿到空的,把已經抓對的歌詞蓋掉
-        if (d.title && !d.resolving) {
-            const key = `${d.title}|||${d.artist || ''}`;
-            if (key !== lyricsKey) {
-                lyricsKey = key;
-                fetchLyrics(d.title, d.artist);
-            }
-        }
+        const keyValue = document.getElementById('kbar-key-value');
+        if (keyValue) keyValue.textContent = String(next.keySemitones || 0);
+        if (canonicalRefreshPending && !['ad', 'error'].includes(next.state)) requestCanonicalLyrics();
     }
 
     // ===================== 進入 / 離開 =====================
     //
-    // 這一頁是「介紹頁 + 字幕機」兩個畫面 (同 /game),`body.karaoke-page` 才是字幕機那個。
-    // **全螢幕只能在使用者手勢裡要**,所以 requestFullscreen 掛在「開始」那顆按鈕上,
-    // 不是進頁面就要 —— 沒有手勢瀏覽器一律拒絕 (而且會在 console 留一則沒人看的警告)。
+    // 這一頁是「完整點歌首頁 + 同頁控台」兩個布局，`body.karaoke-page` 只切換控台顯示。
     let started = false;
+    let nativeStarted = false;
+    let windowPinned = false;
+    let overBar = false;
+    let dragging = false;
 
-    window.karaokeStart = function () {
-        if (started) return;
+    function getWindowSettings() {
+        const configured = window.__karaokeWindowSettings || {};
+        return {
+            compact: configured.compact !== false,
+            top: configured.top !== false,
+            autoCollapse: configured.autoCollapse !== false,
+        };
+    }
+
+    function isWindowInteracting() {
+        const active = document.activeElement;
+        if (active && active !== document.body && active !== document.documentElement
+            && active.matches?.('input,textarea,select,[contenteditable="true"]')) return true;
+        if (overBar || dragging) return true;
+        const picker = document.getElementById('karaoke-song-picker');
+        const resultsPane = document.getElementById('karaoke-picker-results-pane');
+        const results = document.getElementById('youtube-karaoke-results');
+        const resultsVisible = results && results.children.length > 0
+            && (!picker || picker.dataset.pane !== 'queue')
+            && (!resultsPane || resultsPane.offsetParent !== null || resultsPane.getClientRects?.().length > 0);
+        if (resultsVisible) return true;
+        const queuePane = document.getElementById('karaoke-picker-queue-pane');
+        const queueVisible = picker?.dataset.pane === 'queue'
+            && queuePane
+            && (queuePane.offsetParent !== null || queuePane.getClientRects?.().length > 0);
+        if (queueVisible || active?.closest?.('.k-youtube-queue-row')) return true;
+        return Boolean(document.querySelector(
+            '#settings-menu.show, #settings-menu.open, .menu-sub.show,'
+            + ' .sel-pop, .lyrics-options-modal.show, [role="dialog"]:not(.hidden)',
+        ));
+    }
+
+    function setWindowBlocked(blocked, reason = 'error') {
+        return windowBlocker.set(blocked, reason);
+    }
+
+    let collapseController = null;
+    const windowBlocker = createKaraokeWindowBlocker({
+        onBlocked: () => collapseController?.block?.(),
+        onClear: () => { if (started) collapseController?.arm?.(); },
+    });
+    collapseController = createKaraokeCollapseController({
+        bridge: window.karaokeWindow,
+        getState: () => {
+            const settings = getWindowSettings();
+            return {
+                started,
+                nativeStarted,
+                compact: settings.compact,
+                autoCollapse: settings.autoCollapse,
+                pinned: windowPinned,
+                interacting: isWindowInteracting(),
+                blockingError: windowBlocker.isBlocked(),
+            };
+        },
+        onCollapsed: () => document.body.classList.add('karaoke-collapsed'),
+        onExpanded: () => document.body.classList.remove('karaoke-collapsed'),
+        onError: () => setSearchStatus('無法縮小 App 視窗；仍可在完整頁面繼續唱歌'),
+    });
+    window.karaokeWindow?.onHandleExpanded?.(() => { void collapseController.expand(true); });
+
+    const compactGate = createKaraokeCompactStartGate({
+        bridge: window.karaokeWindow,
+        getSettings: getWindowSettings,
+        onStarted: () => {
+            nativeStarted = true;
+            collapseController.markCollapsed?.();
+        },
+        onError: () => {
+            nativeStarted = false;
+            collapseController.clear();
+            setSearchStatus('無法縮小 App 視窗；仍可在完整頁面繼續唱歌');
+        },
+    });
+    window.addEventListener('pagehide', () => { void compactGate.finish(); });
+    window.addEventListener('karaoke-window-settings-changed', (event) => {
+        const settings = event.detail || getWindowSettings();
+        if (settings.autoCollapse === false) collapseController.clear();
+        else if (started && nativeStarted) collapseController.arm();
+    });
+
+    window.karaokeStart = function (item = selectedResult) {
+        if (started) {
+            if (!item || item.videoId === currentItem?.videoId) return;
+            document.body.classList.add('karaoke-page');
+            setWindowBlocked(false, 'owner');
+            compactGate.arm(item.videoId);
+            loadYouTubeItem(item);
+            showBar();
+            return;
+        }
+        if (!item) {
+            if (!item) setSearchStatus('請先選擇可靠的 YouTube 結果');
+            return;
+        }
         started = true;
+        if (window.__mediaSocketAlive === false) setWindowBlocked(true, 'app-socket');
         document.body.classList.add('karaoke-page');
-        // 字幕機本身就是一個更大的歌詞畫面,置頂的靈動島是重複的而且會蓋在上面 —— 請 server
+        setPickerPane('queue');
+        // 控台本身就是 App 的播放／音高／Queue 表面,置頂的靈動島是重複的而且會蓋在上面 —— 請 server
         // 把它收起來 (離開/重整/當掉時連線一斷,server 自己開回來,見 syncIslandHidden)。
         // **sticky**:連線斷掉重連後要重送,否則旗標歸零、島自己跑回來。
-        window.sendMediaSocket({ type: 'karaoke_active', active: true }, 'karaoke');
-        // 從頭唱:按下開始就把歌跳回 0 (= 控制列上的「重唱」),並且直接開始放。
-        // **`play` 不是 `playpause`** —— 後者是 toggle,本來就在播的話會被關掉。
-        // 本地狀態一起改,不然畫面要等下一則廣播 (一秒一則) 才開始跑。
-        karaokeRestart();
-        mediaAction('play');
-        playing = true;
-        paintPlayBtn();
-        // MV 刻意等到這裡才載:介紹頁背後偷偷播一支 YouTube 影片沒有道理
-        karaokeOnSongChange(title, artist);
-        document.documentElement.requestFullscreen?.().catch(() => {});
+        window.sendMediaSocket({ type: 'karaoke_active', active: true }, KARAOKE_ACTIVE_STICKY_KEY);
+        if (window.__mediaSocketAlive !== false) compactGate.arm(item.videoId);
+        loadYouTubeItem(item);
         showBar();
     };
 
-    window.karaokeExit = function () {
+    window.karaokeExit = async function () {
         if (!started) return;
+        warnedCandidateVideoId = '';
+        clearCandidateWarning();
         started = false;
-        // 離開就停:不停的話使用者已經回到介紹頁,背景還在放沒人唱的歌 (同 game.js 的 endGame)
-        mediaAction('pause');
+        nativeStarted = false;
+        windowBlocker.clear();
+        collapseController.finish();
+        // 離開就停:頁面不再唱歌,而 Queue 只存在這個頁面的記憶體裡。
+        const stopPromise = stopPitchRecording();
+        sendYouTubeCommand('pause');
         playing = false;
         paintPlayBtn();
         document.body.classList.remove('karaoke-page');
-        window.sendMediaSocket({ type: 'karaoke_active', active: false }, 'karaoke');
-        karaokeOnSongChange('', '');   // 停掉 MV
-        if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+        setPickerPane('search');
+        window.sendMediaSocket({ type: 'karaoke_active', active: false }, KARAOKE_ACTIVE_STICKY_KEY);
+        try { await stopPromise; } finally { await compactGate.finish(); }
     };
 
-    // 使用者用瀏覽器自己的方式離開全螢幕 (ESC、F11) 時也要回到介紹頁 ——
-    // 全螢幕的 ESC 被瀏覽器吃掉,下面那個 keydown 收不到。
-    // **控制列拆成獨立小視窗時不算** (karaoke-remote.js):開那扇窗本身就可能讓瀏覽器把
-    // 主視窗退出全螢幕,不擋的話「按獨立視窗」等於直接離開卡拉OK模式。而且那時使用者本來
-    // 就是刻意分兩個視窗在用,退出全螢幕不代表要收工。
-    document.addEventListener('fullscreenchange', () => {
-        if (window.karaokeRemoteIsOpen && window.karaokeRemoteIsOpen()) return;
-        if (!document.fullscreenElement && started) karaokeExit();
+    window.addEventListener('kanaric-media-socket-open', () => {
+        if (pitchEnabled) enablePitchRelay();
     });
-
+    window.addEventListener('kanaric-media-socket-close', () => {
+        stopPitchRelay();
+        void stopPitchRecording({ discardRecording: true });
+        if (started) {
+            setWindowBlocked(true, 'app-socket');
+            nativeStarted = false;
+            collapseController.finish();
+            void compactGate.finish();
+            paintConsoleState({ state: 'app-disconnected' });
+        }
+    });
     window.onMediaMessage((msg) => {
-        if (msg.type === 'media_state' || msg.type === 'init') {
-            if (msg.state) applyState(msg.state);
+        if (msg.type === 'youtube_karaoke_lyrics_prefetch_status'
+            || msg.type === 'youtube_karaoke_lyrics_status') {
+            lyricPrefetch.receiveStatus(msg);
             return;
         }
+        if (msg.type === 'youtube_karaoke_owner_lost') {
+            if (!started) return;
+            stopPitchRelay();
+            void stopPitchRecording({ discardRecording: true });
+            nativeStarted = false;
+            collapseController.finish();
+            setWindowBlocked(true, 'owner');
+            void compactGate.finish();
+            paintConsoleState({ state: 'owner-lost' });
+            return;
+        }
+        if (msg.type === 'youtube_karaoke_state') { applyState(msg); return; }
         const liveOffset = offsetFromMessage(offsetSongKey(title, artist), msg);
         if (liveOffset !== null) {
             syncOffset = liveOffset;
             paintOffset();
+            canonicalRefreshPending = true;
+            requestCanonicalLyrics();
             return;
         }
         if (msg.type !== 'lyrics_updated' || !msg.lyrics) return;
         if (msg.title !== title || msg.artist !== artist) return;
-        setLyrics(msg.lyrics);
+        canonicalRefreshPending = true;
+        requestCanonicalLyrics(true);
     });
-
-    // WebSocket 斷線時的保底 (同 app.js/common.js:連線活著就完全不打)
-    setInterval(async () => {
-        if (window.__mediaSocketAlive) return;
-        try {
-            const r = await fetch('/api/current-media', { cache: 'no-store' });
-            if (r.ok) applyState(await r.json());
-        } catch (e) {}
-    }, 2000);
 
     // ===================== 控制列 (#karaoke-bar) =====================
 
@@ -449,26 +1633,68 @@ document.addEventListener('DOMContentLoaded', function () {
         if (optBtn) optBtn.dataset.tip = '備選歌詞';
     }
 
-    // 頭出し:跳回 0 從頭唱。**本地 pos 也要一起歸零** —— 廣播一秒才一則,只送 seek 的話
-    // 畫面會停在原本那句、等下一則廣播才跳,看起來像沒反應 (同 karaokeStart)。
+    // 頭出し與播放控制都只送給 YouTube 擴充套件；畫面位置以它回傳的 state 為準。
     window.karaokeRestart = function () {
-        fetch('/api/seek', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ position: 0 }),
-        }).catch(() => {});
-        pos = 0;
-        lastServerPos = -1;
+        sendYouTubeCommand('seek', { positionMs: 0 });
     };
 
-    // 字幕早晚 = 這首歌的 sync offset,跟首頁共用同一筆 (存 DB)。填色與換行都吃
-    // frame() 的 `pos - syncOffset`,所以改完不必自己重畫,下一幀就對了。
+    function setYouTubeKey(value) {
+        const semitones = Math.max(-6, Math.min(6, Math.trunc(Number(value) || 0)));
+        if (!sendYouTubeCommand('set_key', { semitones })) return;
+        extensionState = youtube.applyYouTubeKey(extensionState, semitones);
+    }
+
+    document.getElementById('kbar-restart')?.addEventListener('click', window.karaokeRestart);
+    document.getElementById('kbar-play')?.addEventListener('click', () => {
+        sendYouTubeCommand(playing ? 'pause' : 'play');
+    });
+    document.getElementById('kbar-next')?.addEventListener('click', nextYouTubeSong);
+    document.getElementById('kbar-key-down')?.addEventListener('click', () => setYouTubeKey((extensionState.keySemitones || 0) - 1));
+    document.getElementById('kbar-key-value')?.addEventListener('click', () => setYouTubeKey(0));
+    document.getElementById('kbar-key-up')?.addEventListener('click', () => setYouTubeKey((extensionState.keySemitones || 0) + 1));
+    document.getElementById('kbar-seek')?.addEventListener('change', (e) => {
+        sendYouTubeCommand('seek', { positionMs: Number(e.target.value) });
+    });
+
+    const searchButton = document.getElementById('youtube-karaoke-search');
+    searchButton?.addEventListener('click', () => searchYouTube());
+    const searchInput = document.getElementById('youtube-karaoke-query');
+    searchInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') searchYouTube();
+    });
+    document.getElementById('karaoke-picker-tab-search')?.addEventListener('click', () => setPickerPane('search'));
+    document.getElementById('karaoke-picker-tab-queue')?.addEventListener('click', () => setPickerPane('queue'));
+    document.getElementById('youtube-karaoke-now')?.addEventListener('click', () => {
+        if (!selectedResult) return;
+        if (started) pickResult({ ...selectedResult, replaceCurrent: true });
+        else pickResult(selectedResult);
+    });
+    document.getElementById('youtube-karaoke-warning-continue')?.addEventListener('click', () => {
+        const candidate = pendingCandidate;
+        pendingCandidate = null;
+        if (candidate) pickResult(candidate, true);
+        else clearCandidateWarning();
+    });
+    document.getElementById('youtube-karaoke-warning-other')?.addEventListener('click', () => {
+        pendingCandidate = null;
+        warnedCandidateVideoId = '';
+        clearCandidateWarning();
+        selectSearchResult(null);
+        setSearchStatus('目前仍在播放；請選擇其他影片');
+        document.getElementById('youtube-karaoke-query')?.focus();
+    });
+    renderQueue();
+
+    // 字幕早晚 = 這首歌的 sync offset,跟首頁共用同一筆 (存 DB)。每次調整都同步給 owner。
     const offsetEl = document.getElementById('kbar-offset');
     const saveOffsetLater = createOffsetSaver((payload) => {
         fetch('/api/lyrics/offset', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({ ...payload,
+                ...(currentItem && extensionState.videoId === currentItem.videoId
+                    && Number.isSafeInteger(extensionState.revision)
+                    ? { videoId: extensionState.videoId, revision: extensionState.revision } : {}) }),
             keepalive: true,
         }).catch(() => {});
     });
@@ -487,12 +1713,16 @@ document.addEventListener('DOMContentLoaded', function () {
     window.karaokeAdjustOffset = function (delta) {
         syncOffset = Math.round((syncOffset + delta) * 10) / 10;   // 0.1 的浮點殘渣
         paintOffset();
+        canonicalRefreshPending = true;
+        requestCanonicalLyrics();
         saveOffset();
     };
 
     window.karaokeResetOffset = function () {
         syncOffset = 0;
         paintOffset();
+        canonicalRefreshPending = true;
+        requestCanonicalLyrics();
         saveOffset();
     };
 
@@ -509,32 +1739,44 @@ document.addEventListener('DOMContentLoaded', function () {
     window.karaokeOffsetKeydown = offsetKeydown;
     document.addEventListener('keydown', offsetKeydown);
 
-    let barTimer = null;
-    let overBar = false;
-
-    function barPinned() {
-        if (overBar) return true;
-        const opt = document.getElementById('lyrics-options-modal');
-        if (opt && opt.classList.contains('show')) return true;
-        return !document.getElementById('karaoke-mv-picker').classList.contains('hidden');
-    }
-
     function showBar() {
         document.body.classList.add('bar-visible');
-        clearTimeout(barTimer);
-        barTimer = setTimeout(() => {
-            if (barPinned()) { showBar(); return; }
-            document.body.classList.remove('bar-visible');
-        }, 3000);
+        if (started && nativeStarted) collapseController.arm();
     }
     window.karaokeShowBar = showBar;
 
     document.addEventListener('mousemove', showBar);
     const bar = document.getElementById('karaoke-bar');
     if (bar) {
-        bar.addEventListener('mouseenter', () => { overBar = true; });
-        bar.addEventListener('mouseleave', () => { overBar = false; });
+        bar.addEventListener('mouseenter', () => { overBar = true; collapseController.clear(); });
+        bar.addEventListener('mouseleave', () => { overBar = false; showBar(); });
     }
+
+    const pin = document.getElementById('karaoke-pin-expand');
+    pin?.addEventListener('click', () => {
+        windowPinned = !windowPinned;
+        pin.setAttribute('aria-pressed', String(windowPinned));
+        pin.classList.toggle('active', windowPinned);
+        if (windowPinned) collapseController.expand();
+        else showBar();
+    });
+
+    document.addEventListener('focusin', () => {
+        if (started) collapseController.clear();
+    });
+    document.addEventListener('focusout', () => {
+        if (started) showBar();
+    });
+    const dragRegion = document.querySelector('.win-drag');
+    dragRegion?.addEventListener('pointerdown', () => {
+        dragging = true;
+        collapseController.clear();
+    });
+    window.addEventListener('pointerup', () => {
+        if (!dragging) return;
+        dragging = false;
+        showBar();
+    });
     showBar();
 
     // ESC 離開。浮層開著時先讓它們吃掉這一下 (備選歌詞的浮層自己有 ESC handler)
@@ -542,10 +1784,6 @@ document.addEventListener('DOMContentLoaded', function () {
         if (e.key !== 'Escape' || !started) return;
         const opt = document.getElementById('lyrics-options-modal');
         if (opt && opt.classList.contains('show')) return;
-        if (!document.getElementById('karaoke-mv-picker').classList.contains('hidden')) {
-            karaokeCloseMvPicker();
-            return;
-        }
         karaokeExit();
     });
 
@@ -555,5 +1793,4 @@ document.addEventListener('DOMContentLoaded', function () {
         searchLyricsOptions();
     };
 
-    requestAnimationFrame(frame);
 });

@@ -27,9 +27,14 @@ const DB = path.join(TMP, 'test.db');
 process.env.DB_PATH = DB;
 process.env.DATA_DIR = TMP;
 process.env.LYRICS_SETTINGS_PATH = SETTINGS;
-fs.writeFileSync(SETTINGS, JSON.stringify({ font_size: 41, track_history: true }), 'utf8');
+fs.writeFileSync(SETTINGS, JSON.stringify({
+  font_size: 41, track_history: true,
+  karaoke_compact_on_start: false,
+  karaoke_always_on_top: false,
+  karaoke_auto_collapse: false,
+}), 'utf8');
 
-const sqlite3 = require('../web-app/node_modules/sqlite3');
+const sqlite3 = require('sqlite3');
 require('../web-app/server.js');
 
 const BASE = `http://localhost:${PORT}`;
@@ -53,6 +58,8 @@ const openRO = (file) => new Promise((resolve, reject) => {
 });
 const get = (d, sql) => new Promise((resolve, reject) =>
   d.get(sql, [], (e, row) => (e ? reject(e) : resolve(row))));
+const all = (d, sql) => new Promise((resolve, reject) =>
+  d.all(sql, [], (e, rows) => (e ? reject(e) : resolve(rows))));
 const run = (d, sql) => new Promise((resolve, reject) =>
   d.run(sql, [], (e) => (e ? reject(e) : resolve())));
 
@@ -61,6 +68,7 @@ async function waitForTables() {
     try {
       const d = await openRO(DB);
       await get(d, 'SELECT COUNT(*) AS n FROM word_corrections');
+      await get(d, 'SELECT COUNT(*) AS n FROM karaoke_pitch_takes');
       d.close();
       return true;
     } catch { await sleep(100); }
@@ -73,6 +81,11 @@ async function run_() {
   const w = new sqlite3.Database(DB);
   await run(w, `INSERT OR REPLACE INTO word_corrections VALUES ('テスト','曲','私','わたし')`);
   await run(w, `INSERT OR REPLACE INTO cache VALUES ('テスト','曲','[00:01.00]歌詞')`);
+  await run(w, `INSERT INTO karaoke_pitch_takes
+    (video_id,title,channel,key_semitones,duration_ms,frame_count,voiced_ratio,
+     lowest_midi,highest_midi,comfortable_low_midi,comfortable_high_midi,frames)
+    VALUES ('abcdefghijk','備份歌曲','頻道',-2,10000,20,0.2,60,64,60,64,
+      '${JSON.stringify(Array.from({ length: 20 }, (_, i) => [i * 100, 6000, 800]))}')`);
   await new Promise((r) => w.close(r));
 
   // ── 1. 備份 ──
@@ -93,7 +106,18 @@ async function run_() {
   check(metaApp && metaApp.value === 'Kanaric', '備份帶了識別用的 meta');
   const metaSettings = await get(b, `SELECT value FROM _backup_meta WHERE key='settings'`);
   check(metaSettings && JSON.parse(metaSettings.value).font_size === 41, 'settings.json 有一起進備份');
+  const backedKaraokeSettings = metaSettings && JSON.parse(metaSettings.value);
+  check(backedKaraokeSettings && backedKaraokeSettings.karaoke_compact_on_start === false,
+    '備份帶走開始唱時縮小設定');
+  check(backedKaraokeSettings && backedKaraokeSettings.karaoke_always_on_top === false,
+    '備份帶走緊湊時置頂設定');
+  check(backedKaraokeSettings && backedKaraokeSettings.karaoke_auto_collapse === false,
+    '備份帶走閒置後收合設定');
   check(!/api|key|secret/i.test(metaSettings.value), '備份的 settings 裡沒有 key 欄位');
+  const pitch = await get(b, `SELECT frames FROM karaoke_pitch_takes WHERE video_id='abcdefghijk'`);
+  check(pitch && JSON.parse(pitch.frames).length === 20, '備份帶走逐字音高紀錄');
+  const pitchColumns = await all(b, 'PRAGMA table_info(karaoke_pitch_takes)');
+  check(pitchColumns.every(column => !/audio|pcm|fft/i.test(column.name)), '音高表沒有保存 raw audio/PCM/FFT');
   b.close();
 
   // secrets.json 是獨立檔案,備份是單一 .db —— 結構上就帶不到,這裡確認它真的沒被塞進去
@@ -124,10 +148,21 @@ async function run_() {
   d2.close();
   check(still.n === 1, '被拒的還原沒有動到現有資料', String(still.n));
 
+  const cleared = await fetch(BASE + '/api/db-clear', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target: 'lyrics' })
+  });
+  check(cleared.ok, '清除歌詞快取端點成功', String(cleared.status));
+  const afterClear = await openRO(DB);
+  const pitchAfterClear = await get(afterClear, `SELECT COUNT(*) AS n FROM karaoke_pitch_takes`);
+  afterClear.close();
+  check(pitchAfterClear.n === 1, '清除歌詞快取不會刪演唱紀錄', String(pitchAfterClear.n));
+
   // ── 3. 真的還原 (放最後:成功之後 db 連線就關了) ──
   // 先把現有資料改掉,還原後應該變回備份當下的樣子
   const w2 = new sqlite3.Database(DB);
   await run(w2, `DELETE FROM word_corrections`);
+  await run(w2, `DELETE FROM karaoke_pitch_takes`);
   await new Promise((rr) => w2.close(rr));
   fs.writeFileSync(SETTINGS, JSON.stringify({ font_size: 99 }), 'utf8');
 
@@ -140,10 +175,15 @@ async function run_() {
   await sleep(300);
   const d3 = await openRO(DB);
   const back = await get(d3, `SELECT hira FROM word_corrections WHERE word='私'`);
+  const restoredPitch = await get(d3, `SELECT frames FROM karaoke_pitch_takes WHERE video_id='abcdefghijk'`);
   d3.close();
   check(back && back.hira === 'わたし', '還原把手改的假名帶回來了', back && back.hira);
+  check(restoredPitch && JSON.parse(restoredPitch.frames).length === 20, '還原把演唱紀錄帶回來了');
   const restoredSettings = JSON.parse(fs.readFileSync(SETTINGS, 'utf8'));
   check(restoredSettings.font_size === 41, '還原也把 settings.json 還原了', String(restoredSettings.font_size));
+  check(restoredSettings.karaoke_compact_on_start === false, '還原開始唱時縮小設定');
+  check(restoredSettings.karaoke_always_on_top === false, '還原緊湊時置頂設定');
+  check(restoredSettings.karaoke_auto_collapse === false, '還原閒置後收合設定');
 }
 
 (async () => {
