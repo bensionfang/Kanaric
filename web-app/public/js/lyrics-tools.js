@@ -14,6 +14,11 @@ function currentSong() {
     return window.currentSongInfo || { title: '', artist: '' };
 }
 
+function isCurrentSong(title, artist) {
+    const song = currentSong();
+    return song.title === title && song.artist === artist;
+}
+
 function showToast(message, iconClass = 'fa-solid fa-circle-info', duration = 3500) {
     const toast = document.getElementById('toast');
     const icon = document.getElementById('toast-icon');
@@ -101,31 +106,93 @@ function showOptBubble(count) {
     window._lyricsBubbleTimer = setTimeout(() => bubble.classList.remove('show'), 8000);
 }
 
+function hasEditedLyricsSearch(title, artist) {
+    const titleInput = document.getElementById('manual-title');
+    const artistInput = document.getElementById('manual-artist');
+    const searchTitle = (titleInput?.value || '').trim() || title;
+    const searchArtist = (artistInput?.value || '').trim() || artist;
+    return searchTitle !== title || searchArtist !== artist;
+}
+
 // 輪詢 server 的搜尋工作,完成後更新按鈕 (announce=false 用於換頁後靜靜接回,不再彈泡泡)
 async function pollOptionsJob(announce = true) {
     const { title, artist } = currentSong();
     if (!title) return;
     clearInterval(window._optPollTimer);
-    window._optPollTimer = setInterval(async () => {
-        const now = currentSong();
-        if (now.title !== title) { clearInterval(window._optPollTimer); return; }   // 中途換歌
+    const generation = window._lyricsOptionsPollGeneration || 0;
+    let failures = 0;
+    let inFlight = false;
+    let pollTimer;
+    const stop = () => {
+        clearInterval(pollTimer);
+        if (window._optPollTimer === pollTimer) delete window._optPollTimer;
+    };
+    pollTimer = setInterval(async () => {
+        if (!isCurrentSong(title, artist) || generation !== (window._lyricsOptionsPollGeneration || 0)) {
+            stop();
+            return;
+        }
+        if (inFlight) return;
+        inFlight = true;
         try {
             const q = new URLSearchParams({ title, artist });
-            const r = await fetch(`/api/lyrics/options/state?${q}`, { cache: 'no-store' });
+            const r = await fetch(`/api/lyrics/options/state?${q}`, {
+                cache: 'no-store', signal: AbortSignal.timeout(8000)
+            });
+            if (!r.ok) throw new Error('state request failed');
             const d = await r.json();
-            if (d.status === 'searching') return;
-            clearInterval(window._optPollTimer);
+            if (!isCurrentSong(title, artist) || generation !== (window._lyricsOptionsPollGeneration || 0)) {
+                stop();
+                return;
+            }
+            failures = 0;
             window._lyricsOptions = d.options || [];
+            if (d.status === 'searching') {
+                window._lyricsOptionsError = false;
+                const modal = document.getElementById('lyrics-options-modal');
+                if (modal && modal.classList.contains('show')) renderOptionsList(window._lyricsOptions, true);
+                return;
+            }
+            stop();
+            window._lyricsOptionsError = !!d.error;
             setOptBtnReady(window._lyricsOptions.length);
-            if (announce) showOptBubble(window._lyricsOptions.length);
-        } catch (e) {}
+            const modal = document.getElementById('lyrics-options-modal');
+            if (d.error) {
+                if (modal && modal.classList.contains('show')) renderOptionsList(window._lyricsOptions, false, true);
+                showToast('備選歌詞搜尋失敗，請重試', 'fa-solid fa-triangle-exclamation', 3500);
+            } else if (announce) showOptBubble(window._lyricsOptions.length);
+        } catch (e) {
+            if (!isCurrentSong(title, artist) || generation !== (window._lyricsOptionsPollGeneration || 0)) {
+                stop();
+                return;
+            }
+            if (++failures >= 3) {
+                stop();
+                window._lyricsOptionsError = true;
+                setOptBtnReady((window._lyricsOptions || []).length);
+                const modal = document.getElementById('lyrics-options-modal');
+                if (modal && modal.classList.contains('show')) renderOptionsList(window._lyricsOptions || [], false, true);
+                showToast('備選歌詞連線失敗，請重試', 'fa-solid fa-triangle-exclamation', 3500);
+            }
+        } finally {
+            inFlight = false;
+        }
     }, 1500);   // 一次完整搜尋大約 30–40 秒 (server 會跑多個來源),不用問太密
+    window._optPollTimer = pollTimer;
 }
 
-async function searchLyricsOptions(force = false, manual = false) {
+async function searchLyricsOptions(force = false, manual = false, defaultQuery = !manual, background = false) {
     const btn = document.getElementById('lyrics-opt-btn');
-    if (!btn || btn.dataset.loading) return;
+    if (!btn) return;
+    if (btn.dataset.loading && !force && !manual) {
+        if (!background) {
+            openLyricsModal(false);
+            renderOptionsList(window._lyricsOptions || [], true);
+        }
+        return;
+    }
     if (btn.dataset.ready && !force) {
+        if (background) return;
         const modal = document.getElementById('lyrics-options-modal');
         if (modal && modal.classList.contains('show')) closeLyricsModal();   // 再按一次收起來
         else openLyricsModal();
@@ -133,47 +200,65 @@ async function searchLyricsOptions(force = false, manual = false) {
     }
     const { title, artist } = currentSong();
     if (!title) return noSongToast();
+    defaultQuery = !!defaultQuery && !manual && !hasEditedLyricsSearch(title, artist);
 
     document.getElementById('lyrics-opt-bubble')?.classList.remove('show');
     window._lyricsOptions = [];
+    window._lyricsOptionsError = false;
+    window._lyricsOptionsSearch = { title, artist, manual, defaultQuery };
     setOptBtnSearching();
-
-    // 手動改過搜尋字串時走 performGetOptions (會帶 searchTitle/searchArtist 並直接填清單)
-    if (manual || force) {
-        try {
-            await performGetOptions(manual, force);
-        } finally {
-            setOptBtnReady((window._lyricsOptions || []).length);
-            showOptBubble((window._lyricsOptions || []).length);
+    if (!background) openLyricsModal(false);
+    const result = await performGetOptions(manual, force, defaultQuery);
+    if (!isCurrentSong(title, artist) || result === 'stale') return;
+    setOptBtnReady((window._lyricsOptions || []).length);
+    if (result === 'failed') {
+        const modal = document.getElementById('lyrics-options-modal');
+        if (!modal || !modal.classList.contains('show')) {
+            showToast('備選歌詞搜尋失敗，請重試', 'fa-solid fa-triangle-exclamation', 3500);
         }
-        return;
+    } else {
+        const modal = document.getElementById('lyrics-options-modal');
+        if (!modal || !modal.classList.contains('show')) showOptBubble((window._lyricsOptions || []).length);
     }
+}
 
-    // 一般情況:叫 server 開工,不等它 —— 換頁也不影響
-    const q = new URLSearchParams({ title, artist });
-    fetch(`/api/lyrics/options?${q}`).catch(() => {});
-    pollOptionsJob(true);
+function retryLyricsOptions() {
+    const last = window._lyricsOptionsSearch;
+    if (!last || !isCurrentSong(last.title, last.artist)) return searchLyricsOptions(true, false, true);
+    return searchLyricsOptions(true, last.manual, last.defaultQuery);
 }
 
 // 頁面載入 / 換歌後,把 server 上這首歌的搜尋狀態接回按鈕
 async function restoreOptionsState() {
     const { title, artist } = currentSong();
     if (!title) return;
+    const generation = window._lyricsOptionsPollGeneration || 0;
     try {
         const q = new URLSearchParams({ title, artist });
         const r = await fetch(`/api/lyrics/options/state?${q}`, { cache: 'no-store' });
+        if (!r.ok) return;
         const d = await r.json();
+        if (!isCurrentSong(title, artist) || generation !== (window._lyricsOptionsPollGeneration || 0)) return;
         if (d.status === 'searching') {
+            window._lyricsOptionsError = false;
             setOptBtnSearching();
             pollOptionsJob(true);   // 接手輪詢,搜完照樣彈泡泡
-        } else if (d.status === 'done' && d.options.length) {
-            window._lyricsOptions = d.options;
-            setOptBtnReady(d.options.length);
+        } else if (d.status === 'done') {
+            window._lyricsOptions = d.options || [];
+            window._lyricsOptionsError = !!d.error;
+            setOptBtnReady(window._lyricsOptions.length);
+            const modal = document.getElementById('lyrics-options-modal');
+            if (modal && modal.classList.contains('show')) {
+                renderOptionsList(window._lyricsOptions, false, !!d.error);
+            }
+            if (d.error) {
+                showToast('備選歌詞搜尋失敗，請重試', 'fa-solid fa-triangle-exclamation', 3500);
+            }
         }
     } catch (e) {}
 }
 
-function openLyricsModal() {
+function openLyricsModal(load = true) {
     const bubble = document.getElementById('lyrics-opt-bubble');
     if (bubble) bubble.classList.remove('show');
     if (typeof closeSettingsMenu === 'function') closeSettingsMenu();   // 兩個浮層不要疊在一起
@@ -193,9 +278,9 @@ function openLyricsModal() {
     }
 
     if (window._lyricsOptions && window._lyricsOptions.length) {
-        renderOptionsList(window._lyricsOptions);   // 已經有結果 (可能是背景工作搜到的) 就直接畫
-    } else {
-        performGetOptions();
+        renderOptionsList(window._lyricsOptions, false, !!window._lyricsOptionsError);
+    } else if (load) {
+        performGetOptions(false, false, !hasEditedLyricsSearch(title, artist));
     }
 }
 
@@ -252,11 +337,15 @@ function optFormat(opt) {
     return { cls: 'plain', label: 'TXT', hint: '純文字,沒有時間軸' };
 }
 
-function renderOptionsList(options, searching = false) {
+function renderOptionsList(options, searching = false, failed = false) {
+    const { title, artist } = currentSong();
+    window._lyricsOptionsSong = { title, artist };
     const listEl = document.getElementById('lyrics-options-list');
     if (!listEl) return;
     if (!options || !options.length) {
-        listEl.innerHTML = searching
+        listEl.innerHTML = failed
+            ? `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;">搜尋失敗，請重試<button class="lyrics-opt-search-btn" onclick="retryLyricsOptions()">重試</button></div>`
+            : searching
             ? `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-spinner fa-spin"></i> 搜尋中...</div>`
             : `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-face-frown"></i> 找不到備選歌詞</div>`;
         return;
@@ -273,7 +362,9 @@ function renderOptionsList(options, searching = false) {
             </div>
         </div>
     `).join('');
-    if (searching) {
+    if (failed) {
+        html += `<div style="color: var(--text-secondary); font-size: 12px; text-align:center; padding: 8px;">搜尋失敗，請重試<button class="lyrics-opt-search-btn" onclick="retryLyricsOptions()">重試</button></div>`;
+    } else if (searching) {
         html += `<div style="color: var(--text-secondary); font-size: 12px; text-align:center; padding: 8px;"><i class="fa-solid fa-spinner fa-spin"></i> 還在找更多來源…</div>`;
     }
     listEl.innerHTML = html;
@@ -337,16 +428,20 @@ async function rememberSearchOverride() {
     }
 }
 
-async function performGetOptions(forceManual = false, force = false) {
+async function performGetOptions(forceManual = false, force = false, defaultQuery = false) {
     const { title: songTitle, artist: songArtist } = currentSong();
     if (!songTitle) return noSongToast();
+    window._lyricsOptionsError = false;
+    window._lyricsOptionsPollGeneration = (window._lyricsOptionsPollGeneration || 0) + 1;
+    clearInterval(window._optPollTimer);
+    delete window._optPollTimer;
 
     let searchTitle = songTitle;
     let searchArtist = songArtist;
 
     const titleInput = document.getElementById('manual-title');
     const artistInput = document.getElementById('manual-artist');
-    if (titleInput && artistInput) {
+    if (titleInput && artistInput && !defaultQuery) {
         if (forceManual || titleInput.value.trim() !== songTitle) searchTitle = titleInput.value.trim() || songTitle;
         if (forceManual || artistInput.value.trim() !== songArtist) searchArtist = artistInput.value.trim() || songArtist;
 
@@ -356,50 +451,91 @@ async function performGetOptions(forceManual = false, force = false) {
     }
 
     const listEl = document.getElementById('lyrics-options-list');
-    if (!listEl) return;
-    listEl.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-spinner fa-spin"></i> 搜尋中...</div>`;
+    if (!listEl) return 'failed';
+    renderOptionsList([], true);
 
-    const queryParams = new URLSearchParams({
-        title: songTitle,
-        artist: songArtist,
-        searchTitle: searchTitle,
-        searchArtist: searchArtist
-    });
+    const queryParams = new URLSearchParams({ title: songTitle, artist: songArtist });
+    if (!defaultQuery) {
+        queryParams.set('searchTitle', searchTitle);
+        queryParams.set('searchArtist', searchArtist);
+    }
     if (force || forceManual) queryParams.set('force', '1');   // 丟掉 server 上舊的搜尋結果重跑
 
-    // 搜尋在 server 端跑 (見 server.js 的 optionJobs);單次完整搜尋實測 25.7 秒,
-    // 全查完才回一包的話這個視窗會乾等。改成觸發背景工作後輪詢進度,
-    // 每問完一家 (網易/酷狗 → fallback → lrclib) server 就會更新 job.options,
-    // 這裡跟著把目前已有的結果先畫出來,不是全部到齊才顯示。
-    clearInterval(window._modalOptPollTimer);
-    fetch(`/api/lyrics/options?${queryParams.toString()}`).catch(() => {});
-    await new Promise((resolve) => {
+    if (window._finishModalOptPoll) window._finishModalOptPoll('stale');
+    return new Promise((resolve) => {
+        let settled = false;
+        let inFlight = false;
+        let failures = 0;
+        let idlePolls = 0;
+        let pollTimer;
+        const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            clearInterval(pollTimer);
+            if (window._finishModalOptPoll === finish) delete window._finishModalOptPoll;
+            resolve(result);
+        };
+        const fail = () => {
+            if (!isCurrentSong(songTitle, songArtist)) return finish('stale');
+            window._lyricsOptionsError = true;
+            renderOptionsList(window._lyricsOptions || [], false, true);
+            finish('failed');
+        };
+        window._finishModalOptPoll = finish;
         const stateParams = new URLSearchParams({ title: songTitle, artist: songArtist });
-        window._modalOptPollTimer = setInterval(async () => {
+        pollTimer = setInterval(async () => {
+            if (!isCurrentSong(songTitle, songArtist)) return finish('stale');
+            if (inFlight) return;
+            inFlight = true;
             try {
-                const r = await fetch(`/api/lyrics/options/state?${stateParams}`, { cache: 'no-store' });
+                const r = await fetch(`/api/lyrics/options/state?${stateParams}`, {
+                    cache: 'no-store', signal: AbortSignal.timeout(8000)
+                });
+                if (!r.ok) throw new Error('state request failed');
                 const d = await r.json();
+                if (!isCurrentSong(songTitle, songArtist)) return finish('stale');
+                if (d.status === 'idle') {
+                    if (++idlePolls >= 4) fail();
+                    return;
+                }
+                failures = 0;
+                idlePolls = 0;
                 window._lyricsOptions = d.options || [];
-                renderOptionsList(window._lyricsOptions, d.status === 'searching');
-                if (d.status !== 'searching') {
-                    clearInterval(window._modalOptPollTimer);
-                    resolve();
+                if (d.status === 'searching') {
+                    renderOptionsList(window._lyricsOptions, true);
+                } else if (d.status === 'done') {
+                    window._lyricsOptionsError = !!d.error;
+                    renderOptionsList(window._lyricsOptions, false, !!d.error);
+                    finish(d.error ? 'failed' : 'done');
+                } else {
+                    fail();
                 }
             } catch (e) {
-                clearInterval(window._modalOptPollTimer);
-                listEl.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; text-align:center; padding: 10px;"><i class="fa-solid fa-triangle-exclamation"></i> 載入失敗</div>`;
-                resolve();
+                if (!isCurrentSong(songTitle, songArtist)) return finish('stale');
+                if (++failures >= 3) fail();
+            } finally {
+                inFlight = false;
             }
         }, 1200);
+        window._modalOptPollTimer = pollTimer;
+
+        fetch(`/api/lyrics/options?${queryParams.toString()}`).then((r) => {
+            if (!r.ok) throw new Error('search request failed');
+        }).catch(() => {
+            if (!settled) fail();
+        });
     });
 }
 
+let lyricsOptionApplyPending = false;
 async function applyLyricsOption(index) {
+    if (lyricsOptionApplyPending) return;
+    const { title, artist } = currentSong();
+    const optionsSong = window._lyricsOptionsSong;
+    if (!optionsSong || optionsSong.title !== title || optionsSong.artist !== artist) return;
     const opt = window._lyricsOptions && window._lyricsOptions[index];
     if (!opt) return;
-    const { title, artist } = currentSong();
-    closeLyricsModal();
-    showToast(`套用: ${opt.title}`, 'fa-solid fa-check', 2000);
+    lyricsOptionApplyPending = true;
     try {
         // server 會寫進快取並廣播 lyrics_updated (首頁與靈動島都會更新)
         const resp = await fetch('/api/lyrics/custom', {
@@ -408,11 +544,17 @@ async function applyLyricsOption(index) {
             body: JSON.stringify({ title, artist, lyrics: opt.lyrics })
         });
         const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'apply failed');
+        if (!isCurrentSong(title, artist)) return;
         if (typeof parseLrcLyrics === 'function') {   // 首頁:立刻重畫歌詞面板
             parseLrcLyrics(data.lyrics || opt.lyrics);
             renderLyrics();
         }
+        closeLyricsModal();
+        showToast(`已套用: ${opt.title}`, 'fa-solid fa-check', 2000);
     } catch (e) {
-        showToast('套用失敗', 'fa-solid fa-xmark', 2000);
+        if (isCurrentSong(title, artist)) showToast('套用失敗，請重試', 'fa-solid fa-xmark', 3500);
+    } finally {
+        lyricsOptionApplyPending = false;
     }
 }

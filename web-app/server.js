@@ -1714,10 +1714,9 @@ function startOptionsJob(q) {
     return options;
   }).catch((e) => {
     job.status = 'done';
-    job.options = [];
     job.error = e.message;
     if (global.broadcast) {
-      global.broadcast({ type: 'lyrics_options_ready', title: q.title, artist: q.artist, count: 0 });
+      global.broadcast({ type: 'lyrics_options_ready', title: q.title, artist: q.artist, count: job.options.length });
     }
     return [];
   });
@@ -1732,7 +1731,8 @@ app.get('/api/lyrics/options/state', (req, res) => {
   // searching 中也給目前已完成來源的結果。brief=1 (行動版) 把歌詞本體拔掉:一次搜尋要輪詢
   // 十幾次,每次都夾帶五份完整歌詞就是幾百 KB 的行動網路流量,而手機在按下去之前不需要內文。
   const options = brief ? job.options.map(({ lyrics, ...o }) => o) : job.options;
-  res.json({ status: job.status, options });
+  const error = job.error ? (job.error.includes('逾時') ? 'timeout' : 'failed') : undefined;
+  res.json({ status: job.status, options, error });
 });
 
 app.get('/api/lyrics/options', async (req, res) => {

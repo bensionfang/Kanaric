@@ -961,6 +961,7 @@
 
             const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
             let barTitle = window.__initialMedia.title || '';   // server 已經渲染好了,別再重寫一次同樣的內容
+            let barArtist = window.__initialMedia.artist || '';
             let barThumb;   // 已經套用的封面 (undefined = 還沒收到過),同 app.js 的 lastThumbnail
 
             // WS 斷線時的保底輪詢,正常情況是 applyPlayerBar 被廣播叫起來的
@@ -999,12 +1000,24 @@
                         if (cov && d.thumbnail) cov.src = 'data:image/jpeg;base64,' + d.thumbnail;
                     }
 
-                    if (d.title !== barTitle) {
-                        barTitle = d.title || '';
-                        setMarqueeText(document.getElementById('current-title'), d.title || '--');
-                        setMarqueeText(document.getElementById('current-artist'), d.title ? (d.artist || 'Unknown Artist') : '--');
+                    const nextTitle = d.title || '';
+                    const nextArtist = d.artist || '';
+                    if (nextTitle !== barTitle || nextArtist !== barArtist) {
+                        barTitle = nextTitle;
+                        barArtist = nextArtist;
+                        setMarqueeText(document.getElementById('current-title'), nextTitle || '--');
+                        setMarqueeText(document.getElementById('current-artist'), nextTitle ? (nextArtist || 'Unknown Artist') : '--');
                         // 換歌 = 上一首的備選歌詞失效;新歌若在 server 上搜過/搜尋中,把狀態接回來
                         window._lyricsOptions = [];
+                        window._lyricsOptionsError = false;
+                        window._lyricsOptionsSearch = null;
+                        window._lyricsOptionsSong = null;
+                        const optionsList = document.getElementById('lyrics-options-list');
+                        if (optionsList) optionsList.innerHTML = '';
+                        const titleInput = document.getElementById('manual-title');
+                        const artistInput = document.getElementById('manual-artist');
+                        if (titleInput) titleInput.value = nextTitle;
+                        if (artistInput) artistInput.value = nextArtist;
                         resetLyricsOptBtn();
                         restoreOptionsState();
                     }

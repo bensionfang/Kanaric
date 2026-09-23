@@ -341,6 +341,9 @@ function applyMediaState(data) {
             // 換歌 = 備選歌詞失效，按鈕回到搜尋狀態
             // 但首次載入 (prevTitle 空) 不重置:SSR 已給正確狀態,重置會閃一下綠勾
             window._lyricsOptions = [];
+            window._lyricsOptionsError = false;
+            window._lyricsOptionsSearch = null;
+            window._lyricsOptionsSong = null;
             if (prevTitle) resetLyricsOptBtn();
             restoreOptionsState();   // 這首歌若已在 server 上搜過/搜尋中,把按鈕狀態接回來
             // 真的換歌才作廢循環段落 (行號對不上新歌詞了)。
@@ -392,6 +395,9 @@ function applyMediaState(data) {
             lastMediaArtist = "";
             window.currentSongInfo = { title: '', artist: '' };
             window._lyricsOptions = [];
+            window._lyricsOptionsError = false;
+            window._lyricsOptionsSearch = null;
+            window._lyricsOptionsSong = null;
             resetLyricsOptBtn();
             setMarqueeText(document.getElementById('current-title'), "--");
             setMarqueeText(document.getElementById('current-artist'), "--");
@@ -426,10 +432,10 @@ function applyMediaState(data) {
                 // 歌曲身分用原始名字 (Spotify 每次都送同一份,跨還原穩定);還原前後是同一首
                 const trackId = `${data.original_title || data.title}|||${data.original_artist || data.artist || ''}`;
                 fetchAndParseLyrics(data.title, data.artist, trackId);
-                // 開了自動搜尋就直接跑一輪 (轉圈 → 綠色打勾 → 泡泡提醒,與手動按下完全同一套流程)。
+                // 自動搜尋留在背景:轉圈 → 綠色打勾 → 泡泡提醒;選歌詞視窗由使用者開啟時才顯示。
                 // 跟抓歌詞綁在一起,才不會用還原前的名字先搜一次
                 if (localStorage.getItem('auto_lyrics_options') === 'true') {
-                    searchLyricsOptions();
+                    searchLyricsOptions(false, false, true, true);
                 }
             }
         }
