@@ -122,7 +122,8 @@ function setSyncPanel(show) {
 // 活動行是否還在歌詞可視區內
 function isActiveLineVisible() {
     const pane = document.getElementById('lyrics-scroll');
-    const line = document.getElementById(`lyric-line-${activeLyricIndex}`);
+    // 前奏還沒有活動行時,用第一句判斷是否已滑離同步位置。
+    const line = document.getElementById(`lyric-line-${activeLyricIndex < 0 ? 0 : activeLyricIndex}`);
     if (!pane || !line) return true;
     const top = line.offsetTop - pane.scrollTop;
     return top + line.offsetHeight > 0 && top < pane.clientHeight;
@@ -131,7 +132,7 @@ function isActiveLineVisible() {
 // 只做按鈕的可見性判定,不捲動 —— 使用者手指還在滑時把畫面搶走很難用
 function updateSyncPanel() {
     if (scrollLocked) return setSyncPanel(true);
-    if (activeLyricIndex < 0) return setSyncPanel(false);   // 沒有活動行 (含無時間軸歌詞)
+    if (activeLyricIndex < 0 && (parsedLyrics.length === 0 || isUnsyncedLyrics)) return setSyncPanel(false);
     setSyncPanel(!isActiveLineVisible());
 }
 
@@ -203,7 +204,10 @@ function resumeSync() {
     scrollLocked = false;
     autoCenter = true;
     setSyncPanel(false);
-    centerActiveLine();
+    if (activeLyricIndex < 0) {
+        programmaticScrollUntil = performance.now() + 500;
+        document.getElementById('lyrics-scroll')?.scrollTo({ top: 0, behavior: 'smooth' });
+    } else centerActiveLine();
 }// -------------------------------------------------------------
 // Live Sync Logic
 // -------------------------------------------------------------
@@ -536,7 +540,7 @@ function updatePlaybackProgress(position) {
 
     // Estimate total time based on current position and song duration
     let durationToUse = window.currentMediaDuration > 0 ? window.currentMediaDuration : songDurationSeconds;
-    const actualDuration = Math.max(durationToUse, position + 10);
+    const actualDuration = window.currentMediaDuration > 0 ? durationToUse : Math.max(durationToUse, position + 10);
     
     window.currentSeekDuration = actualDuration;
 
