@@ -20,6 +20,7 @@ let isUnsyncedLyrics = false;
 // Client-side interpolation state
 let currentInterpolatedPosition = 0;
 let lastServerPosition = -1;
+let clockCorrection = 0;
 let lastFrameTime = performance.now();
 let isCurrentlyPlaying = false;
 let pendingSeekTarget = null;   // 剛送出 seek,等系統跳到位前先無視回報的位置
@@ -31,6 +32,14 @@ let programmaticScrollUntil = 0;   // 這個時間點前的 scroll 事件是自�
 // 隱藏的預設提前量,讓網頁版歌詞提早顯示 (補償視覺延遲,但不影響右下角的調整值)。
 // **不可以留在 syncLoop 裡面** —— seekToLyric 要用同一個值做反向換算
 const WEB_APP_LYRICS_ADVANCE = 0.25;
+
+function advancePlaybackClock(dt) {
+    if (!isCurrentlyPlaying) return;
+    // 回報落後時放慢追正，不能直接倒扣時間讓逐字填色回滾。
+    const adjustment = Math.max(-dt * 0.5, Math.min(dt * 0.5, clockCorrection));
+    currentInterpolatedPosition += dt + adjustment;
+    clockCorrection -= adjustment;
+}
 
 // 段落循環 (練唱):存 parsedLyrics 的 index,不是秒 —— 歌詞重畫後才有辦法把標記畫回去
 let isLoopMode = false;
@@ -64,9 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 只有播放中才推進時間，但畫面永遠要照著目前位置重繪 ——
         // 否則暫停時進度條停在 0 (剛載入首頁)，暫停中點歌詞 seek 也不會跟著跳。
-        if (isCurrentlyPlaying) {
-            currentInterpolatedPosition += dt;
-        }
+        advancePlaybackClock(dt);
         if (parsedLyrics.length > 0) {
             syncLyricsToTime(currentInterpolatedPosition - syncOffset + WEB_APP_LYRICS_ADVANCE);
         }
@@ -315,6 +322,7 @@ function applyMediaState(data) {
 
         // Update interpolation state from server
         isCurrentlyPlaying = data.is_playing;
+        if (!isCurrentlyPlaying) clockCorrection = 0;
         if (data.duration !== undefined) {
             window.currentMediaDuration = data.duration;
         }
@@ -323,14 +331,15 @@ function applyMediaState(data) {
             pendingSeekTarget = null;   // 系統跳到位了 (或等太久),恢復正常同步
         }
         if (data.title && pendingSeekTarget === null) {
-            if (data.position !== lastServerPosition) {
+            if (data.position !== lastServerPosition || data.title !== lastMediaTitle) {
                 const diff = data.position - currentInterpolatedPosition;
-                if (Math.abs(diff) > 1.5 || data.title !== lastMediaTitle) {
+                if (Math.abs(diff) > 1.5 || data.title !== lastMediaTitle || !isCurrentlyPlaying) {
                     // Hard sync on seek or track change
                     currentInterpolatedPosition = data.position;
+                    clockCorrection = 0;
                 } else {
-                    // Smoothly correct 50% of the small drift
-                    currentInterpolatedPosition += diff * 0.5;
+                    // 把小誤差交給下一批影格逐漸修正，避免這一幀倒退。
+                    clockCorrection = diff * 0.5;
                 }
                 lastServerPosition = data.position;
             }
@@ -1000,6 +1009,7 @@ function seekToLyric(lyricTime) {
 // 跳到指定秒數 (播放位置):先在本地跳好,不等系統回報 —— 暫停時系統回報位置很慢甚至不回報
 function seekTo(sec) {
     currentInterpolatedPosition = sec;
+    clockCorrection = 0;
     updatePlaybackProgress(sec);
     // 在系統真的跳到位之前,別讓 pollSystemMedia 用舊位置把我們拉回去
     pendingSeekTarget = sec;
