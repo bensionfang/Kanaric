@@ -27,7 +27,7 @@ process.env.DB_PATH = path.join(TMP, 'test.db');
 process.env.DATA_DIR = TMP;
 process.env.LYRICS_SETTINGS_PATH = path.join(TMP, 'settings.json');
 
-require('../web-app/server.js');
+const { server } = require('../web-app/server.js');
 
 let failed = 0;
 const check = (ok, label, detail) => {
@@ -96,6 +96,9 @@ async function waitResolved(title, artist, timeoutMs = 6000) {
   const sp = { ...track('Lemon (Live)', '米津玄師'), source: 'Spotify.exe' };
   global.handleMediaUpdate(sp);
   check(sp.title === 'Lemon (Live)', '音樂 app 來源:標題不去噪', sp.title);
+  const current = await (await fetch(`http://127.0.0.1:${server.address().port}/api/current-media`)).json();
+  check(!current.original_title && !current.original_artist,
+    '換到沒有原名欄位的歌:不沿用上一首原名', `${current.original_artist || ''} - ${current.original_title || ''}`);
 
   // 5. 沒有播放來源時不能卡在 resolving
   const empty = { title: '', artist: '', is_playing: false };

@@ -469,6 +469,9 @@ function broadcastMediaState() {
 
 global.handleMediaUpdate = function(rawState) {
   try {
+    // currentMediaState 是淺層合併；本次未帶原名時須清掉上一首的值。
+    rawState.original_title ||= '';
+    rawState.original_artist ||= '';
     // iTunes 跨區還原攔截器。查詢是非同步的 (handleMediaUpdate 不能等),所以換歌後的
     // 頭幾百毫秒名字還是原始的、之後才會被換成日文原名。前端看到 title 變就當作換歌重抓
     // 歌詞,會用兩個不同的鍵各抓一次 (第二次多半撞到來源限流而變成「找不到歌詞」)。

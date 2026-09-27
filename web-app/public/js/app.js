@@ -1,8 +1,3 @@
-// 空狀態幽默句,各挑一句隨機顯示 (renderLyrics / fetchAndParseLyrics 各用一組)
-const WAITING_MSGS = ['耳朵準備好了，音樂呢？', '按下播放，我就開工。', '安靜得有點過分，放首歌吧。'];
-const NO_LYRICS_MSGS = ['這首歌把歌詞藏起來了。', '翻遍全網，還是撲了個空。', '歌詞放假去了，改天再來。'];
-const pick = a => a[Math.floor(Math.random() * a.length)];
-
 let lastMediaTitle = "";
 let lastMediaArtist = "";
 // 已經抓過歌詞的 (歌名|||歌手)。與 lastMediaTitle 分開:名字被 iTunes 還原改寫時
@@ -12,6 +7,9 @@ let lastLyricsKey = "";
 // 同一首歌因還原/60 秒重試而重抓時,空結果不准蓋掉已顯示的歌詞 (見 fetchAndParseLyrics)。
 let displayedTrackId = "";
 let lyricsFetchSeq = 0;   // 併發/亂序保護:只採用最後一次請求的結果
+let currentSongMedia = {};
+let currentLyricsStatus = 'searching';
+let currentLyricsProvider = '';
 let parsedLyrics = [];
 let activeLyricIndex = -1;
 let songDurationSeconds = 180; // Estimated or default
@@ -236,6 +234,9 @@ function connectLyricsSocket() {
         if (msg.title !== lastMediaTitle || msg.artist !== lastMediaArtist) return;   // 只認目前顯示的那首
         parseLrcLyrics(msg.lyrics);
         renderLyrics();
+        currentLyricsStatus = 'ready';
+        currentLyricsProvider = window.currentSourceProvider || '';
+        updateSongInfo(currentSongMedia, currentLyricsStatus, currentLyricsProvider);
     });
 }
 
@@ -300,6 +301,7 @@ async function pollSystemMedia() {
 
 function applyMediaState(data) {
     try {
+        currentSongMedia = data;
         const vd = document.getElementById('vinyl-disc');
         const ppIcon = document.getElementById('play-pause-icon');
         if (data.is_playing) {
@@ -345,6 +347,8 @@ function applyMediaState(data) {
             }
         }
         if (data.title && (data.title !== lastMediaTitle || data.artist !== lastMediaArtist)) {
+            // 新歌可能還在等名稱還原；現在就作廢上一首的未完成歌詞請求。
+            lyricsFetchSeq++;
             const prevTitle = lastMediaTitle;
             lastMediaTitle = data.title;
             lastMediaArtist = data.artist;
@@ -386,6 +390,8 @@ function applyMediaState(data) {
             // 動畫,不是「找不到」但一樣是好歌詞消失,而且沒有補救路徑。
             const newTrackId = `${data.original_title || data.title}|||${data.original_artist || data.artist || ''}`;
             if (newTrackId !== displayedTrackId) {
+                currentLyricsStatus = data.resolving ? 'resolving' : 'searching';
+                currentLyricsProvider = '';
                 const scrollPane = document.getElementById('lyrics-scroll');
                 if (scrollPane) scrollPane.innerHTML = `<div class="loading-spinner"><i class="fa-solid fa-spinner fa-spin"></i> 正在搜尋歌詞...</div>`;
                 parsedLyrics = [];
@@ -401,6 +407,7 @@ function applyMediaState(data) {
 
         } else if (!data.title && lastMediaTitle) {
             // Stopped completely
+            lyricsFetchSeq++;
             lastMediaTitle = "";
             lastMediaArtist = "";
             window.currentSongInfo = { title: '', artist: '' };
@@ -412,7 +419,10 @@ function applyMediaState(data) {
             renderLyrics();
             lastLyricsKey = "";
             displayedTrackId = "";
+            currentLyricsStatus = 'waiting';
+            currentLyricsProvider = '';
         }
+        updateSongInfo(data, currentLyricsStatus, currentLyricsProvider);
 
         // 封面**不掛在換歌分支底下**,自己比對前後值。兩個理由:
         //   1. 廣播在封面沒變時會「整個不送 thumbnail 這個鍵」(server.js broadcastMediaState),
@@ -454,7 +464,31 @@ function applyMediaState(data) {
     }
 }
 
-async function fetchAndParseLyrics(title, artist, trackId = "") {
+function updateSongInfo(media, status, provider) {
+    const info = document.getElementById('song-info');
+    if (!info) return;
+    info.hidden = !media.title;
+    if (!media.title) return;
+    const set = (id, value) => { document.getElementById(id).textContent = value; };
+    const raw = [media.original_artist || media.artist, media.original_title || media.title].filter(Boolean).join(' — ');
+    const recognized = [media.artist, media.title].filter(Boolean).join(' — ');
+    set('song-info-player', (media.source || '未知').replace(/\.exe$/i, ''));
+    set('song-info-title', recognized);
+    set('song-info-original', raw);
+    document.getElementById('song-info-original-row').hidden = raw === recognized;
+    set('song-info-status', ({ resolving: '正在辨識歌曲', searching: '正在搜尋歌詞', ready: '歌詞已載入', no_lyrics: '已標記無歌詞', not_found: '找不到歌詞', error: '載入失敗' })[status] || '等待播放');
+    set('song-info-provider', provider || '來源未知');
+}
+
+function openMediaSourceSettings(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('settings-menu');
+    if (!menu.classList.contains('show')) toggleSettingsMenu();
+    if (!document.getElementById('source-section').classList.contains('show')) toggleSourceSection();
+    document.getElementById('source-toggle')?.focus();
+}
+
+async function fetchAndParseLyrics(title, artist, trackId = displayedTrackId) {
     const scrollPane = document.getElementById('lyrics-scroll');
     const seq = ++lyricsFetchSeq;
     // 同一首歌的重抓 (iTunes 還原改名 / 60 秒重試觸發):不清畫面、不換 spinner ——
@@ -462,6 +496,9 @@ async function fetchAndParseLyrics(title, artist, trackId = "") {
     // 只有換到別首歌 (trackId 不同) 才顯示搜尋中。
     const sameTrack = !!trackId && trackId === displayedTrackId;
     if (!sameTrack) {
+        currentLyricsStatus = 'searching';
+        currentLyricsProvider = '';
+        updateSongInfo(currentSongMedia, currentLyricsStatus, currentLyricsProvider);
         scrollPane.innerHTML = `<div class="loading-spinner"><i class="fa-solid fa-spinner fa-spin"></i> 正在搜尋歌詞...</div>`;
         parsedLyrics = [];
     }
@@ -476,6 +513,9 @@ async function fetchAndParseLyrics(title, artist, trackId = "") {
             parseLrcLyrics(data.lyrics);
             renderLyrics();
             displayedTrackId = trackId;
+            currentLyricsStatus = 'ready';
+            currentLyricsProvider = window.currentSourceProvider || (data.source === 'cache' ? '' : data.source);
+            updateSongInfo(currentSongMedia, currentLyricsStatus, currentLyricsProvider);
             if (parsedLyrics.length > 0) {
                 const lastLyricTime = parsedLyrics[parsedLyrics.length - 1].time;
                 songDurationSeconds = Math.max(120, Math.round(lastLyricTime + 15));
@@ -484,12 +524,23 @@ async function fetchAndParseLyrics(title, artist, trackId = "") {
             // 空結果:同一首已在畫面上就保留原歌詞 (暫時性的限流別蓋掉),換首才顯示找不到
             if (sameTrack) return;
             displayedTrackId = "";
-            scrollPane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-face-frown"></i><p>${pick(NO_LYRICS_MSGS)}</p></div>`;
+            currentLyricsStatus = data?.source === 'no_lyrics' ? 'no_lyrics' : data?.source === 'error' || !resp.ok ? 'error' : 'not_found';
+            updateSongInfo(currentSongMedia, currentLyricsStatus, '');
+            scrollPane.innerHTML = emptyLyricsHtml(currentLyricsStatus);
         }
     } catch (e) {
         if (stale() || sameTrack) return;
-        scrollPane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-triangle-exclamation"></i><p>載入歌詞出錯</p></div>`;
+        currentLyricsStatus = 'error';
+        updateSongInfo(currentSongMedia, currentLyricsStatus, '');
+        scrollPane.innerHTML = emptyLyricsHtml('error');
     }
+}
+
+function emptyLyricsHtml(status) {
+    if (status === 'waiting') return `<div class="lyrics-empty" role="status"><i class="fa-solid fa-music" aria-hidden="true"></i><p>播放一首歌，歌詞就會顯示在這裡。</p><button type="button" onclick="openMediaSourceSettings(event)">檢查音訊來源</button></div>`;
+    if (status === 'no_lyrics') return `<div class="lyrics-empty" role="status"><i class="fa-solid fa-music" aria-hidden="true"></i><p>這首歌已標記為無歌詞。</p><button type="button" onclick="searchLyricsOptions()">搜尋備選歌詞</button></div>`;
+    if (status === 'error') return `<div class="lyrics-empty" role="status"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><p>歌詞載入失敗，請稍後重試。</p><button type="button" onclick="reloadCurrentLyrics()">重新載入</button></div>`;
+    return `<div class="lyrics-empty" role="status"><i class="fa-solid fa-face-frown" aria-hidden="true"></i><p>找不到這首歌的歌詞。</p><button type="button" onclick="searchLyricsOptions()">搜尋備選歌詞</button></div>`;
 }
 
 // 解析本身在 public/js/lrc-parse.js (卡拉OK頁與測試共用),這裡只負責寫回首頁的全域狀態
@@ -507,7 +558,7 @@ function renderLyrics() {
         if (lastMediaTitle) {
             pane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-music"></i><p>純音樂，無人聲歌詞</p></div>`;
         } else {
-            pane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-music"></i><p>${pick(WAITING_MSGS)}</p></div>`;
+            pane.innerHTML = emptyLyricsHtml('waiting');
         }
         return;
     }
