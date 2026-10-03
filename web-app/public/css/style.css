@@ -782,21 +782,9 @@ button.menu-action i {
 /* Lyrics Display Container */
 .lyrics-view-container { display: flex; flex-direction: column; gap: 16px; flex-grow: 1; }
 
-.song-info {
-    align-self: flex-start;
-    max-width: min(520px, 100%);
-    margin: 8px 24px 0;
-    color: var(--text-secondary);
-    font-size: 13px;
-}
-.song-info[hidden], #song-info-original-row[hidden] { display: none; }
-.song-info summary { cursor: pointer; }
-.song-info summary:focus-visible, .lyrics-empty button:focus-visible, .song-info button:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
-.song-info-body { margin-top: 10px; padding: 10px 14px; background: rgba(0, 0, 0, 0.22); border: 1px solid var(--panel-border); border-radius: 8px; }
-.song-info-body p { margin: 4px 0; overflow-wrap: anywhere; }
-.song-info-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.song-info-actions button, .lyrics-empty button { padding: 6px 10px; border: 1px solid var(--panel-border); border-radius: 6px; background: var(--panel-hover); color: var(--text-primary); cursor: pointer; }
-.song-info-actions button:hover, .lyrics-empty button:hover { border-color: var(--text-primary); }
+.lyrics-empty button:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.lyrics-empty button { padding: 6px 10px; border: 1px solid var(--panel-border); border-radius: 6px; background: var(--panel-hover); color: var(--text-primary); cursor: pointer; }
+.lyrics-empty button:hover { border-color: var(--text-primary); }
 
 .lyrics-scroll-pane {
     background: transparent; border: none;
@@ -1603,8 +1591,6 @@ body.window-maximized .lyrics-view-container {
     padding: 0 !important;
     gap: 0 !important;
 }
-body.window-maximized .song-info { display: none; }
-
 body.window-maximized .lyrics-scroll-pane {
     flex: 1 !important;
     height: auto !important;
