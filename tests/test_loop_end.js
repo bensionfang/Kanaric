@@ -1,7 +1,10 @@
-// 段落循環尾段間奏防護的自檢。
-// app.js 是瀏覽器端 (require 進 node 會因 document 未定義而崩),所以這裡鏡射兩支純函式,
-// 公式必須與 web-app/public/js/app.js 的 median 計算與 loopEndTime() 逐字一致。動一邊改兩邊。
-const LOOP_TAIL_FACTOR = 1.6;
+// 段落循環尾段間奏防護的自檢。直接執行 app.js 的終點函式，避免鏡射公式跟實作分岔。
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = fs.readFileSync(require('node:path').join(__dirname, '..', 'web-app/public/js/app.js'), 'utf8');
+const factor = source.match(/const LOOP_TAIL_FACTOR = [^\n]+;/)?.[0];
+const endFn = source.match(/function loopEndTime\(\) \{[\s\S]*?\n\}/)?.[0];
+if (!factor || !endFn) throw new Error('找不到段落循環終點函式');
 
 function computeMedianGap(times) {
     const gaps = [];
@@ -15,10 +18,16 @@ function computeMedianGap(times) {
 }
 
 // bTime = B 句開始, nextTime = B+1 句開始 (null 代表 B 是最後一句), hardFallback = 歌曲結束秒數
-function loopEndTime(bTime, nextTime, hardFallback, medianGap) {
-    const hardEnd = nextTime != null ? nextTime : hardFallback;
-    const cap = bTime + medianGap * LOOP_TAIL_FACTOR;
-    return hardEnd > cap ? cap : hardEnd;
+function loopEndTime(bTime, nextTime, duration, medianGap, offset = 0) {
+    const state = vm.createContext({
+        parsedLyrics: [{ time: bTime }, ...(nextTime == null ? [] : [{ time: nextTime }])],
+        loopB: 0,
+        window: { currentMediaDuration: duration },
+        songDurationSeconds: 180,
+        medianLineGap: medianGap,
+        syncOffset: offset
+    });
+    return vm.runInContext(`${factor}\n${endFn}\nloopEndTime()`, state);
 }
 
 function eq(a, b, msg) {
@@ -43,5 +52,9 @@ eq(loopEndTime(100, null, 200, med), 106.4, '最後一句用 cap 夾住長尾');
 eq(loopEndTime(100, null, 103, med), 103, '最後一句短尾用歌曲結束');
 // 邊界:剛好等於 cap 不夾 (hardEnd > cap 才夾)
 eq(loopEndTime(100, 106.4, 999, med), 106.4, 'cap 邊界不夾');
+eq(loopEndTime(100, 104, 999, med, 0.5), 104.5, '正校正時用播放器時間判定終點');
+eq(loopEndTime(100, 104, 999, med, -0.3), 103.7, '負校正時用播放器時間判定終點');
+eq(loopEndTime(100, null, 103, med, 1), 103, '最後一句的實際歌曲時長不加校正');
+eq(loopEndTime(100, 105, 103, med, 1), 103, '終點不超過實際歌曲時長');
 
 console.log('\nall pass');

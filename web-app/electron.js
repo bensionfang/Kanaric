@@ -5,10 +5,16 @@
  * 2. 在主進程內直接載入 server.js (Express + WebSocket + Python 子進程)。
  * 3. 開儀表板視窗 + 系統匣圖示 + 靈動島視窗 (island.js),結束時收乾淨所有子進程。
  */
-const { app, BrowserWindow, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
+const crypto = require('crypto');
+const {
+  YOUTUBE_EXTENSION_ID,
+  installNativeMessagingHost,
+} = require('./native-messaging-host.js');
+const { registerKaraokeWindowIpc } = require('./karaoke-window.js');
 
 // app.quit() 是非同步的:光呼叫它,後面的 whenReady 還是會跑,第二個實例會先起一份 server
 // 與 media monitor 佔用另一個 port,再自己崩掉。要 app.exit() 立刻收工。
@@ -18,6 +24,12 @@ if (!app.requestSingleInstanceLock()) {
 
 let PORT = Number(process.env.PORT) || 5720;
 const DEV_ROOT = path.join(__dirname, '..');
+let discoveryFile = '';
+let discoveryTimer = null;
+
+// Electron 啟動時才產生本次 token；純 node 模式仍沿用 server.js 的相容 fallback。
+process.env.KANARIC_EXTENSION_ID = YOUTUBE_EXTENSION_ID;
+process.env.YOUTUBE_EXTENSION_TOKEN ||= crypto.randomBytes(32).toString('base64url');
 
 // 找可用 port:優先用偏好值 (5720),被占用就讓 OS 指派一個空閒的,
 // 這樣別人電腦上就算 5720 被別的程式占著也能正常開起來。
@@ -125,6 +137,45 @@ function closeSplash() {
   }
 }
 
+function writeRuntimeDiscovery() {
+  if (!discoveryFile || !process.env.YOUTUBE_EXTENSION_TOKEN) return false;
+  const payload = JSON.stringify({
+    baseUrl: `http://127.0.0.1:${PORT}`,
+    token: process.env.YOUTUBE_EXTENSION_TOKEN,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    pid: process.pid,
+  });
+  const tmp = `${discoveryFile}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(discoveryFile), { recursive: true });
+    fs.writeFileSync(tmp, payload, 'utf8');
+    fs.renameSync(tmp, discoveryFile);
+    return true;
+  } catch (error) {
+    try { fs.unlinkSync(tmp); } catch {}
+    return false;
+  }
+}
+
+function removeRuntimeDiscovery() {
+  if (discoveryTimer) clearInterval(discoveryTimer);
+  discoveryTimer = null;
+  if (!discoveryFile) return;
+  try { fs.unlinkSync(discoveryFile); } catch (error) {
+    if (error.code !== 'ENOENT') return;
+  }
+}
+
+function isKanaricAudioRequest(permission, requestingUrl, mediaTypes) {
+  let origin = '';
+  try { origin = new URL(requestingUrl).origin; } catch (e) { return false; }
+  return permission === 'media'
+    && Array.isArray(mediaTypes)
+    && mediaTypes.includes('audio')
+    && !mediaTypes.includes('video')
+    && (origin === `http://localhost:${PORT}` || origin === `http://127.0.0.1:${PORT}`);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -134,9 +185,22 @@ function createWindow() {
     autoHideMenuBar: true,
     icon: TRAY_ICON,
     show: false, // 等頁面畫好才顯示,啟動畫面在這之前頂著
-    // 無標題列,系統按鈕直接疊在頁面上 (height 要跟 CSS .win-drag 一致)
-    titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#00000000', symbolColor: '#ffffff', height: 36 }
+    // 真正無框；自製按鈕只在非卡拉 OK 頁提供，卡拉 OK 保留內容區退出。
+    frame: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-karaoke.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  registerKaraokeWindowIpc({
+    ipcMain, mainWindow, screen, BrowserWindow,
+    preloadPath: path.join(__dirname, 'preload-karaoke.js'),
+    origin: `http://localhost:${PORT}`,
+  });
+  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const requestingUrl = details?.requestingUrl || webContents.getURL();
+    callback(isKanaricAudioRequest(permission, requestingUrl, details?.mediaTypes));
   });
   mainWindow.loadURL(`http://localhost:${PORT}`);
 
@@ -238,7 +302,16 @@ app.whenReady().then(async () => {
   // 先確定實際 port,再帶起 server (server.js 讀 process.env.PORT)
   PORT = await findFreePort(PORT);
   process.env.PORT = String(PORT);
+  discoveryFile = path.join(app.getPath('userData'), 'youtube-karaoke-discovery.json');
+  installNativeMessagingHost({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    devRoot: DEV_ROOT,
+    dataDir: app.getPath('userData'),
+  });
   require('./server.js'); // 帶起 Express + WebSocket + media monitor
+  writeRuntimeDiscovery();
+  discoveryTimer = setInterval(writeRuntimeDiscovery, 60 * 1000);
 
   wireIsland();
 
@@ -313,5 +386,6 @@ app.on('before-quit', () => {
   if (global.monitorProcess) {
     try { global.monitorProcess.kill(); } catch (e) {}
   }
+  removeRuntimeDiscovery();
   // 靈動島現在是本 app 的視窗,跟著 app 一起結束,不需要額外收尾
 });

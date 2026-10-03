@@ -95,6 +95,42 @@ assert parse_results({"contents": [vr("k", "米津玄師 Kenshi Yonezu - KICKBAC
 long_official = parse_results(PICK, artist="ヨルシカ", title="春泥棒", duration=261)
 assert long_official[0]["durationSec"] == 300, "差 39 秒的官方版仍然排第一"
 
+# Task 2:官方候選帶出版本分類與時長差；超過 30 秒只警告、不改排名
+OFFICIAL_CHECK = {"contents": [
+    vr("exact", "ヨルシカ - 春泥棒（OFFICIAL VIDEO）", "ヨルシカ / n-buna Official", "4:14"),
+    vr("intro", "ヨルシカ - 春泥棒（OFFICIAL VIDEO）", "ヨルシカ / n-buna Official", "5:00"),
+    vr("cover", "春泥棒 Cover", "誰か", "4:14"),
+]}
+official_exact = parse_results(OFFICIAL_CHECK, artist="ヨルシカ", title="春泥棒", duration=254)[0]
+assert official_exact["official"] is True
+assert official_exact["durationDeltaSec"] == 0
+assert official_exact["needsConfirmation"] is False
+official_long_intro = next(i for i in parse_results(OFFICIAL_CHECK, artist="ヨルシカ", title="春泥棒", duration=254)
+                           if i["videoId"] == "intro")
+assert official_long_intro["durationDeltaSec"] == 46
+assert official_long_intro["needsConfirmation"] is True
+cover_exact = next(i for i in parse_results(OFFICIAL_CHECK, artist="ヨルシカ", title="春泥棒", duration=254)
+                   if i["videoId"] == "cover")
+assert cover_exact["official"] is False
+
+# One-search sends no separate artist.  An empty artist is unknown, not an
+# explicit non-official channel; a clean, title-ranked, duration-matching
+# result must remain safe to start without a redundant confirmation.
+ONE_SEARCH = {"contents": [
+    vr("one-search-exact", "春泥棒", "Some Uploader", "4:14"),
+    vr("one-search-long", "春泥棒", "Some Uploader", "5:00"),
+    vr("one-search-cover", "春泥棒 歌ってみた", "Some Uploader", "4:14"),
+]}
+one_search = parse_results(ONE_SEARCH, artist="", title="春泥棒", duration=254)
+assert one_search[0]["official"] is None, "空歌手只能表示 official unknown"
+assert one_search[0]["needsConfirmation"] is False, "乾淨的一欄搜尋候選不得被未知歌手誤警告"
+one_search_long = next(i for i in one_search if i["videoId"] == "one-search-long")
+assert one_search_long["official"] is None
+assert one_search_long["needsConfirmation"] is True, "時長不符仍需確認"
+one_search_bad = next(i for i in one_search if i["videoId"] == "one-search-cover")
+assert one_search_bad["ok"] is False
+assert one_search_bad["needsConfirmation"] is True, "壞候選仍需確認"
+
 # 全部都是翻唱時第一支仍然是 not ok —— 前端據此決定「乾脆不套」
 allbad = parse_results({"contents": [vr("c1", "歌ってみた", "A", "4:20"),
                                      vr("c2", "ピアノ", "B", "4:20")]})

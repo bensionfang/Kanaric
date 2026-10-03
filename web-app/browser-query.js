@@ -31,12 +31,20 @@ function cleanBrowserQuery(title, artist) {
   do { prev = t; t = t.replace(_NOISE_TAIL, '').trim(); } while (t !== prev && t);
 
   const norm = (s) => s.replace(/[\s\-_.]/g, '').toLowerCase();
+  const artistMatches = (candidate, observed) => {
+    const candidateNorm = norm(candidate);
+    const observedNorm = norm(observed);
+    if (candidateNorm && observedNorm && (candidateNorm.includes(observedNorm) || observedNorm.includes(candidateNorm))) return true;
+    const parts = (s) => s.split(/[\s\-–—|/]+/).map(norm).filter(Boolean);
+    const candidateParts = parts(candidate);
+    const observedParts = parts(observed);
+    return candidateParts.length > 1 && candidateParts.every((part) => observedParts.includes(part));
+  };
 
   // 「歌名／歌手」尾綴。只有尾段真的就是歌手時才剝 —— 歌名本身含 / 的 (「A/B」) 不能砍
   const slash = t.match(/^(.+?)\s*[／/]\s*([^／/]{1,30})$/);
   if (slash && artist) {
-    const tail = norm(slash[2]), a0 = norm(artist);
-    if (tail && a0 && (tail.includes(a0) || a0.includes(tail))) t = slash[1].trim();
+    if (artistMatches(slash[2], artist)) t = slash[1].trim();
   }
 
   // 「歌手 - 歌名」前綴 (YouTube 最常見的形狀:ヨルシカ - 春泥棒)。前綴真的是歌手時才剝:
@@ -46,8 +54,7 @@ function cleanBrowserQuery(title, artist) {
   // 連字號的 (怪獣の花唄 - replica -) 不受影響。
   const dash = t.match(/^(.{1,40}?)\s+[-–—]\s+(.+)$/);
   if (dash && artist) {
-    const head = norm(dash[1]), a0 = norm(artist);
-    if (head && a0 && (head.includes(a0) || a0.includes(head))) t = dash[2].trim();
+    if (artistMatches(dash[1], artist)) t = dash[2].trim();
   }
 
   const a = (artist || '')
@@ -58,4 +65,7 @@ function cleanBrowserQuery(title, artist) {
   return { title: t || title, artist: a || artist };
 }
 
-module.exports = { cleanBrowserQuery, isMusicAppSource, MUSIC_APPS };
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { cleanBrowserQuery, isMusicAppSource, MUSIC_APPS };
+}
+if (typeof window !== 'undefined') window.cleanBrowserQuery = cleanBrowserQuery;

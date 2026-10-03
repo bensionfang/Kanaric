@@ -3,6 +3,8 @@ secrets.json
 # 本機環境變數。目前只有 PORT/DB_PATH/NODE_ENV,但這是最容易誤把 key 提交上去的地方
 .env
 .env.local
+# 本機 Codex/Claude 工具允許清單,只對這台電腦有效
+.claude/settings.local.json
 # 使用者的 UI 設定 (視窗位置、快捷鍵、LLM 端點)。預設值寫死在 electron.js,
 # 檔案不存在時 readSettings() 回 {},所以不進版控也不影響全新 clone
 settings.json
@@ -33,6 +35,7 @@ scripts/.itunes_cache.json
 scripts/.itunes_tracks.json
 app.pid
 web-app/server_log.txt
+tmp-task*-runtime-*/
 # 個人筆記/截圖/PDF,不進版控
 docs/
 # 規劃筆記 (含「明確不做的事」),只留本機

@@ -1,0 +1,14 @@
+{
+  "name": "browser-extension",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test .\\tests\\*.test.js"
+  },
+  "dependencies": {
+    "@soundtouchjs/audio-worklet": "2.1.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

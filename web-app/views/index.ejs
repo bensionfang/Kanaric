@@ -5,9 +5,10 @@
     <!-- 滾動歌詞面板 -->
     <div class="lyrics-view-container" style="display: flex; flex-direction: column; flex: 1; min-height: 0; position: relative;">
         <div class="lyrics-scroll-pane" id="lyrics-scroll" style="flex: 1; font-size: 24px; min-height: 0; padding-bottom: 100px;">
-            <div class="lyrics-empty" id="lyrics-placeholder">
-                <i class="fa-solid fa-music"></i>
-                <p>等待播放...</p>
+            <div class="lyrics-empty" id="lyrics-placeholder" role="status">
+                <i class="fa-solid fa-music" aria-hidden="true"></i>
+                <p>播放一首歌，歌詞就會顯示在這裡。</p>
+                <button type="button" onclick="openMediaSourceSettings(event)">檢查音訊來源</button>
             </div>
         </div>
         
@@ -31,5 +32,5 @@
 <script src="/js/karaoke.js?v=2"></script>
 <script src="/js/lrc-parse.js?v=1"></script>
 <script src="/js/offset-sync.js?v=3"></script>
-<script src="/js/app.js?v=61"></script>
+<script src="/js/app.js?v=66"></script>
 <%- include('footer') %>

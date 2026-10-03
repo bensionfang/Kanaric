@@ -3,6 +3,21 @@
 // 需要 EJS 插值的那幾行 (window.__initialMedia 等) 留在 footer.ejs 裡,在這支之前跑。
 // 這支刻意**不加 defer** —— 它要在原本內嵌的那個位置同步執行,順序與時機才跟改版前一致。
 
+        window.__karaokeWindowSettings = { compact: true, top: true, autoCollapse: true };
+        const karaokeWindowSettingKeys = {
+            karaoke_compact_on_start: 'compact',
+            karaoke_always_on_top: 'top',
+            karaoke_auto_collapse: 'autoCollapse',
+        };
+
+        function updateKaraokeWindowSetting(key, checked) {
+            const name = karaokeWindowSettingKeys[key];
+            if (!name || !window.karaokeWindow) return;
+            window.__karaokeWindowSettings[name] = checked;
+            window.dispatchEvent(new CustomEvent('karaoke-window-settings-changed', { detail: window.__karaokeWindowSettings }));
+            saveSettingsToServer(key, checked);
+        }
+
         function toggleSettingsMenu(e) {
             if (e) e.stopPropagation();
             const menu = document.getElementById('settings-menu');
@@ -307,7 +322,7 @@
 
         // ── 使用說明:引導式導覽 ──
         const tourSteps = [
-            { page: '/',       el: '.nav-menu',      title: '側欄導覽',   text: '這裡可以切換頁面：懸浮歌詞、統計數據、排行榜、歌詞編輯器、猜歌。滑鼠移到圖示上會顯示名稱。' },
+            { page: '/',       el: '.nav-menu',      title: '側欄導覽',   text: '這裡可以切換頁面：歌詞、統計數據、排行榜、卡拉OK、歌詞編輯器、猜歌。要進入卡拉OK模式，請從側欄點「卡拉OK」。滑鼠移到圖示上會顯示名稱。' },
             { page: '/',       el: '#menu-dots-btn', title: '設定選單',   text: '常用的開關直接列在上面：日文假名、片假名標平假名、顯示中文翻譯、顯示羅馬拼音、文字大小、歌詞對齊、優先搜尋來源。下半部收成幾個小節——靈動島、音訊來源、自訂快捷鍵、聆聽紀錄與資料，點一下往旁邊展開。讀不了片假名的話打開「片假名標平假名」，サヨナラ 上方會多標一行 さよなら；打開「顯示中文翻譯」或「顯示羅馬拼音」則會在每句日文歌詞下面多標一行，兩者網頁與靈動島同時生效。' },
             { page: '/',       el: '#lyrics-scroll', title: '歌詞區',     text: '歌詞會隨播放自動同步捲動，漢字上方標示假名注音。點任一句歌詞可以直接跳轉到該時間點。' },
             { page: '/',       el: '.player-center', title: '播放控制',   text: '控制播放/暫停、上下一首，拖曳進度條可跳轉。' },
@@ -745,6 +760,26 @@
             .then(res => res.json())
             .then(data => {
                 // class 已由 header.ejs 用同一份 server 值渲染好,這裡只補 checkbox
+                window.__karaokeWindowSettings = {
+                    compact: data.karaoke_compact_on_start !== false,
+                    top: data.karaoke_always_on_top !== false,
+                    autoCollapse: data.karaoke_auto_collapse !== false,
+                };
+                for (const [key, id] of Object.entries({
+                    compact: 'setting-karaoke-compact',
+                    top: 'setting-karaoke-top',
+                    autoCollapse: 'setting-karaoke-auto-collapse',
+                })) {
+                    const input = document.getElementById(id);
+                    if (input) input.checked = window.__karaokeWindowSettings[key];
+                }
+                const windowSettings = document.getElementById('karaoke-window-settings');
+                const windowNote = document.getElementById('karaoke-window-desktop-note');
+                if (!window.karaokeWindow) {
+                    if (windowSettings) windowSettings.hidden = true;
+                    if (windowNote) windowNote.hidden = false;
+                }
+                window.dispatchEvent(new CustomEvent('karaoke-window-settings-changed', { detail: window.__karaokeWindowSettings }));
                 if (data.show_furigana !== undefined) {
                     const fEl = document.getElementById('setting-furigana');
                     if (fEl) fEl.checked = data.show_furigana;
@@ -868,6 +903,7 @@
                 window.__mediaSocket = ws;
                 ws.onopen = () => {
                     window.__mediaSocketAlive = true;
+                    window.dispatchEvent(new Event('kanaric-media-socket-open'));
                     window.__stickyMsgs.forEach((m) => { try { ws.send(JSON.stringify(m)); } catch (e) {} });
                 };
                 ws.onmessage = (ev) => {
@@ -876,7 +912,11 @@
                     // 一個 handler 丟例外不能害其他 handler 收不到訊息
                     window.__mediaHandlers.forEach((fn) => { try { fn(msg); } catch (e) {} });
                 };
-                ws.onclose = () => { window.__mediaSocketAlive = false; setTimeout(connect, 3000); };
+                ws.onclose = () => {
+                    window.__mediaSocketAlive = false;
+                    window.dispatchEvent(new Event('kanaric-media-socket-close'));
+                    setTimeout(connect, 3000);
+                };
                 ws.onerror = () => { try { ws.close(); } catch (e) {} };
             };
             connect();
@@ -884,7 +924,7 @@
 
         // ── 非首頁:同步下方播放列(歌曲資訊/播放狀態/進度/靈動島狀態) ──
         // 首頁由 app.js 全權處理;這裡只給其他頁面輕量版
-        if (!document.getElementById('lyrics-scroll')) {
+        if (!document.getElementById('lyrics-scroll') && !window.__youtubeKaraokeOnly) {
             window.mediaAction = function(action) {
                 fetch('/api/media-control', {
                     method: 'POST',

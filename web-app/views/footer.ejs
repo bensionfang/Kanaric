@@ -25,7 +25,7 @@
                 <div class="progress-container">
                     <span class="time-label" id="current-time"><%= fmt(media.position) %></span>
                     <div class="slider-wrapper">
-                        <input type="range" id="progress-slider" min="0" max="100" value="<%= pct %>">
+                        <input type="range" id="progress-slider" min="0" max="100" step="0.01" value="<%= pct %>">
                         <!-- hover 預覽必須排在 fill 之前:兩者都是 positioned 且無 z-index,靠 DOM 順序讓綠色 fill 疊在上面 -->
                         <div class="progress-hover-fill" id="progress-hover"></div>
                         <div class="progress-bar-fill" id="progress-fill" style="width: <%= pct %>%"></div>
@@ -53,10 +53,6 @@
                     <div id="lyrics-opt-bubble" class="lyrics-opt-bubble" onclick="openLyricsModal()"></div>
                     <%- include('modals/lyrics-options') %>
                 </div>
-                <%# 卡拉OK頁自己也吃這條播放列 (它把播放列改成自動隱藏的浮條),那時不必再放進去的入口 %>
-                <% if (activePage !== 'karaoke') { %>
-                <a id="karaoke-entry-btn" class="ctrl-btn" href="/karaoke" data-tip="卡拉OK模式"><i class="fa-solid fa-microphone-lines"></i></a>
-                <% } %>
                 <button id="loop-mode-btn" class="ctrl-btn" onclick="toggleLoopMode()" data-tip="段落循環"><i class="fa-solid fa-bookmark"></i></button>
                 <button id="toggle-ruby-mode-btn" class="ctrl-btn" onclick="toggleRubyEditMode()" data-tip="編輯假名模式"><i class="fa-solid fa-pen"></i></button>
                 <button id="reload-btn" class="ctrl-btn" onclick="reloadCurrentLyrics()" data-tip="重新載入歌詞"><i class="fa-solid fa-rotate"></i></button>
@@ -90,6 +86,6 @@
         // 否則 island_line2 設成 romaji/translation 時,關掉歌詞區的對應開關會沒有作用。
         window.__lyricsPaneSettings = { show_romaji: <%- !!settings.show_romaji %>, show_translation: <%- !!settings.show_translation %> };
     </script>
-    <script src="/js/common.js?v=5"></script>
+    <script src="/js/common.js?v=6"></script>
 </body>
 </html>

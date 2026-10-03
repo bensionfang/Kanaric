@@ -51,6 +51,8 @@ assert.strictEqual(t('Ado - うっせぇわ', 'Ado'), 'うっせぇわ');
 assert.strictEqual(t('Chilli Beans. - rose', '米津玄師'), 'Chilli Beans. - rose');
 // 歌名本身帶連字號的尾綴,剝掉歌手前綴後要完整留著
 assert.strictEqual(t('Vaundy - 怪獣の花唄 - replica -', 'Vaundy'), '怪獣の花唄 - replica -');
+// YouTube 官方頁實例:標題與頻道的歌手順序不同,仍要剝掉歌手前綴。
+assert.strictEqual(t('米津玄師  Kenshi Yonezu  - Lemon', 'Kenshi Yonezu  米津玄師'), 'Lemon');
 // 沒有歌手資訊時不猜
 assert.strictEqual(t('ヨルシカ - 春泥棒', ''), 'ヨルシカ - 春泥棒');
 

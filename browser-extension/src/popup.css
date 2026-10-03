@@ -1,0 +1,9 @@
+:root { color-scheme: dark; font: 14px system-ui, sans-serif; }
+body { margin: 0; min-width: 280px; background: #15171c; color: #f3f4f6; }
+main { display: grid; gap: 12px; padding: 16px; }
+h1 { margin: 0; font-size: 18px; }
+label { display: grid; gap: 5px; color: #b8beca; }
+input, button { box-sizing: border-box; width: 100%; border: 1px solid #3b4250; border-radius: 6px; padding: 8px; background: #20242d; color: inherit; }
+button { border: 0; background: #3b82f6; cursor: pointer; font-weight: 600; }
+button:disabled { cursor: wait; opacity: .65; }
+#status { margin: 0; color: #a7f3d0; }

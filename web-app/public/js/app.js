@@ -1,8 +1,3 @@
-// 空狀態幽默句,各挑一句隨機顯示 (renderLyrics / fetchAndParseLyrics 各用一組)
-const WAITING_MSGS = ['耳朵準備好了，音樂呢？', '按下播放，我就開工。', '安靜得有點過分，放首歌吧。'];
-const NO_LYRICS_MSGS = ['這首歌把歌詞藏起來了。', '翻遍全網，還是撲了個空。', '歌詞放假去了，改天再來。'];
-const pick = a => a[Math.floor(Math.random() * a.length)];
-
 let lastMediaTitle = "";
 let lastMediaArtist = "";
 // 已經抓過歌詞的 (歌名|||歌手)。與 lastMediaTitle 分開:名字被 iTunes 還原改寫時
@@ -14,23 +9,34 @@ let displayedTrackId = "";
 let lyricsFetchSeq = 0;   // 併發/亂序保護:只採用最後一次請求的結果
 let parsedLyrics = [];
 let activeLyricIndex = -1;
+let lyricSeekFocusIndex = -1;
 let songDurationSeconds = 180; // Estimated or default
 let isUnsyncedLyrics = false;
 
 // Client-side interpolation state
 let currentInterpolatedPosition = 0;
 let lastServerPosition = -1;
+let clockCorrection = 0;
 let lastFrameTime = performance.now();
 let isCurrentlyPlaying = false;
 let pendingSeekTarget = null;   // 剛送出 seek,等系統跳到位前先無視回報的位置
 let pendingSeekUntil = 0;
+let resumePending = false;
 let syncOffset = 0;
 let scrollLocked = false;   // 硬鎖自動捲動:編輯假名中 / 鍵盤手動切行中
 let autoCenter = true;      // 逐句置中模式 (黏著):使用者自己捲才脫離,漂回中間帶才黏回去
 let programmaticScrollUntil = 0;   // 這個時間點前的 scroll 事件是自己捲的,不算使用者操作
 // 隱藏的預設提前量,讓網頁版歌詞提早顯示 (補償視覺延遲,但不影響右下角的調整值)。
-// **不可以留在 syncLoop 裡面** —— seekToLyric 要用同一個值做反向換算
+// 逐字填色要扣回這個值；點句子的半秒準備時間是另一個值。
 const WEB_APP_LYRICS_ADVANCE = 0.25;
+
+function advancePlaybackClock(dt) {
+    if (!isCurrentlyPlaying || dt > 0.5) return;
+    // 回報落後時放慢追正，不能直接倒扣時間讓逐字填色回滾。
+    const adjustment = Math.max(-dt * 0.5, Math.min(dt * 0.5, clockCorrection));
+    currentInterpolatedPosition += dt + adjustment;
+    clockCorrection -= adjustment;
+}
 
 // 段落循環 (練唱):存 parsedLyrics 的 index,不是秒 —— 歌詞重畫後才有辦法把標記畫回去
 let isLoopMode = false;
@@ -64,22 +70,50 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 只有播放中才推進時間，但畫面永遠要照著目前位置重繪 ——
         // 否則暫停時進度條停在 0 (剛載入首頁)，暫停中點歌詞 seek 也不會跟著跳。
-        if (isCurrentlyPlaying) {
-            currentInterpolatedPosition += dt;
+        if (!document.hidden && !resumePending && dt <= 0.5) {
+            advancePlaybackClock(dt);
+            if (parsedLyrics.length > 0) {
+                syncLyricsToTime(currentInterpolatedPosition - syncOffset + WEB_APP_LYRICS_ADVANCE);
+            }
+            // 段落循環:唱完 B 句就跳回 A 句。pendingSeekTarget 還沒清掉代表上一次跳轉還沒到位,
+            // 這時再送一次 seek 會變成每幀狂送。
+            if (loopB !== null && isCurrentlyPlaying && pendingSeekTarget === null &&
+                currentInterpolatedPosition >= loopEndTime()) {
+                seekToLyric(parsedLyrics[loopA].time, loopA);
+            }
+            updatePlaybackProgress(currentInterpolatedPosition);
         }
-        if (parsedLyrics.length > 0) {
-            syncLyricsToTime(currentInterpolatedPosition - syncOffset + WEB_APP_LYRICS_ADVANCE);
-        }
-        // 段落循環:唱完 B 句就跳回 A 句。pendingSeekTarget 還沒清掉代表上一次跳轉還沒到位,
-        // 這時再送一次 seek 會變成每幀狂送。
-        if (loopB !== null && isCurrentlyPlaying && pendingSeekTarget === null &&
-            currentInterpolatedPosition >= loopEndTime()) {
-            seekToLyric(parsedLyrics[loopA].time);
-        }
-        updatePlaybackProgress(currentInterpolatedPosition);
         requestAnimationFrame(syncLoop);
     }
     requestAnimationFrame(syncLoop);
+
+    document.addEventListener('visibilitychange', async () => {
+        if (document.hidden) {
+            resumePending = true;
+            return;
+        }
+        resumePending = true;
+        const wasFollowing = autoCenter && !scrollLocked;
+        lastFrameTime = performance.now();
+        try {
+            await pollSystemMedia(true);
+        } finally {
+            // 還原後只用最新位置畫一次，不讓背景累積的平滑捲動逐句追上來。
+            if (parsedLyrics.length > 0) {
+                syncLyricsToTime(currentInterpolatedPosition - syncOffset + WEB_APP_LYRICS_ADVANCE, true);
+                if (wasFollowing) {
+                    jumpToActiveLine = true;
+                    centerActiveLine();
+                    setSyncPanel(false);
+                } else {
+                    updateSyncPanel();
+                }
+            }
+            updatePlaybackProgress(currentInterpolatedPosition);
+            lastFrameTime = performance.now();
+            resumePending = false;
+        }
+    });
 
     // Initialize zoom mode if persisted
     if (localStorage.getItem('zoomModeActive') === 'true') {
@@ -122,7 +156,8 @@ function setSyncPanel(show) {
 // 活動行是否還在歌詞可視區內
 function isActiveLineVisible() {
     const pane = document.getElementById('lyrics-scroll');
-    const line = document.getElementById(`lyric-line-${activeLyricIndex}`);
+    // 前奏還沒有活動行時,用第一句判斷是否已滑離同步位置。
+    const line = document.getElementById(`lyric-line-${activeLyricIndex < 0 ? 0 : activeLyricIndex}`);
     if (!pane || !line) return true;
     const top = line.offsetTop - pane.scrollTop;
     return top + line.offsetHeight > 0 && top < pane.clientHeight;
@@ -131,7 +166,7 @@ function isActiveLineVisible() {
 // 只做按鈕的可見性判定,不捲動 —— 使用者手指還在滑時把畫面搶走很難用
 function updateSyncPanel() {
     if (scrollLocked) return setSyncPanel(true);
-    if (activeLyricIndex < 0) return setSyncPanel(false);   // 沒有活動行 (含無時間軸歌詞)
+    if (activeLyricIndex < 0 && (parsedLyrics.length === 0 || isUnsyncedLyrics)) return setSyncPanel(false);
     setSyncPanel(!isActiveLineVisible());
 }
 
@@ -162,9 +197,12 @@ function applyAutoScroll(prevIndex) {
     let gestureUntil = 0;
     const pane = document.getElementById('lyrics-scroll');
     const markGesture = () => { gestureUntil = performance.now() + 1000; };
-    for (const ev of ['wheel', 'touchstart', 'touchmove', 'pointerdown', 'keydown']) {
+    for (const ev of ['wheel', 'touchstart', 'touchmove', 'keydown']) {
         pane.addEventListener(ev, markGesture, { passive: true });
     }
+    pane.addEventListener('pointerdown', (e) => {
+        if (!e.target.closest('.lyrics-line')) markGesture();
+    }, { passive: true });
     pane.addEventListener('scrollend', () => { programmaticScrollUntil = 0; });
     pane.addEventListener('scroll', () => {
         if (scrollRaf) return;
@@ -203,7 +241,10 @@ function resumeSync() {
     scrollLocked = false;
     autoCenter = true;
     setSyncPanel(false);
-    centerActiveLine();
+    if (activeLyricIndex < 0) {
+        programmaticScrollUntil = performance.now() + 500;
+        document.getElementById('lyrics-scroll')?.scrollTo({ top: 0, behavior: 'smooth' });
+    } else centerActiveLine();
 }// -------------------------------------------------------------
 // Live Sync Logic
 // -------------------------------------------------------------
@@ -275,19 +316,19 @@ function applyCoverColor(coverImg) {
 // 這支以前是 100ms 一次,而 /api/current-media 回的是**整份** currentMediaState —— 含
 // base64 封面,實測一則約 171 KB,等於每秒在 loopback 上搬 1.7 MB 並 parse 十次 base64 PNG。
 // 廣播那條路早就節流過 (1 秒一次、封面沒變就不送那個鍵),只是網頁前端一直沒接上去。
-async function pollSystemMedia() {
+async function pollSystemMedia(force = false) {
     // 連線活著就完全不打:那支回的是整份狀態,問一次 171 KB,2 秒一次仍是常態 85 KB/s
-    if (window.__mediaSocketAlive) return;
+    if (!force && window.__mediaSocketAlive) return;
     try {
         const resp = await fetch('/api/current-media', { cache: 'no-store' });
         if (!resp.ok) return;
-        applyMediaState(await resp.json());
+        applyMediaState(await resp.json(), force);
     } catch (err) {
         // Ignore polling errors
     }
 }
 
-function applyMediaState(data) {
+function applyMediaState(data, forcePosition = false) {
     try {
         const vd = document.getElementById('vinyl-disc');
         const ppIcon = document.getElementById('play-pause-icon');
@@ -310,7 +351,9 @@ function applyMediaState(data) {
         }
 
         // Update interpolation state from server
+        const wasPlaying = isCurrentlyPlaying;
         isCurrentlyPlaying = data.is_playing;
+        if (!isCurrentlyPlaying) clockCorrection = 0;
         if (data.duration !== undefined) {
             window.currentMediaDuration = data.duration;
         }
@@ -319,19 +362,30 @@ function applyMediaState(data) {
             pendingSeekTarget = null;   // 系統跳到位了 (或等太久),恢復正常同步
         }
         if (data.title && pendingSeekTarget === null) {
-            if (data.position !== lastServerPosition) {
+            const pauseTransition = wasPlaying && !isCurrentlyPlaying;
+            if (forcePosition || data.position !== lastServerPosition || data.title !== lastMediaTitle || pauseTransition) {
                 const diff = data.position - currentInterpolatedPosition;
-                if (Math.abs(diff) > 1.5 || data.title !== lastMediaTitle) {
-                    // Hard sync on seek or track change
+                const hardSync = forcePosition || Math.abs(diff) > 1.5 || data.title !== lastMediaTitle || pauseTransition;
+                if (lyricSeekFocusIndex >= 0 && Math.abs(diff) > 1.5) lyricSeekFocusIndex = -1;
+                if (hardSync) {
+                    // Hard sync on seek, pause, or track change
                     currentInterpolatedPosition = data.position;
-                } else {
-                    // Smoothly correct 50% of the small drift
-                    currentInterpolatedPosition += diff * 0.5;
+                    clockCorrection = 0;
+                } else if (isCurrentlyPlaying) {
+                    // 把小誤差交給下一批影格逐漸修正，避免這一幀倒退。
+                    clockCorrection = diff * 0.5;
                 }
                 lastServerPosition = data.position;
             }
+        } else if (forcePosition && !data.title) {
+            currentInterpolatedPosition = data.position || 0;
+            clockCorrection = 0;
+            lastServerPosition = data.position || 0;
         }
         if (data.title && (data.title !== lastMediaTitle || data.artist !== lastMediaArtist)) {
+            lyricSeekFocusIndex = -1;
+            // 新歌可能還在等名稱還原；現在就作廢上一首的未完成歌詞請求。
+            lyricsFetchSeq++;
             const prevTitle = lastMediaTitle;
             lastMediaTitle = data.title;
             lastMediaArtist = data.artist;
@@ -388,6 +442,8 @@ function applyMediaState(data) {
 
         } else if (!data.title && lastMediaTitle) {
             // Stopped completely
+            lyricSeekFocusIndex = -1;
+            lyricsFetchSeq++;
             lastMediaTitle = "";
             lastMediaArtist = "";
             window.currentSongInfo = { title: '', artist: '' };
@@ -441,7 +497,15 @@ function applyMediaState(data) {
     }
 }
 
-async function fetchAndParseLyrics(title, artist, trackId = "") {
+function openMediaSourceSettings(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('settings-menu');
+    if (!menu.classList.contains('show')) toggleSettingsMenu();
+    if (!document.getElementById('source-section').classList.contains('show')) toggleSourceSection();
+    document.getElementById('source-toggle')?.focus();
+}
+
+async function fetchAndParseLyrics(title, artist, trackId = displayedTrackId) {
     const scrollPane = document.getElementById('lyrics-scroll');
     const seq = ++lyricsFetchSeq;
     // 同一首歌的重抓 (iTunes 還原改名 / 60 秒重試觸發):不清畫面、不換 spinner ——
@@ -471,12 +535,20 @@ async function fetchAndParseLyrics(title, artist, trackId = "") {
             // 空結果:同一首已在畫面上就保留原歌詞 (暫時性的限流別蓋掉),換首才顯示找不到
             if (sameTrack) return;
             displayedTrackId = "";
-            scrollPane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-face-frown"></i><p>${pick(NO_LYRICS_MSGS)}</p></div>`;
+            const status = data?.source === 'no_lyrics' ? 'no_lyrics' : data?.source === 'error' || !resp.ok ? 'error' : 'not_found';
+            scrollPane.innerHTML = emptyLyricsHtml(status);
         }
     } catch (e) {
         if (stale() || sameTrack) return;
-        scrollPane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-triangle-exclamation"></i><p>載入歌詞出錯</p></div>`;
+        scrollPane.innerHTML = emptyLyricsHtml('error');
     }
+}
+
+function emptyLyricsHtml(status) {
+    if (status === 'waiting') return `<div class="lyrics-empty" role="status"><i class="fa-solid fa-music" aria-hidden="true"></i><p>播放一首歌，歌詞就會顯示在這裡。</p><button type="button" onclick="openMediaSourceSettings(event)">檢查音訊來源</button></div>`;
+    if (status === 'no_lyrics') return `<div class="lyrics-empty" role="status"><i class="fa-solid fa-music" aria-hidden="true"></i><p>這首歌已標記為無歌詞。</p><button type="button" onclick="searchLyricsOptions()">搜尋備選歌詞</button></div>`;
+    if (status === 'error') return `<div class="lyrics-empty" role="status"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><p>歌詞載入失敗，請稍後重試。</p><button type="button" onclick="reloadCurrentLyrics()">重新載入</button></div>`;
+    return `<div class="lyrics-empty" role="status"><i class="fa-solid fa-face-frown" aria-hidden="true"></i><p>找不到這首歌的歌詞。</p><button type="button" onclick="searchLyricsOptions()">搜尋備選歌詞</button></div>`;
 }
 
 // 解析本身在 public/js/lrc-parse.js (卡拉OK頁與測試共用),這裡只負責寫回首頁的全域狀態
@@ -494,7 +566,7 @@ function renderLyrics() {
         if (lastMediaTitle) {
             pane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-music"></i><p>純音樂，無人聲歌詞</p></div>`;
         } else {
-            pane.innerHTML = `<div class="lyrics-empty"><i class="fa-solid fa-music"></i><p>${pick(WAITING_MSGS)}</p></div>`;
+            pane.innerHTML = emptyLyricsHtml('waiting');
         }
         return;
     }
@@ -523,6 +595,7 @@ function renderLyrics() {
     
     pane.innerHTML = html;
     activeLyricIndex = -1;
+    lyricSeekFocusIndex = -1;
     jumpToActiveLine = true;   // 重畫後第一次置中用瞬移,不要從頂端滑下來
     restoreLoopRange();   // 換頁回來時把上次選好的段落接回來
     paintLoopRange();
@@ -536,7 +609,7 @@ function updatePlaybackProgress(position) {
 
     // Estimate total time based on current position and song duration
     let durationToUse = window.currentMediaDuration > 0 ? window.currentMediaDuration : songDurationSeconds;
-    const actualDuration = Math.max(durationToUse, position + 10);
+    const actualDuration = window.currentMediaDuration > 0 ? durationToUse : Math.max(durationToUse, position + 10);
     
     window.currentSeekDuration = actualDuration;
 
@@ -568,7 +641,7 @@ function karaokeFill(lineEl, lyric, position) {
     karaokePaint(lineEl.firstElementChild, lyric.words, (real - lyric.time) * 1000);
 }
 
-function syncLyricsToTime(position) {
+function syncLyricsToTime(position, skipScroll = false) {
     if (parsedLyrics.length === 0 || isUnsyncedLyrics) return;
 
     const prevIndex = activeLyricIndex;
@@ -578,6 +651,14 @@ function syncLyricsToTime(position) {
             foundIndex = i;
         } else {
             break;
+        }
+    }
+    if (lyricSeekFocusIndex >= 0) {
+        const focusLine = parsedLyrics[lyricSeekFocusIndex];
+        if (!focusLine || (isCurrentlyPlaying && position >= focusLine.time)) {
+            lyricSeekFocusIndex = -1;
+        } else {
+            foundIndex = lyricSeekFocusIndex;
         }
     }
     
@@ -597,7 +678,8 @@ function syncLyricsToTime(position) {
             const currentLine = document.getElementById(`lyric-line-${activeLyricIndex}`);
             if (currentLine) {
                 currentLine.classList.add('active');
-                applyAutoScroll(prevIndex);
+                if (skipScroll) updateSyncPanel();
+                else applyAutoScroll(prevIndex);
             }
         }
     }
@@ -621,6 +703,7 @@ function updateOffsetDisplay() {
 
 function adjustSyncOffset(delta) {
     syncOffset += delta;
+    lyricSeekFocusIndex = -1;
     updateOffsetDisplay();
     saveSyncOffset();
     if (parsedLyrics.length > 0 && currentInterpolatedPosition >= 0) {
@@ -630,6 +713,7 @@ function adjustSyncOffset(delta) {
 
 function resetSyncOffset() {
     syncOffset = 0;
+    lyricSeekFocusIndex = -1;
     updateOffsetDisplay();
     saveSyncOffset();
     if (parsedLyrics.length > 0 && currentInterpolatedPosition >= 0) {
@@ -936,10 +1020,10 @@ function restoreLoopRange() {
 function loopEndTime() {
     const b = parsedLyrics[loopB];
     const next = parsedLyrics[loopB + 1];
-    const hardEnd = next ? next.time
-        : (window.currentMediaDuration > 0 ? window.currentMediaDuration : songDurationSeconds);
-    const cap = b.time + medianLineGap * LOOP_TAIL_FACTOR;
-    return hardEnd > cap ? cap : hardEnd;
+    const hardEnd = next ? next.time + syncOffset
+        : (window.currentMediaDuration > 0 ? window.currentMediaDuration : songDurationSeconds + syncOffset);
+    const cap = b.time + syncOffset + medianLineGap * LOOP_TAIL_FACTOR;
+    return Math.min(hardEnd, cap, window.currentMediaDuration > 0 ? window.currentMediaDuration : Infinity);
 }
 
 function pickLoopLine(line) {
@@ -954,7 +1038,7 @@ function pickLoopLine(line) {
         loopB = index;   // 再點同一句 = 單句循環
         if (loopB < loopA) [loopA, loopB] = [loopB, loopA];   // 由下往上點也算數
         saveLoopRange();
-        seekToLyric(parsedLyrics[loopA].time);
+        seekToLyric(parsedLyrics[loopA].time, loopA);
         showToast(loopA === loopB
             ? `循環第 ${loopA + 1} 句`
             : `循環第 ${loopA + 1} – ${loopB + 1} 句`, 'fa-solid fa-bookmark');
@@ -972,30 +1056,27 @@ function paintLoopRange() {
     }
 }
 
-/**
- * 跳到**某一句歌詞**。收的是歌詞時間,送出去的是播放位置 —— 兩者差一個「顯示對齊」的量,
- * 不換算就會跳錯句。
- *
- * 高亮的判斷是 `syncLyricsToTime(播放位置 - syncOffset + ADVANCE)`,反過來解:要讓第 L 句
- * 成為當前句,播放位置得是 `L.time + syncOffset - ADVANCE`。舊版直接把 `L.time` 當播放位置
- * 送出去,`syncOffset > 0.25` 的歌 (庫裡 39 筆偏移有好幾首是 0.5 / 1.0) 就落在 L 的前面 =
- * **高亮跳到上一句**。播放中看不出來,位置馬上推進過去了;**暫停時位置不動,就卡在錯的那句**。
- *
- * **`SEEK_EPS` 不是防禦性程式,少了它照樣跳錯句。** 反函數算出來的目標正好落在邊界上,
- * 而 seek 是繞一圈回來的 (送出去 → 播放器跳 → Windows Media API 回報),回報值往下捨
- * 任何一點就掉回上一句 —— 實測送 39.271、回報 39.2705,差 0.0005 就足以判成上一句。
- * 往後推 50ms 讓目標落在那一句裡面而不是邊界上;50ms 聽不出來。
- *
- * 進度條那條路 (`seekTo`) 收的本來就是播放位置,不能走這裡。
- */
-const SEEK_EPS = 0.05;
-function seekToLyric(lyricTime) {
-    seekTo(Math.max(0, lyricTime + syncOffset - WEB_APP_LYRICS_ADVANCE + SEEK_EPS));
+// 點句與循環回 A 共用半秒準備時間。進度條直接走 seekTo,仍精確跳到指定位置。
+// 提前期間保持所選句的視覺焦點；播放進入該句後才交回自然同步。
+const LYRIC_SEEK_PREROLL = 0.5;
+function seekToLyric(lyricTime, lyricIndex = -1) {
+    seekTo(Math.max(0, lyricTime + syncOffset - LYRIC_SEEK_PREROLL));
+    lyricSeekFocusIndex = parsedLyrics[lyricIndex] ? lyricIndex : -1;
+    if (lyricSeekFocusIndex >= 0) {
+        const previousIndex = activeLyricIndex;
+        syncLyricsToTime(currentInterpolatedPosition - syncOffset + WEB_APP_LYRICS_ADVANCE);
+        if (previousIndex === activeLyricIndex) {
+            autoCenter = true;
+            applyAutoScroll(activeLyricIndex);
+        }
+    }
 }
 
 // 跳到指定秒數 (播放位置):先在本地跳好,不等系統回報 —— 暫停時系統回報位置很慢甚至不回報
 function seekTo(sec) {
+    lyricSeekFocusIndex = -1;
     currentInterpolatedPosition = sec;
+    clockCorrection = 0;
     updatePlaybackProgress(sec);
     // 在系統真的跳到位之前,別讓 pollSystemMedia 用舊位置把我們拉回去
     pendingSeekTarget = sec;
@@ -1026,7 +1107,7 @@ document.getElementById('lyrics-scroll').addEventListener('click', (e) => {
 
     // Seek mode
     const timeSec = line.getAttribute('data-time');
-    if (timeSec) seekToLyric(parseFloat(timeSec));
+    if (timeSec) seekToLyric(parseFloat(timeSec), parseInt(line.id.replace('lyric-line-', ''), 10));
 });
 
 // 就地編輯假名:直接把 <rt> 變成可編輯,不開視窗
